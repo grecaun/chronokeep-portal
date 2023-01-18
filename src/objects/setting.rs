@@ -11,11 +11,11 @@ impl Setting {
         }
     }
 
-    pub fn Name(&self) -> &String {
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn Value(&self) -> &String {
+    pub fn value(&self) -> &str {
         &self.value
     }
 }

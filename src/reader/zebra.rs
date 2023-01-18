@@ -10,7 +10,13 @@ pub struct Zebra {
 }
 
 impl Zebra {
-    pub fn new(id: usize, nickname: String, kind: String, ip_address: String, port: u16) -> Zebra {
+    pub fn new(
+        id: usize,
+        nickname: String,
+        kind: String,
+        ip_address: String,
+        port: u16
+    ) -> Zebra {
         Zebra {
             id,
             kind,
@@ -24,12 +30,32 @@ impl Zebra {
 }
 
 impl super::Reader for Zebra {
-    fn get_kind(&self) {
-        todo!()
+    fn id(&self) -> usize {
+        self.id
+    }
+    
+    fn nickname(&self) -> &str {
+        &self.nickname
     }
 
-    fn get_connected(&self) {
-        todo!()
+    fn kind(&self) -> &str{
+        &self.kind
+    }
+
+    fn ip_address(&self) -> &str {
+        &self.ip_address
+    }
+
+    fn port(&self) -> u16 {
+        self.port
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    fn connected_at(&self) -> &str {
+        &self.connected_at
     }
 
     fn process_messages(&self) {

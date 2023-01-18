@@ -11,3 +11,26 @@ pub struct Read {
     // Status will be used for when the system processes reads.
     pub status: u16,
 }
+
+impl Read {
+    pub fn new(
+        id: u64,
+        chip: String,
+        seconds: u64,
+        milliseconds: u32,
+        antenna: u32,
+        reader: String,
+        rssi: String,
+        status: u16) -> Read{
+            Read {
+                id,
+                chip,
+                seconds,
+                milliseconds,
+                antenna,
+                reader,
+                rssi,
+                status
+            }
+    }
+}
