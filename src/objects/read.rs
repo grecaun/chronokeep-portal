@@ -1,13 +1,13 @@
 pub struct Read {
     // ID should be implemented database side.
-    id: u64,
+    pub id: u64,
     // These fields should be received from the reader.
-    chip: String,
-    seconds: u64,
-    milliseconds: u32,
-    antenna: u32,
-    reader: String,
-    rssi: String,
+    pub chip: String,
+    pub seconds: u64,
+    pub milliseconds: u32,
+    pub antenna: u32,
+    pub reader: String,
+    pub rssi: String,
     // Status will be used for when the system processes reads.
-    status: u16,
+    pub status: u16,
 }

@@ -1,6 +1,7 @@
 pub struct Zebra {
+    id: usize,
+    nickname: String,
     kind: String,
-    name: String,
     ip_address: String,
     port: u16,
     connected: bool,
@@ -9,10 +10,11 @@ pub struct Zebra {
 }
 
 impl Zebra {
-    fn new(name: String, kind: String, ip_address: String, port: u16) -> Zebra {
+    pub fn new(id: usize, nickname: String, kind: String, ip_address: String, port: u16) -> Zebra {
         Zebra {
+            id,
             kind,
-            name,
+            nickname,
             ip_address,
             port,
             connected: false,
