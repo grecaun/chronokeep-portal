@@ -2,6 +2,8 @@ pub const READ_STATUS_UNUSED: u8 = 0;
 pub const READ_STATUS_USED: u8 = 1;
 pub const READ_STATUS_TOO_SOON: u8 = 3;
 
+pub const READ_UPLOADED_FALSE: u8 = 0;
+
 pub struct Read {
     // ID should be implemented database side.
     id: u64,
@@ -14,6 +16,7 @@ pub struct Read {
     rssi: String,
     // Status will be used for when the system processes reads.
     status: u8,
+    uploaded: u8,
 }
 
 impl Read {
@@ -25,7 +28,9 @@ impl Read {
         antenna: u32,
         reader: String,
         rssi: String,
-        status: u8) -> Read{
+        status: u8,
+        uploaded: u8,
+    ) -> Read{
             Read {
                 id,
                 chip,
@@ -34,11 +39,12 @@ impl Read {
                 antenna,
                 reader,
                 rssi,
-                status
+                status,
+                uploaded
             }
     }
 
-    pub fn equal(&self, other: &Read) -> bool {
+    pub fn equals(&self, other: &Read) -> bool {
         self.chip == other.chip &&
         self.seconds == other.seconds &&
         self.milliseconds == other.milliseconds &&
@@ -77,6 +83,10 @@ impl Read {
 
     pub fn status(&self) -> u8 {
         self.status
+    }
+
+    pub fn uploaded(&self) -> u8 {
+        self.uploaded
     }
 
     pub fn set_status(&mut self, status: u8) {

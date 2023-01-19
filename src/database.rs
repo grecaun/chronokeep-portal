@@ -1,4 +1,4 @@
-use crate::objects::{setting, participant, read};
+use crate::objects::{setting, participant, read, sighting};
 use crate::network::results;
 use crate::reader;
 use std::fmt;
@@ -57,4 +57,8 @@ pub trait Database {
     fn delete_participants(&self) -> Result<usize, DBError>;
     fn delete_participant(&self, bib: &str) -> Result<usize, DBError>;
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError>;
+    // Sighting information
+    fn save_sightings(&self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError>;
+    fn get_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError>;
+    fn delete_sightings(&self) -> Result<usize, DBError>;
 }

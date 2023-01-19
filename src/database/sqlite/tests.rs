@@ -1,4 +1,5 @@
 use core::panic;
+use std::collections::HashMap;
 use std::sync;
 use std::fs;
 use super::SQLite;
@@ -8,6 +9,7 @@ use crate::network::results;
 use crate::objects::participant;
 use crate::objects::read;
 use crate::objects::setting;
+use crate::objects::sighting;
 use crate::reader::{self, Reader, zebra};
 
 mod test_reader;
@@ -15,10 +17,11 @@ mod test_reader;
 fn setup_tests(path: &str) -> SQLite {
     let new_conn = rusqlite::Connection::open(path).unwrap();
     let drop_tables = [
-        "DROP TABLE IF EXISTS results_api",
-        "DROP TABLE IF EXISTS participants",
-        "DROP TABLE IF EXISTS readers",
-        "DROP TABLE IF EXISTS chip_reads",
+        "DROP TABLE IF EXISTS sightings;",
+        "DROP TABLE IF EXISTS results_api;",
+        "DROP TABLE IF EXISTS participants;",
+        "DROP TABLE IF EXISTS readers;",
+        "DROP TABLE IF EXISTS chip_reads;",
         "DROP TABLE IF EXISTS settings;",
     ];
     for table in drop_tables {
@@ -54,15 +57,16 @@ fn setup_v1(path: &str) -> SQLite {
                 UNIQUE (setting) ON CONFLICT REPLACE
             );",
             "CREATE TABLE IF NOT EXISTS results_api (
-                id INTEGER PRIMARY KEY,
+                api_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nickname VARCHAR(75),
                 kind VARCHAR(50),
                 token VARCHAR(100),
                 uri VARCHAR(150),
+                UNIQUE (nickname) ON CONFLICT REPLACE,
                 UNIQUE (uri, token) ON CONFLICT REPLACE
             );",
             "CREATE TABLE IF NOT EXISTS participants (
-                id INTEGER PRIMARY KEY,
+                part_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 bib VARCHAR(50) NOT NULL,
                 first VARCHAR(50) NOT NULL,
                 last VARCHAR(75) NOT NULL,
@@ -72,10 +76,11 @@ fn setup_v1(path: &str) -> SQLite {
                 distance VARCHAR(75) NOT NULL,
                 part_chip VARCHAR(100) NOT NULL UNIQUE,
                 anonymous SMALLINT NOT NULL DEFAULT 0,
-                UNIQUE (bib, first, last, distance) ON CONFLICT REPLACE
+                UNIQUE (bib) ON CONFLICT REPLACE,
+                UNIQUE (part_chip) ON CONFLICT REPLACE
             );",
             "CREATE TABLE IF NOT EXISTS readers (
-                id INTEGER PRIMARY KEY,
+                reader_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nickname VARCHAR(75) NOT NULL,
                 kind VARCHAR(50) NOT NULL,
                 ip_address VARCHAR(100) NOT NULL,
@@ -83,15 +88,21 @@ fn setup_v1(path: &str) -> SQLite {
                 UNIQUE (nickname) ON CONFLICT REPLACE
             );",
             "CREATE TABLE IF NOT EXISTS chip_reads (
-                id INTEGER PRIMARY KEY,
+                chip_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chip VARCHAR(100) NOT NULL,
                 seconds BIGINT NOT NULL,
                 milliseconds INTEGER NOT NULL,
                 antenna INTEGER,
                 reader VARCHAR(75),
                 rssi VARCHAR(10),
-                status INTEGER NOT NULL DEFAULT 0,
+                status SMALLINT NOT NULL DEFAULT 0,
+                uploaded SMALLINT NOT NULL DEFAULT 0,
                 UNIQUE (chip, seconds, milliseconds) ON CONFLICT IGNORE
+            );",
+            "CREATE TABLE IF NOT EXISTS sightings (
+                chip_id INTEGER REFERENCES chip_reads(chip_id) ON DELETE CASCADE,
+                part_id INTEGER REFERENCES participants(part_id) ON DELETE CASCADE,
+                UNIQUE (chip_id, part_id) ON CONFLICT IGNORE
             );"
         ];
         for table in database_tables {
@@ -447,7 +458,7 @@ fn test_save_api() {
         }
     }
     drop(sqlite);
-    finalize_tests(unique_path);;
+    finalize_tests(unique_path);
 }
 
 #[test]
@@ -521,7 +532,7 @@ fn test_delete_api() {
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(9, apis.len());
     drop(sqlite);
-    finalize_tests(unique_path);;
+    finalize_tests(unique_path);
 }
 
 fn make_reads() -> Vec<read::Read> {
@@ -534,7 +545,8 @@ fn make_reads() -> Vec<read::Read> {
             2,
             String::from("reader-1"),
             String::from("-25dba"),
-            read::READ_STATUS_USED
+            read::READ_STATUS_USED,
+            read::READ_UPLOADED_FALSE
     ));
     output.push(read::Read::new(
             0,
@@ -544,7 +556,8 @@ fn make_reads() -> Vec<read::Read> {
             4,
             String::from("reader-1"),
             String::from("-20dba"),
-            read::READ_STATUS_TOO_SOON
+            read::READ_STATUS_TOO_SOON,
+            read::READ_UPLOADED_FALSE
     ));
     // this entry should be ignored on save
     output.push(read::Read::new(
@@ -555,7 +568,8 @@ fn make_reads() -> Vec<read::Read> {
             3,
             String::from("reader-1"),
             String::from("-5dba"),
-            read::READ_STATUS_UNUSED
+            read::READ_STATUS_UNUSED,
+            read::READ_UPLOADED_FALSE
     ));
     for i in 1006..1100 {
         output.push(read::Read::new(
@@ -566,7 +580,8 @@ fn make_reads() -> Vec<read::Read> {
             1,
             String::from("reader-1"),
             String::from("-25dba"),
-            read::READ_STATUS_UNUSED
+            read::READ_STATUS_UNUSED,
+            read::READ_UPLOADED_FALSE
         ));
     }
     output
@@ -590,7 +605,8 @@ fn test_save_reads() {
         500,
         String::from("new-reader-name"),
         String::from("15dba"),
-        read::READ_STATUS_USED
+        read::READ_STATUS_USED,
+        read::READ_UPLOADED_FALSE
     );
     let result = sqlite.save_reads(&vec![updated_read]);
     assert!(result.is_ok());
@@ -604,12 +620,13 @@ fn test_save_reads() {
         500,
         String::from("new-reader-name"),
         String::from("15dba"),
-        255
+        255,
+        read::READ_UPLOADED_FALSE
     );
     let result = sqlite.save_reads(&vec![updated_read]);
     assert!(result.is_err());
     drop(sqlite);
-    finalize_tests(unique_path);;
+    finalize_tests(unique_path);
 }
 
 #[test]
@@ -625,14 +642,14 @@ fn test_get_reads() {
     for outer in reads.iter() {
         let mut found = false;
         for inner in new_reads.iter() {
-            if outer.equal(&inner) {
+            if outer.equals(&inner) {
                 found = true
             }
         }
         assert!(found)
     }
     drop(sqlite);
-    finalize_tests(unique_path);;
+    finalize_tests(unique_path);
 }
 
 #[test]
@@ -816,6 +833,148 @@ fn test_delete_participant() {
     assert_eq!(0, result.unwrap());
     let parts = sqlite.get_participants().unwrap();
     assert_eq!(participants.len()-1, parts.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+fn make_sightings(sqlite: &SQLite) -> Vec<sighting::Sighting> {
+    // store all participants in the database
+    let parts = make_participants();
+    _ = sqlite.add_participants(&parts);
+    // get all the participants so id's are up to date
+    let parts = sqlite.get_participants().unwrap();
+    // we'll make 5 reads per person for this test
+    let mut reads: Vec<read::Read> = Vec::new();
+    for p in parts.iter() {
+        let vals: [u32; 5] = [0, 1, 2, 3, 4];
+        for i in vals {
+            reads.push(read::Read::new(
+                0,
+                String::from(p.chip()),
+                u64::from(1000 + (i * 30*60)),
+                10 * i,
+                i,
+                String::from("reader-1"),
+                String::from("-25dba"),
+                read::READ_STATUS_USED,
+                read::READ_UPLOADED_FALSE
+            ));
+        }
+    }
+    _ = sqlite.save_reads(&reads);
+    // all reads should be between 1000 and 9000 seconds
+    let reads = sqlite.get_reads(0, 20000).unwrap();
+    let mut part_reads: HashMap<&str, Vec<&read::Read>> = HashMap::new();
+    for read in reads.iter() {
+        if !part_reads.contains_key(read.chip()) {
+            part_reads.insert(read.chip(), Vec::new());
+        }
+        let known_reads = part_reads.get_mut(read.chip()).unwrap();
+        known_reads.push(read);
+    }
+    let mut output: Vec<sighting::Sighting> = Vec::new();
+    for part in parts.iter() {
+        if let Some(preads) = part_reads.get(part.chip()) {
+            for r in preads {
+                output.push(sighting::Sighting{
+                    participant: participant::Participant::new(
+                        part.id(),
+                        String::from(part.bib()),
+                        String::from(part.first()),
+                        String::from(part.last()),
+                        part.age(),
+                        String::from(part.gender()),
+                        String::from(part.age_group()),
+                        String::from(part.distance()),
+                        String::from(part.chip()),
+                        part.anonymous()
+                    ),
+                    read: read::Read::new(
+                        r.id(),
+                        String::from(r.chip()),
+                        r.seconds(),
+                        r.milliseconds(),
+                        r.antenna(),
+                        String::from(r.reader()),
+                        String::from(r.rssi()),
+                        r.status(),
+                        r.uploaded()
+                    )
+                })
+            }
+        }
+    }
+    output
+}
+
+#[test]
+fn test_save_sightings() {
+    let unique_path = "./test_save_sightings.sqlite";
+    let sqlite = setup_tests(unique_path);
+    let sightings = make_sightings(&sqlite);
+    let result = sqlite.save_sightings(&sightings);
+    assert!(result.is_ok());
+    assert_eq!(sightings.len(), result.unwrap());
+    // test a random id entry - should error out because of
+    // foreign key constraints
+    let sightings = vec!(sighting::Sighting{
+        participant: participant::Participant::new(
+            0,
+            String::from("100"),
+            String::from("John"),
+            String::from("Smith"),
+            10,
+            String::from("M"),
+            String::from("0-110"),
+            String::from("Half Marathon"),
+            String::from("202201001"),
+            false
+        ),
+        read: read::Read::new(
+            0,
+            String::from("202201001"),
+            100,
+            100,
+            1,
+            String::from("reader-1"),
+            String::from("-20dba"),
+            0,
+            0
+        )
+    });
+    let result = sqlite.save_sightings(&sightings);
+    assert!(result.is_err());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_get_sightings() {
+    let unique_path = "./test_get_sightings.sqlite";
+    let sqlite = setup_tests(unique_path);
+    let sightings = make_sightings(&sqlite);
+    _ = sqlite.save_sightings(&sightings);
+    let result = sqlite.get_sightings();
+    assert!(result.is_ok());
+    let res_sights = result.unwrap();
+    assert_eq!(sightings.len(), res_sights.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_delete_sightings() {
+    let unique_path = "./test_delete_sightings.sqlite";
+    let sqlite = setup_tests(unique_path);
+    let sightings = make_sightings(&sqlite);
+    _ = sqlite.save_sightings(&sightings);
+    let sights = sqlite.get_sightings().unwrap();
+    assert_eq!(sightings.len(), sights.len());
+    let result = sqlite.delete_sightings();
+    assert!(result.is_ok());
+    assert_eq!(sightings.len(), result.unwrap());
+    let sights = sqlite.get_sightings().unwrap();
+    assert_eq!(0, sights.len());
     drop(sqlite);
     finalize_tests(unique_path);
 }

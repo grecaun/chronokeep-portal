@@ -1,4 +1,4 @@
-use crate::objects::{setting, participant, read};
+use crate::objects::{setting, participant, read, sighting};
 use crate::network::results;
 use crate::database::DBError;
 use crate::reader::{self, zebra};
@@ -58,7 +58,7 @@ impl SQLite {
         if let Ok(tx) = conn.transaction() {
             let database_tables = [
                 "CREATE TABLE IF NOT EXISTS results_api (
-                    id INTEGER PRIMARY KEY,
+                    api_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nickname VARCHAR(75),
                     kind VARCHAR(50),
                     token VARCHAR(100),
@@ -67,7 +67,7 @@ impl SQLite {
                     UNIQUE (uri, token) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS participants (
-                    id INTEGER PRIMARY KEY,
+                    part_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     bib VARCHAR(50) NOT NULL,
                     first VARCHAR(50) NOT NULL,
                     last VARCHAR(75) NOT NULL,
@@ -81,7 +81,7 @@ impl SQLite {
                     UNIQUE (part_chip) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS readers (
-                    id INTEGER PRIMARY KEY,
+                    reader_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nickname VARCHAR(75) NOT NULL,
                     kind VARCHAR(50) NOT NULL,
                     ip_address VARCHAR(100) NOT NULL,
@@ -89,15 +89,21 @@ impl SQLite {
                     UNIQUE (nickname) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS chip_reads (
-                    id INTEGER PRIMARY KEY,
+                    chip_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     chip VARCHAR(100) NOT NULL,
                     seconds BIGINT NOT NULL,
                     milliseconds INTEGER NOT NULL,
                     antenna INTEGER,
                     reader VARCHAR(75),
                     rssi VARCHAR(10),
-                    status INTEGER NOT NULL DEFAULT 0,
+                    status SMALLINT NOT NULL DEFAULT 0,
+                    uploaded SMALLINT NOT NULL DEFAULT 0,
                     UNIQUE (chip, seconds, milliseconds) ON CONFLICT IGNORE
+                );",
+                "CREATE TABLE IF NOT EXISTS sightings (
+                    chip_id INTEGER REFERENCES chip_reads(chip_id) ON DELETE CASCADE,
+                    part_id INTEGER REFERENCES participants(part_id) ON DELETE CASCADE,
+                    UNIQUE (chip_id, part_id) ON CONFLICT IGNORE
                 );"
             ];
             for table in database_tables {
@@ -354,19 +360,21 @@ impl super::Database for SQLite {
                                 antenna,
                                 reader,
                                 rssi,
-                                status
-                            ) VALUES (?1,?2,?3,?4,?5,?6,?7);",
-                        (r.chip(), r.seconds(), r.milliseconds(), r.antenna(), r.reader(), r.rssi(), r.status())
+                                status,
+                                uploaded
+                            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8);",
+                        (r.chip(), r.seconds(), r.milliseconds(), r.antenna(), r.reader(), r.rssi(), r.status(), r.uploaded())
                     ) {
                         Ok(val) => count = count + val,
                         Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
                     }
                 }
                 if let Err(e) = tx.commit() {
-                    return Err(DBError::DataInsertionError(e.to_string()))
+                    return Err(DBError::DataInsertionError(e.to_string()));
                 }
                 return Ok(count);
             }
+            return Err(DBError::ConnectionError(String::from("error starting transaction")));
         }
         Err(DBError::MutexError(String::from("error getting mutex lock")))
     }
@@ -389,6 +397,7 @@ impl super::Database for SQLite {
                         row.get(5)?,
                         row.get(6)?,
                         row.get(7)?,
+                        row.get(8)?,
                     ))
                 }) {
                     Ok(r) => r,
@@ -527,5 +536,112 @@ impl super::Database for SQLite {
             return Ok(output);
         }
         Err(DBError::MutexError(String::from("error getting mutex lock")))
+    }
+
+    fn save_sightings(&self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError> {
+        if let Ok(mut conn) = self.mutex.lock() {
+            if let Ok(tx) = conn.transaction() {
+                let mut count = 0;
+                for s in sightings {
+                    match tx.execute(
+                        "INSERT INTO sightings (
+                            chip_id,
+                            part_id
+                        ) VALUES (?1,?2);",
+                        (s.read.id(), s.participant.id())
+                    ) {
+                        Ok(val) => count = count + val,
+                        Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
+                    }
+                }
+                if let Err(e) = tx.commit() {
+                    return Err(DBError::DataInsertionError(e.to_string()));
+                }
+                return Ok(count);
+            }
+            return Err(DBError::ConnectionError(String::from("error starting transaction")));
+        }
+        Err(DBError::ConnectionError(String::from("error getting mutex lock")))
+    }
+
+    fn get_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError> {
+        if let Ok(conn) = self.mutex.lock() {
+            let mut stmt = match conn.prepare(
+                "SELECT 
+                    part_id,
+                    bib,
+                    first,
+                    last,
+                    age,
+                    gender,
+                    age_group,
+                    distance,
+                    part_chip,
+                    anonymous,
+                    chip_id,
+                    seconds,
+                    milliseconds,
+                    antenna,
+                    reader,
+                    rssi,
+                    status,
+                    uploaded
+                FROM participants NATURAL JOIN sightings NATURAL JOIN chip_reads;"
+            ) {
+                Ok(stmt) => stmt,
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            };
+            let results = match stmt.query_map([],
+                |row| {
+                    Ok(sighting::Sighting{
+                        participant: participant::Participant::new(
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                            row.get(9)?,
+                        ),
+                        read: read::Read::new(
+                            row.get(10)?,
+                            row.get(8)?,
+                            row.get(11)?,
+                            row.get(12)?,
+                            row.get(13)?,
+                            row.get(14)?,
+                            row.get(15)?,
+                            row.get(16)?,
+                            row.get(17)?,
+                        )
+                    })
+                }
+            ) {
+                Ok(r) => r,
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            };
+            let mut output: Vec<sighting::Sighting> = Vec::new();
+            for row in results {
+                match row {
+                    Ok(r) => output.push(r),
+                    Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+                }
+            }
+            return Ok(output);
+        }
+        Err(DBError::ConnectionError(String::from("error getting mutex lock")))
+    }
+
+    fn delete_sightings(&self) -> Result<usize, DBError> {
+        if let Ok(conn) = self.mutex.lock() {
+            match conn.execute("DELETE FROM sightings;", []) {
+                Ok(num) => return Ok(num),
+                Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+            }
+        }
+        Err(DBError::ConnectionError(String::from("error getting mutex lock")))
     }
 }
