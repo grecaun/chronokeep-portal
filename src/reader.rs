@@ -12,9 +12,8 @@ pub trait Reader {
     fn ip_address(&self) -> &str;
     fn port(&self) -> u16;
     fn connected_at(&self) -> &str;
-
     fn is_connected(&self) -> bool;
-
+    fn equal(&self, other: &dyn Reader) -> bool;
     fn process_messages(&self);
     fn set_time(&self);
     fn get_time(&self);

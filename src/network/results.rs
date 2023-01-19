@@ -1,5 +1,5 @@
-//const API_TYPE_CHRONOKEEP: &str = "CHRONOKEEP";
-//const API_TYPE_CKEEP_SELF: &str = "CHRONOKEEP_SELF";
+pub const API_TYPE_CHRONOKEEP: &str = "CHRONOKEEP";
+pub const API_TYPE_CKEEP_SELF: &str = "CHRONOKEEP_SELF";
 
 pub struct ResultsApi {
     id: usize,
@@ -44,4 +44,11 @@ impl ResultsApi {
     pub fn uri(&self) -> &str {
         &self.uri
     }
+
+    pub fn equal(&self, other: &ResultsApi) -> bool {
+        self.nickname == other.nickname &&
+            self.kind == other.kind &&
+            self.token == other.token &&
+            self.uri == other.uri
+    } 
 }

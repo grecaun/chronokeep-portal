@@ -38,6 +38,18 @@ impl Participant {
         }
     }
 
+    pub fn equals(&self, other: &Participant) -> bool {
+        self.bib == other.bib &&
+        self.first == other.first &&
+        self.last == other.last &&
+        self.age == other.age &&
+        self.gender == other.gender &&
+        self.age_group == other.age_group &&
+        self.distance == other.distance &&
+        self.chip == other.chip &&
+        self.anonymous == other.anonymous
+    }
+
     pub fn id(&self) -> u64 {
         self.id
     }

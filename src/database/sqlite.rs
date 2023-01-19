@@ -63,6 +63,7 @@ impl SQLite {
                     kind VARCHAR(50),
                     token VARCHAR(100),
                     uri VARCHAR(150),
+                    UNIQUE (nickname) ON CONFLICT REPLACE,
                     UNIQUE (uri, token) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS participants (
@@ -76,7 +77,8 @@ impl SQLite {
                     distance VARCHAR(75) NOT NULL,
                     part_chip VARCHAR(100) NOT NULL UNIQUE,
                     anonymous SMALLINT NOT NULL DEFAULT 0,
-                    UNIQUE (bib, first, last, distance) ON CONFLICT REPLACE
+                    UNIQUE (bib) ON CONFLICT REPLACE,
+                    UNIQUE (part_chip) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS readers (
                     id INTEGER PRIMARY KEY,
@@ -190,6 +192,12 @@ impl super::Database for SQLite {
 
     // Readers
     fn save_reader(&self, reader: &dyn reader::Reader) -> Result<usize, DBError> {
+        match reader.kind() {
+            reader::READER_KIND_ZEBRA => {},
+            reader::READER_KIND_IMPINJ => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
+            reader::READER_KIND_RFID => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
+            _ => return Err(DBError::DataInsertionError(String::from("unknown reader kind specified")))
+        }
         if let Ok(conn) = self.mutex.lock() {
             match conn.execute(
                 "INSERT INTO readers (nickname, kind, ip_address, port) VALUES (?1, ?2, ?3, ?4);",
@@ -231,7 +239,6 @@ impl super::Database for SQLite {
                                     zebra::Zebra::new(
                                         r.id,
                                         r.nickname,
-                                        r.kind,
                                         r.ip_address,
                                         r.port)
                                 ))
@@ -261,6 +268,10 @@ impl super::Database for SQLite {
 
     // Results API
     fn save_api(&self, api: &results::ResultsApi) -> Result<usize, DBError> {
+        match api.kind() {
+            results::API_TYPE_CHRONOKEEP | results::API_TYPE_CKEEP_SELF => {},
+            _ => return Err(DBError::DataInsertionError(String::from("invalid kind specified")))
+        }
         if let Ok(conn) = self.mutex.lock() {
             match conn.execute(
                 "INSERT INTO results_api (
@@ -302,7 +313,10 @@ impl super::Database for SQLite {
             for row in results {
                 match row {
                     Ok(r) => {
-                        output.push(r);
+                        match r.kind() {
+                            results::API_TYPE_CHRONOKEEP | results::API_TYPE_CKEEP_SELF => output.push(r),
+                            _ => return Err(DBError::DataRetrievalError(String::from("invalid api type")))
+                        }
                     },
                     Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
                 }
@@ -328,6 +342,10 @@ impl super::Database for SQLite {
             if let Ok(tx) = conn.transaction() {
                 let mut count = 0;
                 for r in reads {
+                    match r.status() {
+                        read::READ_STATUS_TOO_SOON | read::READ_STATUS_UNUSED | read::READ_STATUS_USED => {},
+                        _ => return Err(DBError::DataInsertionError(String::from("invalid chip read status")))
+                    }
                     match tx.execute(
                         "INSERT INTO chip_reads (
                                 chip, 
@@ -338,9 +356,9 @@ impl super::Database for SQLite {
                                 rssi,
                                 status
                             ) VALUES (?1,?2,?3,?4,?5,?6,?7);",
-                        (&r.chip, r.seconds, r.milliseconds, r.antenna, &r.reader, &r.rssi, r.status)
+                        (r.chip(), r.seconds(), r.milliseconds(), r.antenna(), r.reader(), r.rssi(), r.status())
                     ) {
-                        Ok(_) => count = count + 1,
+                        Ok(val) => count = count + val,
                         Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
                     }
                 }
@@ -353,7 +371,7 @@ impl super::Database for SQLite {
         Err(DBError::MutexError(String::from("error getting mutex lock")))
     }
 
-    fn get_reads(&self, start: &u64, end: &u64) -> Result<Vec<read::Read>, DBError> {
+    fn get_reads(&self, start: u64, end: u64) -> Result<Vec<read::Read>, DBError> {
         if let Ok(conn) = self.mutex.lock() {
             let mut stmt = match conn.prepare("SELECT * FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;") {
                 Ok(stmt) => stmt,
@@ -390,7 +408,7 @@ impl super::Database for SQLite {
         Err(DBError::MutexError(String::from("error getting mutex lock")))
     }
 
-    fn delete_reads(&self, start: &u64, end: &u64) -> Result<usize, DBError> {
+    fn delete_reads(&self, start: u64, end: u64) -> Result<usize, DBError> {
         if let Ok(conn) = self.mutex.lock() {
             match conn.execute(
                 "DELETE FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;",

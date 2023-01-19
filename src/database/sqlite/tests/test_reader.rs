@@ -1,6 +1,4 @@
-pub const DEFAULT_ZEBRA_PORT: u16 = 22;
-
-pub struct Zebra {
+pub struct TestReader {
     id: usize,
     nickname: String,
     kind: String,
@@ -8,29 +6,28 @@ pub struct Zebra {
     port: u16,
     connected: bool,
     connected_at: String,
-    // list of sockets to be connected to
 }
 
-impl Zebra {
+impl TestReader {
     pub fn new(
-        id: usize,
         nickname: String,
+        kind: String,
         ip_address: String,
         port: u16
-    ) -> Zebra {
-        Zebra {
-            id,
-            kind: String::from(super::READER_KIND_ZEBRA),
+    ) -> TestReader {
+        TestReader {
+            id: 0,
             nickname,
+            kind,
             ip_address,
             port,
             connected: false,
-            connected_at: String::from(""),
+            connected_at: String::from("")
         }
     }
 }
 
-impl super::Reader for Zebra {
+impl super::Reader for TestReader {
     fn id(&self) -> usize {
         self.id
     }
