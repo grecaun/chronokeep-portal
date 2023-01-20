@@ -14,7 +14,7 @@ const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 const DATABASE_VERSION_SETTING: &str = "PORTAL_DATABASE_VERSION";
 const DATABASE_VERSION: u16 = 1;
 
-struct SQLite {
+pub struct SQLite {
     mutex: sync::Mutex<rusqlite::Connection>,
 }
 
@@ -27,7 +27,7 @@ struct TempReader {
 }
 
 impl SQLite {
-    fn new() -> Result<SQLite, DBError> {
+    pub fn new() -> Result<SQLite, DBError> {
         let new_conn = rusqlite::Connection::open(DATABASE_URI);
         match new_conn {
             Ok(c) => 

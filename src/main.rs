@@ -1,15 +1,32 @@
+use core::panic;
 use std::io;
 
+use crate::database::sqlite;
+use crate::database::Database;
+
+pub mod control;
+pub mod defaults;
 pub mod database;
 pub mod network;
 pub mod objects;
 pub mod reader;
-
-//const ZERO_CONF_PORT: u32 = 12345;
-//const CONTROL_PORT: u32 = 12346;
+pub mod util;
 
 fn main() {
     println!("Chronokeep Portal starting up...");
+    let sqlite = sqlite::SQLite::new().unwrap();
+    match sqlite.setup() {
+        Ok(_) => println!("Database successfully setup."),
+        Err(e) => {
+            println!("Error setting up database: {e}");
+            panic!()
+        }
+    }
+    let control = control::Control::new(&sqlite).unwrap();
+    println!("Control values retrieved from database.");
+    let s: u64 = u64::from(control.sighting_period);
+    println!("Sightings will be ignored if received within {}", util::pretty_time(&s));
+    println!("Zero Conf Port: {} -- Control Port: {}", control.zero_conf_port, control.control_port);
     let mut keepalive: bool = true;
     let mut input: String = String::new();
 
