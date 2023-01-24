@@ -26,8 +26,8 @@ fn main() {
     }
     let control = control::Control::new(&sqlite).unwrap();
     println!("Control values retrieved from database.");
-    let s: u64 = u64::from(control.sighting_period);
-    println!("Sightings will be ignored if received within {}", util::pretty_time(&s));
+    println!("Portal is named '{}'.", control.name);
+    println!("Sightings will be ignored if received within {}", util::pretty_time(&u64::from(control.sighting_period)));
     println!("Zero Conf Port: {} -- Control Port: {}", control.zero_conf_port, control.control_port);
     let mut keepalive: bool = true;
     let mut input: String = String::new();
@@ -36,9 +36,10 @@ fn main() {
         io::stdin()
             .read_line(&mut input)
             .expect("Failed to read line.");
-        let lowercase: String = input.to_lowercase();
-        let parts: Vec<&str> = lowercase.split_whitespace().collect();
-        let first: &str = if parts.len() > 0 {parts[0]} else {""};
+        let in_string = input.to_string();
+        let parts: Vec<&str> = in_string.split_whitespace().collect();
+        let first_str = if parts.len() > 0 {parts[0].to_lowercase()} else {String::from("")};
+        let first: &str = first_str.as_str();
         input.clear();
         match first {
             "s" | "setting" => {
@@ -46,7 +47,7 @@ fn main() {
                     println!("Invalid number of arguments specified.");
                     continue
                 }
-                change_setting(parts[1], parts[2], &sqlite);
+                change_setting(parts[1].to_lowercase().as_str(), parts[2], &sqlite);
             },
             "q" | "quit" | "exit" => {
                 keepalive = false;
@@ -107,7 +108,9 @@ fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
         },
         "z" | "zeroconf" => {
             if let Ok(port) = u16::from_str(value) {
-                let res = sqlite.set_setting(&setting::Setting::new(String::from(control::SETTING_ZERO_CONF_PORT), port.to_string()));
+                let res = sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_ZERO_CONF_PORT),
+                    port.to_string()));
                 match res {
                     Ok(_) => println!("Zero configuration port set to {}.", port),
                     Err(e) => println!("Unable to set zero configuration port. {e}"),
@@ -118,7 +121,9 @@ fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
         },
         "c" | "control" => {
             if let Ok(port) = u16::from_str(value) {
-                let res = sqlite.set_setting(&setting::Setting::new(String::from(control::SETTING_CONTROL_PORT), port.to_string()));
+                let res = sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_CONTROL_PORT),
+                    port.to_string()));
                 match res {
                     Ok(_) => println!("Control port set to {}.", port),
                     Err(e) => println!("Unable to set control port. {e}"),
@@ -126,7 +131,18 @@ fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
                 return;
             }
             println!("Invalid port specified. Type h for help.")
-        }
+        },
+        "n" | "name" => {
+            let res = sqlite.set_setting(&setting::Setting::new(
+                String::from(control::SETTING_PORTAL_NAME),
+                String::from(value),
+            ));
+            match res {
+                Ok(_) => println!("Portal name set to '{}'.", value),
+                Err(e) => println!("Unable to set portal name. {e}"),
+            }
+            return;
+        },
         option => {
             println!("'{option} is not a valid option for a setting. Type h for help.");
         }
