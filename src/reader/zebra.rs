@@ -1,4 +1,4 @@
-pub const DEFAULT_ZEBRA_PORT: u16 = 22;
+pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 
 pub struct Zebra {
     id: usize,

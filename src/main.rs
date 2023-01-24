@@ -5,6 +5,7 @@ use std::str::FromStr;
 use crate::database::sqlite;
 use crate::database::Database;
 use crate::objects::setting;
+use crate::reader::zebra;
 
 pub mod control;
 pub mod defaults;
@@ -42,6 +43,27 @@ fn main() {
         let first: &str = first_str.as_str();
         input.clear();
         match first {
+            "r" | "reader" => {
+                match parts[1].to_lowercase().as_str() {
+                    "a" | "add" => {
+                        if parts.len() < 5 {
+                            println!("Invalid number of arguments specified.");
+                            continue
+                        }
+                        let port = if parts.len() < 6  {""} else {parts[5]};
+                        add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sqlite);
+                    },
+                    "c" | "connect" => {
+                        println!("not yet implemented");
+                    },
+                    "l" | "list" => {
+                        list_readers(&sqlite);
+                    }
+                    other => {
+                        println!("'{other}' is not a valid option for readers.");
+                    }
+                }
+            }
             "s" | "setting" => {
                 if parts.len() < 3 {
                     println!("Invalid number of arguments specified.");
@@ -57,6 +79,54 @@ fn main() {
         };
     }
     println!("Goodbye!")
+}
+
+fn list_readers(sqlite: &sqlite::SQLite) {
+    let res = sqlite.get_readers();
+    match res {
+        Ok(readers) => {
+            if readers.len() == 0 {
+                println!("No readers saved.");
+                return
+            }
+            for reader in readers {
+                println!("Reader      - {}", reader.nickname());
+                println!("      Kind  - {}", reader.kind());
+                println!("      IP    - {}", reader.ip_address());
+                println!("      Port  - {}", reader.port());
+            }
+        },
+        Err(e) => {
+            println!("Error retrieving readers. {e}");
+        }
+    }
+}
+
+fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQLite) {
+    match kind {
+        "z" | "zebra" => {
+            let port: u16 = u16::from_str(port).unwrap_or_else(|_err| {
+                println!("Invalid or no port specified. Using default.");
+                zebra::DEFAULT_ZEBRA_PORT
+            });
+            match sqlite.save_reader(&zebra::Zebra::new(
+                0,
+                String::from(name),
+                String::from(ip),
+                port
+            )) {
+                Ok(_) => {
+                    println!("Reader saved.")
+                },
+                Err(e) => {
+                    println!("Unable to save reader. {e}")
+                }
+            }
+        },
+        kind => {
+            println!("'{kind}' is not a valid reader type.")
+        }
+    }
 }
 
 fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
