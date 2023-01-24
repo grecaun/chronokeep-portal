@@ -14,6 +14,7 @@ pub mod network;
 pub mod objects;
 pub mod reader;
 pub mod util;
+pub mod llrp;
 
 fn main() {
     println!("Chronokeep Portal starting up...");
