@@ -216,6 +216,42 @@ impl super::Database for SQLite {
         Err(DBError::MutexError(String::from("error getting mutex lock")))
     }
 
+    fn get_reader(&self, name: &str) -> Result<Box<dyn reader::Reader>, DBError> {
+        if let Ok(conn) = self.mutex.lock() {
+            match conn.query_row("SELECT * FROM readers WHERE nickname=?1;",
+                [name],
+                |row| {
+                    Ok(TempReader {
+                        id: row.get(0)?,
+                        nickname: row.get(1)?,
+                        kind: row.get(2)?,
+                        ip_address: row.get(3)?,
+                        port: row.get(4)?,
+                    })
+            }) {
+                Ok(r) => {
+                    match &r.kind[..] {
+                        reader::READER_KIND_ZEBRA => {
+                            return Ok(Box::new(
+                                zebra::Zebra::new(
+                                    r.id,
+                                    r.nickname,
+                                    r.ip_address,
+                                    r.port)
+                            ))
+                        },
+                        reader::READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
+                        reader::READER_KIND_RFID => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
+                        _ => return Err(DBError::DataRetrievalError(String::from("unknown reader kind specified")))
+                    }
+                },
+                Err(rusqlite::Error::QueryReturnedNoRows) => return Err(DBError::NotFound),
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string())),
+            };
+    }
+        Err(DBError::MutexError(String::from("error getting mutex lock")))
+    }
+
     fn get_readers(&self) -> Result<Vec<Box<dyn reader::Reader>>, DBError> {
         if let Ok(conn) = self.mutex.lock() {
             let mut stmt = match conn.prepare("SELECT * FROM readers;") {

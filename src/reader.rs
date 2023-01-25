@@ -14,9 +14,9 @@ pub trait Reader {
     fn connected_at(&self) -> &str;
     fn is_connected(&self) -> bool;
     fn equal(&self, other: &dyn Reader) -> bool;
-    fn process_messages(&self);
-    fn set_time(&self);
-    fn get_time(&self);
-    fn connect(&self);
-    fn initialize(&self);
+    fn process_messages(&self) -> Result<(), &'static str>;
+    fn set_time(&self) -> Result<(), &'static str>;
+    fn get_time(&self) -> Result<(), &'static str>;
+    fn connect(&mut self) -> Result<(), &'static str>;
+    fn initialize(&self) -> Result<(), &'static str>;
 }

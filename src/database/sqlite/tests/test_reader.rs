@@ -63,23 +63,23 @@ impl super::Reader for TestReader {
             self.port == other.port()
     }
 
-    fn process_messages(&self) {
+    fn process_messages(&self) -> Result<(), &'static str> {
         todo!()
     }
 
-    fn set_time(&self) {
+    fn set_time(&self) -> Result<(), &'static str> {
         todo!()
     }
 
-    fn get_time(&self) {
+    fn get_time(&self) -> Result<(), &'static str> {
         todo!()
     }
 
-    fn connect(&self) {
+    fn connect(&mut self) -> Result<(), &'static str> {
         todo!()
     }
 
-    fn initialize(&self) {
+    fn initialize(&self) -> Result<(), &'static str> {
         todo!()
     }
 }

@@ -55,7 +55,20 @@ fn main() {
                         add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sqlite);
                     },
                     "c" | "connect" => {
-                        println!("not yet implemented");
+                        if parts.len() > 5 {
+                            let port = if parts.len() < 6  {""} else {parts[5]};
+                            add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sqlite);
+                        }
+                        let mut reader = match sqlite.get_reader(parts[2]) {
+                            Ok(r) => r,
+                            Err(e) => {
+                                println!("Unable to connect to the reader. {e}");
+                                continue
+                            },
+                        };
+                        if let Err(e) = reader.connect() {
+                            println!("Error connecting to reader. {e}")
+                        }
                     },
                     "l" | "list" => {
                         list_readers(&sqlite);
