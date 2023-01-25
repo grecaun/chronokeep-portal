@@ -1,3 +1,5 @@
+use std::thread::JoinHandle;
+
 pub struct TestReader {
     id: usize,
     nickname: String,
@@ -75,11 +77,15 @@ impl super::Reader for TestReader {
         todo!()
     }
 
-    fn connect(&mut self) -> Result<(), &'static str> {
+    fn connect(&mut self) -> Result<JoinHandle<()>, &'static str> {
         todo!()
     }
 
     fn initialize(&self) -> Result<(), &'static str> {
+        todo!()
+    }
+
+    fn disconnect(&mut self) -> Result<(), &'static str> {
         todo!()
     }
 }

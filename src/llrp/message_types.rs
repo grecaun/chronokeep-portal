@@ -1,8 +1,8 @@
 // Protocol Version Management
-pub const GET_SUPPORTED_VERSION: u16 = 46;
-pub const GET_SUPPORTED_VERSION_RESPONSE: u16 = 56;
-pub const SET_PROTOCOL_VERSION: u16 = 47;
-pub const SET_PROTOCOL_VERSION_RESPONSE: u16 = 57;
+pub const GET_SUPPORTED_VERSION: u16 = 46;          // v2
+pub const GET_SUPPORTED_VERSION_RESPONSE: u16 = 56; // v2
+pub const SET_PROTOCOL_VERSION: u16 = 47;           // v2
+pub const SET_PROTOCOL_VERSION_RESPONSE: u16 = 57;  // v2
 
 // Reader Device Capabilities
 pub const GET_READER_CAPABILITIES: u16 = 1;

@@ -1,3 +1,5 @@
+use std::thread::JoinHandle;
+
 pub mod zebra;
 
 pub const READER_KIND_ZEBRA: &str = "ZEBRA";
@@ -17,6 +19,7 @@ pub trait Reader {
     fn process_messages(&self) -> Result<(), &'static str>;
     fn set_time(&self) -> Result<(), &'static str>;
     fn get_time(&self) -> Result<(), &'static str>;
-    fn connect(&mut self) -> Result<(), &'static str>;
+    fn connect(&mut self) -> Result<JoinHandle<()>, &'static str>;
+    fn disconnect(&mut self) -> Result<(), &'static str>;
     fn initialize(&self) -> Result<(), &'static str>;
 }

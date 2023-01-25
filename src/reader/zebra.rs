@@ -1,4 +1,5 @@
-use std::{net::TcpStream, thread::{self, JoinHandle}, sync, io::Read};
+use std::{net::TcpStream, thread::{self, JoinHandle}, sync::{self, Arc}, io::Read, io::{Write, ErrorKind}};
+use std::time::Duration;
 
 use crate::llrp;
 
@@ -10,12 +11,11 @@ pub struct Zebra {
     kind: String,
     ip_address: String,
     port: u16,
+
     connected: bool,
     connected_at: String,
-    // list of sockets to be connected to
-    pub buff: [u8; 1024],
-    pub joiner: Option<JoinHandle<()>>,
-    pub keepalive: sync::Mutex<bool>,
+    pub keepalive: Arc<sync::Mutex<bool>>,
+    pub msg_id: Arc<sync::Mutex<u32>>,
 }
 
 impl Zebra {
@@ -33,9 +33,8 @@ impl Zebra {
             port,
             connected: false,
             connected_at: String::from(""),
-            buff: [0; 1024],
-            joiner: None,
-            keepalive: sync::Mutex::new(true)
+            keepalive: Arc::new(sync::Mutex::new(true)),
+            msg_id: Arc::new(sync::Mutex::new(0)),
         }
     }
 }
@@ -88,47 +87,123 @@ impl super::Reader for Zebra {
         todo!()
     }
 
-    fn connect(&mut self) -> Result<(), &'static str> {
+    fn connect(&mut self) -> Result<JoinHandle<()>, &'static str> {
         let res = TcpStream::connect(format!("{}:{}", self.ip_address, self.port));
         match res {
             Err(_) => return Err("unable to connect"),
             Ok(mut tcp_stream) => {
-                self.joiner = Some(thread::spawn(move|| {
+                self.connected = true;
+                //self.connected_at = "";
+                let t_mutex = self.keepalive.clone();
+                let msg_id = self.msg_id.clone();
+                let output = thread::spawn(move|| {
                     let buf: &mut [u8; 1024] = &mut [0;1024];
+                    match tcp_stream.set_read_timeout(Some(Duration::from_secs(1))) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            println!("Error setting read timeout. {e}")
+                        }
+                    }
                     loop {
-                        let numread = tcp_stream.read(buf);
-                        match numread {
-                            Ok(num) => {
-                                if num > 0 {
-                                    let bits: u16 = (u16::from(buf[0]) << 8) + u16::from(buf[1]);
-                                    let msg_type = llrp::bit_masks::get_msg_type(&bits);
-                                    match msg_type {
-                                        Ok(info) => {
-                                            let found_type = match llrp::message_types::get_message_name(info.kind) {
-                                                Some(found) => found,
-                                                _ => "UNKNOWN",
-                                            };
-                                            println!("Message Type Found! V: {} - {}", info.version, found_type);
-                                        },
-                                        Err(e) => {
-                                            println!("Error finding message type: {e}");
-                                        },
+                        if let Ok(keepalive) = t_mutex.lock() {
+                            // check if we've been told to quit
+                            if *keepalive == false {
+                                break;
+                            };
+                        } else {
+                            // unable to grab mutex...
+                            break;
+                        }
+                        match read(&mut tcp_stream, buf, &msg_id) {
+                            Ok(_) => (),
+                            Err(e) => {
+                                match e.kind() {
+                                    ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
+                                        break;
+                                    }
+                                    ErrorKind::TimedOut => (),
+                                    _ => println!("Error reading from reader. {e}"),
+                                }
+                            }
+                        }
+                    }
+                    // finalize what we're doing
+                    let fin_id = match msg_id.lock() {
+                        Ok(id) => *id,
+                        Err(_) => 0,
+                    };
+                    let close = llrp::requests::close_connection(&fin_id);
+                    match tcp_stream.write(&close) {
+                        Ok(_) => {
+                            match read(&mut tcp_stream, buf, &msg_id) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    match e.kind() {
+                                        ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset | ErrorKind::TimedOut => (),
+                                        _ => println!("Error reading from reader. {e}"),
                                     }
                                 }
                             }
-                            Err(e) => {
-                                println!("Error! {e}");
-                                continue
-                            },
-                        }
+                        },
+                        Err(e) => println!("Error closing connection. {e}"),
                     }
-                }));
-                Ok(())
+                    println!("Thread reading from this reader has now closed.")
+                });
+                Ok(output)
             },
         }
+    }
+
+    fn disconnect(&mut self) -> Result<(), &'static str> {
+        if let Ok(mut keepalive) = self.keepalive.lock() {
+            *keepalive = false;
+        };
+        Ok(())
     }
 
     fn initialize(&self) -> Result<(), &'static str> {
         todo!()
     }
+}
+
+fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;1024], msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), std::io::Error> {
+    let numread = tcp_stream.read(buf);
+    match numread {
+        Ok(num) => {
+            if num > 0 {
+                let msg_type = llrp::bit_masks::get_msg_type(&buf[0..10]);
+                match msg_type {
+                    Ok(info) => {
+                        let found_type = match llrp::message_types::get_message_name(info.kind) {
+                            Some(found) => found,
+                            _ => "UNKNOWN",
+                        };
+                        match info.kind {
+                            llrp::message_types::KEEPALIVE => {
+                                println!("Keepalive message received.");
+                                let response = llrp::requests::keepalive_ack(&info.id);
+                                match tcp_stream.write(&response) {
+                                    Ok(_) => (),
+                                    Err(e) => println!("Error responding to keepalive. {e}"),
+                                }
+                            },
+                            _ => {
+                                println!("Message Type Found! V: {} - {}", info.version, found_type);
+                            },
+                        }
+                        if let Ok(mut id) = msg_id.lock() {
+                            *id = info.id + 1;
+                        }
+                    },
+                    Err(e) => {
+                        return Err(std::io::Error::new(ErrorKind::InvalidData, e))
+                    },
+                }
+            }
+        }
+        Err(e) => {
+            return Err(e);
+        },
+    }
+    Ok(())
 }
