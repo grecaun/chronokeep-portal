@@ -1,13 +1,11 @@
 use std::thread::JoinHandle;
 
 pub struct TestReader {
-    id: usize,
+    id: i64,
     nickname: String,
     kind: String,
     ip_address: String,
     port: u16,
-    connected: bool,
-    connected_at: String,
 }
 
 impl TestReader {
@@ -23,14 +21,16 @@ impl TestReader {
             kind,
             ip_address,
             port,
-            connected: false,
-            connected_at: String::from("")
         }
     }
 }
 
-impl super::Reader for TestReader {
-    fn id(&self) -> usize {
+impl crate::reader::Reader for TestReader {
+    fn set_id(&mut self, id: i64) {
+        self.id = id;
+    }
+
+    fn id(&self) -> i64 {
         self.id
     }
     
@@ -50,23 +50,11 @@ impl super::Reader for TestReader {
         self.port
     }
 
-    fn is_connected(&self) -> bool {
-        self.connected
-    }
-
-    fn connected_at(&self) -> &str {
-        &self.connected_at
-    }
-
     fn equal(&self, other: &dyn super::Reader) -> bool {
         self.nickname == other.nickname() &&
             self.kind == other.kind() &&
             self.ip_address == other.ip_address() &&
             self.port == other.port()
-    }
-
-    fn process_messages(&self) -> Result<(), &'static str> {
-        todo!()
     }
 
     fn set_time(&self) -> Result<(), &'static str> {
@@ -81,11 +69,15 @@ impl super::Reader for TestReader {
         todo!()
     }
 
+    fn disconnect(&mut self) -> Result<(), &'static str> {
+        todo!()
+    }
+
     fn initialize(&self) -> Result<(), &'static str> {
         todo!()
     }
 
-    fn disconnect(&mut self) -> Result<(), &'static str> {
+    fn send(&mut self, _buf: &[u8]) -> Result<(), &'static str> {
         todo!()
     }
 }

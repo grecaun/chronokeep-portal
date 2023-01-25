@@ -7,7 +7,7 @@ use crate::database::Database;
 use crate::database::sqlite;
 use crate::objects::setting;
 use crate::reader::{self, Reader};
-use crate::reader::zebra;
+use crate::reader::llrp;
 use crate::util;
 
 pub fn control_loop(sqlite: &sqlite::SQLite) {
@@ -41,38 +41,20 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                     "c" | "connect" => {
                         if parts.len() > 5 {
                             let port = if parts.len() < 6  {""} else {parts[5]};
-                            add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sqlite);
+                            let id = add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sqlite);
+                            if id > 0 {
+                                connect_reader(id, &sqlite, &mut connected, &mut joiners);
+                            }
+                            continue
                         }
                         if parts.len() < 3 {
                             println!("Invalid number of arguments specified.");
                             continue
                         }
-                        let reader = match sqlite.get_reader(parts[2]) {
-                            Ok(r) => r,
-                            Err(e) => {
-                                println!("Unable to connect to the reader. {e}");
-                                continue
-                            },
-                        };
-                        match reader.kind() {
-                            reader::READER_KIND_ZEBRA => {
-                                let mut r = reader::zebra::Zebra::new(
-                                    reader.id(),
-                                    String::from(reader.nickname()),
-                                    String::from(reader.ip_address()),
-                                    reader.port(),
-                                );
-                                match r.connect() {
-                                    Ok(j) => {
-                                        connected.push(Box::new(r));
-                                        joiners.push(j)
-                                    },
-                                    Err(e) => println!("Error connecting to reader. {e}"),
-                                }
-                            },
-                            _ => {
-                                println!("unknown reader type found")
-                            }
+                        if let Ok(id) = i64::from_str(parts[2]) {
+                            connect_reader(id, &sqlite, &mut connected, &mut joiners);
+                        } else {
+                            println!("Invalid reader number.");
                         }
                     },
                     "d" | "disconnect" => {
@@ -80,27 +62,35 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                             println!("Invalid number of arguments specified.");
                             continue
                         }
-                        let mut found = false;
-                        let index = match connected.iter().position(|x| x.nickname() == parts[2]) {
-                            Some(ix) => {
-                                found = true;
-                                ix
-                            },
-                            None => {
-                                0
+                        let id: i64 = match i64::from_str(parts[2]) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                println!("Invalid reader number specified.");
+                                continue
                             },
                         };
-                        if found {
-                            let mut reader = connected.remove(index);
-                            match reader.disconnect() {
-                                Ok(_) => println!("Successfully disconnected from {}.", reader.nickname()),
-                                Err(e) => println!("Error disconnecting from the reader. {e}"),
-                            }
-                        }                     
-                    }
+                        disconnect_reader(id, &mut connected);
+                    },
+                    "r" | "remove" => {
+                        if parts.len() < 3 {
+                            println!("Invalid number of arguments specified.");
+                            continue
+                        }
+                        let id: i64 = match i64::from_str(parts[2]) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                println!("Invalid reader number specified.");
+                                continue
+                            },
+                        };
+                        remove_reader(id, &sqlite, &mut connected);
+                    },
                     "l" | "list" => {
                         list_readers(&sqlite);
-                    }
+                    },
+                    "s" | "send" => {
+
+                    },
                     other => {
                         println!("'{other}' is not a valid option for readers.");
                     }
@@ -137,6 +127,79 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
     }
 }
 
+fn disconnect_reader(id: i64, connected: &mut Vec<Box<dyn Reader>>){
+    match connected.iter().position(|x| x.id() == id) {
+        Some(ix) => {
+            let mut reader = connected.remove(ix);
+            match reader.disconnect() {
+                Ok(_) => println!("Successfully disconnected from {}.", reader.nickname()),
+                Err(e) => println!("Error disconnecting from the reader. {e}"),
+            }
+        },
+        None => {
+            println!("Reader not found.")
+        },
+    };
+}
+
+fn remove_reader(
+    id: i64,
+    sqlite: &sqlite::SQLite,
+    connected: &mut Vec<Box<dyn reader::Reader>>,
+) {
+    match connected.iter().position(|x| x.id() == id) {
+        Some(ix) => {
+            let mut reader = connected.remove(ix);
+            match reader.disconnect() {
+                Ok(_) => println!("Successfully disconnected from {}.", reader.nickname()),
+                Err(e) => println!("Error disconnecting from the reader. {e}"),
+            }
+        },
+        None => (),
+    }
+    match sqlite.delete_reader(&id) {
+        Ok(_) => println!("Successfully removed Reader {id} from saved reader list."),
+        Err(e) => println!("Error removing Reader {id} from saved reader list. {e}"),
+    }
+}
+
+fn connect_reader(
+    id: i64,
+    sqlite: &sqlite::SQLite,
+    connected: &mut Vec<Box<dyn reader::Reader>>,
+    joiners: &mut Vec<JoinHandle<()>>
+) {
+    let reader = match sqlite.get_reader(&id) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("Unable to connect to the reader. {e}");
+            return
+        },
+    };
+    match reader.kind() {
+        reader::READER_KIND_LLRP => {
+            let mut r = reader::llrp::LLRP::new(
+                reader.id(),
+                String::from(reader.nickname()),
+                String::from(reader.ip_address()),
+                reader.port(),
+            );
+            match r.connect() {
+                Ok(j) => {
+                    connected.push(Box::new(r));
+                    joiners.push(j);
+                },
+                Err(e) => {
+                    println!("Error connecting to reader. {e}");
+                },
+            }
+        },
+        _ => {
+            println!("unknown reader type found");
+        }
+    }
+}
+
 fn list_readers(sqlite: &sqlite::SQLite) {
     let res = sqlite.get_readers();
     match res {
@@ -158,21 +221,22 @@ fn list_readers(sqlite: &sqlite::SQLite) {
     }
 }
 
-fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQLite) {
+fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQLite) -> i64 {
     match kind {
-        "z" | "zebra" => {
+        "l" | "llrp" => {
             let port: u16 = u16::from_str(port).unwrap_or_else(|_err| {
                 println!("Invalid or no port specified. Using default.");
-                zebra::DEFAULT_ZEBRA_PORT
+                llrp::DEFAULT_ZEBRA_PORT
             });
-            match sqlite.save_reader(&zebra::Zebra::new(
+            match sqlite.save_reader(&llrp::LLRP::new(
                 0,
                 String::from(name),
                 String::from(ip),
                 port
             )) {
-                Ok(_) => {
-                    println!("Reader saved.")
+                Ok(val) => {
+                    println!("Reader saved.");
+                    return val
                 },
                 Err(e) => {
                     println!("Unable to save reader. {e}")
@@ -183,6 +247,7 @@ fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQL
             println!("'{kind}' is not a valid reader type.")
         }
     }
+    -1
 }
 
 fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
@@ -277,7 +342,18 @@ fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
 
 fn print_help() {
     println!("(s)etting -- Type s or setting to change a setting.  Valid values to change are:");
-    println!("    (s)ighting <X> - Define the period of time where we should ignore any subsequent chip reads after the first. Can be given in number of seconds or (h):MM:ss format.");
-    println!("    (z)eroconf <X> - Define the port to be used for the zero configuration lookup utility. Useful for determining the IP of this machine. 1-65356");
-    println!("    (c)ontrol  <X> - Define the port to be used for connecting to the control and information command interfaces. 1-65356")
+    println!("    (s)ighting <X>    - Define the period of time where we should ignore any subsequent chip reads after the first. Can be given in number of seconds or (h):MM:ss format.");
+    println!("    (z)eroconf <X>    - Define the port to be used for the zero configuration lookup utility. Useful for determining the IP of this machine. 1-65356");
+    println!("    (c)ontrol  <X>    - Define the port to be used for connecting to the control and information command interfaces. 1-65356");
+    println!("    (n)ame     <X>    - Changes the advertised name of this device.");
+    println!("(r)eader  -- Type r or reading to deal with readers. Valid values are:");
+    println!("    (l)ist            - List all saved readers. Number is used for other commands.");
+    println!("    (a)dd <name> <kind> <ip> [port] - Save a reader with name, kind, ip, and optional port.");
+    println!("                      - Valid kinds are (l)lrp.");
+    println!("    (c)onnect <#>     - Connect to a reader.");
+    println!("    (d)isconnect <#>  - Disconnect from a reader.");
+    println!("    (r)emove <#>      - Remove a reader from the saved readers list.");
+    println!("    (s)end <c>        - Send a specified command.");
+    println!("(h)elp                - Displays this help message.");
+    println!("(q)uit                - Instructs the program to terminate.");
 }

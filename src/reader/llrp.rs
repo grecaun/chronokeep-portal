@@ -5,67 +5,61 @@ use crate::llrp;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 
-pub struct Zebra {
-    id: usize,
+pub struct LLRP {
+    id: i64,
     nickname: String,
     kind: String,
     ip_address: String,
     port: u16,
 
-    connected: bool,
-    connected_at: String,
+    pub socket: sync::Mutex<Option<TcpStream>>,
     pub keepalive: Arc<sync::Mutex<bool>>,
     pub msg_id: Arc<sync::Mutex<u32>>,
 }
 
-impl Zebra {
+impl LLRP {
     pub fn new(
-        id: usize,
+        id: i64,
         nickname: String,
         ip_address: String,
-        port: u16
-    ) -> Zebra {
-        Zebra {
+        port: u16,
+    ) -> LLRP {
+        LLRP {
             id,
-            kind: String::from(super::READER_KIND_ZEBRA),
+            kind: String::from(super::READER_KIND_LLRP),
             nickname,
             ip_address,
             port,
-            connected: false,
-            connected_at: String::from(""),
+            socket: sync::Mutex::new(None),
             keepalive: Arc::new(sync::Mutex::new(true)),
             msg_id: Arc::new(sync::Mutex::new(0)),
         }
     }
 }
 
-impl super::Reader for Zebra {
-    fn id(&self) -> usize {
-        self.id
-    }
-    
-    fn nickname(&self) -> &str {
-        &self.nickname
+impl super::Reader for LLRP {
+    fn set_id(&mut self, id: i64) {
+        self.id = id;
     }
 
-    fn kind(&self) -> &str{
-        &self.kind
+    fn id(&self) -> i64 {
+        self.id
+    }
+
+    fn nickname(&self) -> &str {
+        self.nickname.as_str()
+    }
+
+    fn kind(&self) -> &str {
+        self.kind.as_str()
     }
 
     fn ip_address(&self) -> &str {
-        &self.ip_address
+        self.ip_address.as_str()
     }
 
     fn port(&self) -> u16 {
         self.port
-    }
-
-    fn is_connected(&self) -> bool {
-        self.connected
-    }
-
-    fn connected_at(&self) -> &str {
-        &self.connected_at
     }
 
     fn equal(&self, other: &dyn super::Reader) -> bool {
@@ -73,10 +67,6 @@ impl super::Reader for Zebra {
             self.kind == other.kind() &&
             self.ip_address == other.ip_address() &&
             self.port == other.port()
-    }
-
-    fn process_messages(&self) -> Result<(), &'static str> {
-        todo!()
     }
 
     fn set_time(&self) -> Result<(), &'static str> {
@@ -91,14 +81,19 @@ impl super::Reader for Zebra {
         let res = TcpStream::connect(format!("{}:{}", self.ip_address, self.port));
         match res {
             Err(_) => return Err("unable to connect"),
-            Ok(mut tcp_stream) => {
-                self.connected = true;
-                //self.connected_at = "";
+            Ok(tcp_stream) => {
+                self.socket = match tcp_stream.try_clone() {
+                    Ok(stream) => sync::Mutex::new(Some(stream)),
+                    Err(_) => {
+                        return Err("error copying stream to thread")
+                    }
+                };
+                let mut t_stream = tcp_stream;
                 let t_mutex = self.keepalive.clone();
                 let msg_id = self.msg_id.clone();
                 let output = thread::spawn(move|| {
                     let buf: &mut [u8; 1024] = &mut [0;1024];
-                    match tcp_stream.set_read_timeout(Some(Duration::from_secs(1))) {
+                    match t_stream.set_read_timeout(Some(Duration::from_secs(1))) {
                         Ok(_) => (),
                         Err(e) => {
                             println!("Error setting read timeout. {e}")
@@ -114,7 +109,7 @@ impl super::Reader for Zebra {
                             // unable to grab mutex...
                             break;
                         }
-                        match read(&mut tcp_stream, buf, &msg_id) {
+                        match read(&mut t_stream, buf, &msg_id) {
                             Ok(_) => (),
                             Err(e) => {
                                 match e.kind() {
@@ -133,9 +128,9 @@ impl super::Reader for Zebra {
                         Err(_) => 0,
                     };
                     let close = llrp::requests::close_connection(&fin_id);
-                    match tcp_stream.write(&close) {
+                    match t_stream.write(&close) {
                         Ok(_) => {
-                            match read(&mut tcp_stream, buf, &msg_id) {
+                            match read(&mut t_stream, buf, &msg_id) {
                                 Ok(_) => (),
                                 Err(e) => {
                                     match e.kind() {
@@ -163,6 +158,29 @@ impl super::Reader for Zebra {
 
     fn initialize(&self) -> Result<(), &'static str> {
         todo!()
+    }
+
+    fn send(&mut self, buf: &[u8]) -> Result<(), &'static str> {
+        if let Ok(stream) = self.socket.lock() {
+            match &*stream {
+                Some(s) => {
+                    let mut w_stream = match s.try_clone() {
+                        Ok(v) => v,
+                        Err(_) => return Err("unable to copy stream")
+                    };
+                    match w_stream.write(buf) {
+                        Ok(_) => (),
+                        Err(_) => return Err("error writing data")
+                    }
+                    Ok(())
+                },
+                None => {
+                    Err("not connected")
+                },
+            }
+        } else {
+            Err("unable to get mutex")
+        }
     }
 }
 

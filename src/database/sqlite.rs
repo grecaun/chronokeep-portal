@@ -1,7 +1,7 @@
 use crate::objects::{setting, participant, read, sighting};
 use crate::network::results;
 use crate::database::DBError;
-use crate::reader::{self, zebra};
+use crate::reader::{self, llrp};
 
 use std::str::FromStr;
 use std::sync;
@@ -19,7 +19,7 @@ pub struct SQLite {
 }
 
 struct TempReader {
-    id: usize,
+    id: i64,
     nickname: String,
     kind: String,
     ip_address: String,
@@ -197,9 +197,9 @@ impl super::Database for SQLite {
     }
 
     // Readers
-    fn save_reader(&self, reader: &dyn reader::Reader) -> Result<usize, DBError> {
+    fn save_reader(&self, reader: &dyn reader::Reader) -> Result<i64, DBError> {
         match reader.kind() {
-            reader::READER_KIND_ZEBRA => {},
+            reader::READER_KIND_LLRP => {},
             reader::READER_KIND_IMPINJ => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
             reader::READER_KIND_RFID => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
             _ => return Err(DBError::DataInsertionError(String::from("unknown reader kind specified")))
@@ -209,17 +209,17 @@ impl super::Database for SQLite {
                 "INSERT INTO readers (nickname, kind, ip_address, port) VALUES (?1, ?2, ?3, ?4);",
                 (reader.nickname(), reader.kind(), reader.ip_address(), reader.port()),
             ) {
-                Ok(val) => return Ok(val),
+                Ok(_) => return Ok(conn.last_insert_rowid()),
                 Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
             }
         }
         Err(DBError::MutexError(String::from("error getting mutex lock")))
     }
 
-    fn get_reader(&self, name: &str) -> Result<Box<dyn reader::Reader>, DBError> {
+    fn get_reader(&self, id: &i64) -> Result<Box<dyn reader::Reader>, DBError> {
         if let Ok(conn) = self.mutex.lock() {
-            match conn.query_row("SELECT * FROM readers WHERE nickname=?1;",
-                [name],
+            match conn.query_row("SELECT * FROM readers WHERE reader_id=?1;",
+                [id],
                 |row| {
                     Ok(TempReader {
                         id: row.get(0)?,
@@ -231,9 +231,9 @@ impl super::Database for SQLite {
             }) {
                 Ok(r) => {
                     match &r.kind[..] {
-                        reader::READER_KIND_ZEBRA => {
+                        reader::READER_KIND_LLRP => {
                             return Ok(Box::new(
-                                zebra::Zebra::new(
+                                llrp::LLRP::new(
                                     r.id,
                                     r.nickname,
                                     r.ip_address,
@@ -276,9 +276,9 @@ impl super::Database for SQLite {
                 match row {
                     Ok(r) => {
                         match &r.kind[..] {
-                            reader::READER_KIND_ZEBRA => {
+                            reader::READER_KIND_LLRP => {
                                 output.push(Box::new(
-                                    zebra::Zebra::new(
+                                    llrp::LLRP::new(
                                         r.id,
                                         r.nickname,
                                         r.ip_address,
@@ -298,9 +298,9 @@ impl super::Database for SQLite {
         Err(DBError::MutexError(String::from("error getting mutex lock")))
     }
 
-    fn delete_reader(&self, name: &str) -> Result<usize, DBError> {
+    fn delete_reader(&self, id: &i64) -> Result<usize, DBError> {
         if let Ok(conn) = self.mutex.lock() {
-            match conn.execute("DELETE FROM readers WHERE nickname=?1", [name]) {
+            match conn.execute("DELETE FROM readers WHERE reader_id=?1", [id]) {
                 Ok(num) => return Ok(num),
                 Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
             }
