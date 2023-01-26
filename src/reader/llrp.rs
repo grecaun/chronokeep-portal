@@ -1,7 +1,7 @@
 use std::{net::TcpStream, thread::{self, JoinHandle}, sync::{self, Arc}, io::Read, io::{Write, ErrorKind}};
 use std::time::Duration;
 
-use crate::llrp;
+use crate::llrp::{self, parameter_types};
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 
@@ -169,7 +169,8 @@ impl super::Reader for LLRP {
                         Err(_) => return Err("unable to copy stream")
                     };
                     match w_stream.write(buf) {
-                        Ok(_) => (),
+                        Ok(_) => {
+                        },
                         Err(_) => return Err("error writing data")
                     }
                     Ok(())
@@ -181,6 +182,15 @@ impl super::Reader for LLRP {
         } else {
             Err("unable to get mutex")
         }
+    }
+
+    fn get_next_id(&mut self) -> u32 {
+        let mut output: u32 = 0;
+        if let Ok(mut v) = self.msg_id.lock() {
+            output = *v + 1;
+            *v = output;
+        }
+        output
     }
 }
 
@@ -198,15 +208,20 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;1024], msg_id: &Arc<sync::Mute
                         };
                         match info.kind {
                             llrp::message_types::KEEPALIVE => {
-                                println!("Keepalive message received.");
+                                println!("{} found.", found_type);
                                 let response = llrp::requests::keepalive_ack(&info.id);
                                 match tcp_stream.write(&response) {
                                     Ok(_) => (),
                                     Err(e) => println!("Error responding to keepalive. {e}"),
                                 }
                             },
+                            llrp::message_types::GET_ROSPECS_RESPONSE => {
+                                println!("{} found.", found_type);
+                                process_parameters(&buf, 10, &num);
+                            },
                             _ => {
                                 println!("Message Type Found! V: {} - {}", info.version, found_type);
+                                process_parameters(&buf, 10, &num);
                             },
                         }
                         if let Ok(mut id) = msg_id.lock() {
@@ -224,4 +239,41 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;1024], msg_id: &Arc<sync::Mute
         },
     }
     Ok(())
+}
+
+fn process_parameters(buf: &[u8;1024], start_ix: usize, num: &usize) {
+    let mut start: usize = start_ix;
+    while start < *num {
+        let bits: u32 = ((buf[start] as u32) << 24) + ((buf[start+1] as u32) << 16) + ((buf[start+2] as u32) << 8) + (buf[start+3] as u32);
+        let param_info = match llrp::bit_masks::get_param_type(&bits) {
+            Ok(info) => info,
+            Err(e) => {
+                println!("Unable to process parameters. {e}");
+                return
+            }
+        };
+        if param_info.length < 1 {
+            return
+        }
+        match param_info.kind {
+            parameter_types::RO_SPEC => {
+                if start + 10 > *num {
+                    println!("Out of bounds.");
+                    return
+                }
+                // ID is an unsigned integer. 0 is invalid
+                let rospec_id: u32 = ((buf[start+4] as u32) << 24) + ((buf[start+5] as u32) << 16) + ((buf[start+6] as u32) << 8) + (buf[start+7] as u32);
+                // Valid priorities are 0-7, lower are given higher priority
+                let priority: u8 = buf[start+8];
+                // 0 = disabled, 1 = inactive, 2 = active
+                let current_state: u8 = buf[start+9];
+                // 10 is a ROBoundarySpec parameter followed by 1-n SpecParameters followed by 0-1 ROReportSpec parameters
+                println!("ROSpec Parameter -- id {} - priority {} - current state {}", rospec_id, priority, current_state);
+            },
+            _ => {
+                println!("Parameter found -- {:?} -- TV? {}", parameter_types::get_parameter_name(param_info.kind), param_info.tv);
+            }
+        }
+        start = start + param_info.length as usize;
+    }
 }

@@ -5,6 +5,7 @@ use std::thread::JoinHandle;
 
 use crate::database::Database;
 use crate::database::sqlite;
+use crate::llrp::requests;
 use crate::objects::setting;
 use crate::reader::{self, Reader};
 use crate::reader::llrp;
@@ -89,7 +90,35 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                         list_readers(&sqlite);
                     },
                     "s" | "send" => {
-
+                        if parts.len() < 3 {
+                            println!("Invalid number of arguments specified.");
+                            continue
+                        }
+                        let id: i64 = match i64::from_str(parts[2]) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                println!("Invalid reader number specified.");
+                                continue
+                            },
+                        };
+                        match connected.iter().position(|x| x.id() == id) {
+                            Some(ix) => {
+                                let mut reader =  connected.remove(ix);
+                                let msg = requests::get_rospecs(&reader.get_next_id());
+                                match reader.send(&msg) {
+                                    Ok(_) => {
+                                        println!("Sent message successfully.");
+                                    },
+                                    Err(e) => {
+                                        println!("Error sending message. {e}");
+                                    }
+                                };
+                                connected.push(reader);
+                            },
+                            None => {
+                                println!("Unable to find reader.")
+                            }
+                        }
                     },
                     other => {
                         println!("'{other}' is not a valid option for readers.");

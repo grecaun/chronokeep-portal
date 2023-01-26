@@ -80,4 +80,8 @@ impl crate::reader::Reader for TestReader {
     fn send(&mut self, _buf: &[u8]) -> Result<(), &'static str> {
         todo!()
     }
+
+    fn get_next_id(&mut self) -> u32 {
+        todo!()
+    }
 }

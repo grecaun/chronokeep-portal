@@ -21,8 +21,5 @@ pub trait Reader {
     fn disconnect(&mut self) -> Result<(), &'static str>;
     fn initialize(&self) -> Result<(), &'static str>;
     fn send(&mut self, buf: &[u8]) -> Result<(), &'static str>;
-}
-
-pub struct GenReader {
-
+    fn get_next_id(&mut self) -> u32;
 }

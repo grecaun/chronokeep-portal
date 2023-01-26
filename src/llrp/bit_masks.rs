@@ -1,3 +1,5 @@
+use super::parameter_types;
+
 // First 16 bits of our message are as follows.
 // 3 bits reserved (should be 0)
 // 3 bits llrp version (1 for 1.0, 2 for 1.1)
@@ -59,7 +61,7 @@ pub fn get_param_type(bits: &u32) -> Result<ParamTypeInfo, &'static str> {
         return Ok(ParamTypeInfo {
             tv: true,
             kind: ( head & TV_TYPE ) >> 8,
-            length: 0,
+            length: tv_length_dict(( head & TV_TYPE ) >> 8),
         })
     }
     if ( head & PARAM_RESERVED ) != 0 {
@@ -70,4 +72,34 @@ pub fn get_param_type(bits: &u32) -> Result<ParamTypeInfo, &'static str> {
         kind: head & PARAM_TYPE,
         length: (bits & PARAM_LENGTH) as u16,
     })
+}
+
+pub fn tv_length_dict(kind: u16) -> u16 {
+    match kind {
+        // 13 byte lengths
+        parameter_types::EPC_96 => 13,
+        //  9 byte lengths
+        parameter_types::FIRST_SEEN_TIMESTAMP_UTC |
+        parameter_types::FIRST_SEEN_TIMESTAMP_UPTIME |
+        parameter_types::LAST_SEEN_TIMESTAMP_UTC |
+        parameter_types::LAST_SEEN_TIMESTAMP_UPTIME => 9,
+        //  5 byte lengths
+        parameter_types::RO_SPEC_ID |
+        parameter_types::ACCESS_SPEC_ID |
+        parameter_types::C1G2_SINGULATION_DETAILS => 5,
+        //  3 byte lengths
+        parameter_types::SPEC_INDEX |
+        parameter_types::INVENTORY_PARAMETER_SPEC_ID |
+        parameter_types::ANTENNA_ID |
+        parameter_types::CHANNEL_INDEX |
+        parameter_types::TAG_SEEN_COUNT |
+        parameter_types::CLIENT_REQUEST_OP_SPEC_RESULT |
+        parameter_types::C1G2_PC |
+        parameter_types::C1G2_XPCW1 |
+        parameter_types::C1G2_XPCW2 |
+        parameter_types::C1G2_CRC => 3,
+        //  2 byte lengths
+        parameter_types::PEAK_RSSI => 2,
+        _ => 0,
+    }
 }

@@ -1,3 +1,5 @@
+use super::message_types;
+
 pub fn get_supported_version() {
     todo!()
 }
@@ -35,7 +37,7 @@ pub fn disable_rospec() {
 }
 
 pub fn get_rospecs(id: &u32) -> [u8;10] {
-    let header: u16 = (1 << 10) + 35;
+    let header: u16 = (1 << 10) + message_types::GET_ROSPECS;
     let length: u32 = 10;
     [
         // convert 16 bits to two 8 bit unsigned ints
@@ -87,7 +89,7 @@ pub fn set_reader_config() {
 }
 
 pub fn close_connection(id: &u32) -> [u8;10] {
-    let header: u16 = (1 << 10) + 35;
+    let header: u16 = (1 << 10) + message_types::CLOSE_CONNECTION;
     let length: u32 = 10;
     [
         // convert 16 bits to two 8 bit unsigned ints
@@ -115,7 +117,7 @@ pub fn keepalive() {
 }
 
 pub fn keepalive_ack(id: &u32) -> [u8;10] {
-    let header: u16 = (1 << 10) + 35;
+    let header: u16 = (1 << 10) + message_types::KEEPALIVE_ACK;
     let length: u32 = 10;
     [
         // convert 16 bits to two 8 bit unsigned ints
