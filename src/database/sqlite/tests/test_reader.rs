@@ -1,4 +1,6 @@
-use std::thread::JoinHandle;
+use std::{thread::JoinHandle, sync};
+
+use crate::database::sqlite::SQLite;
 
 pub struct TestReader {
     id: i64,
@@ -57,14 +59,6 @@ impl crate::reader::Reader for TestReader {
             self.port == other.port()
     }
 
-    fn set_time(&self) -> Result<(), &'static str> {
-        todo!()
-    }
-
-    fn get_time(&self) -> Result<(), &'static str> {
-        todo!()
-    }
-
     fn connect(&mut self) -> Result<JoinHandle<()>, &'static str> {
         todo!()
     }
@@ -73,7 +67,7 @@ impl crate::reader::Reader for TestReader {
         todo!()
     }
 
-    fn initialize(&self) -> Result<(), &'static str> {
+    fn initialize(&mut self) -> Result<(), &'static str> {
         todo!()
     }
 
@@ -82,6 +76,10 @@ impl crate::reader::Reader for TestReader {
     }
 
     fn get_next_id(&mut self) -> u32 {
+        todo!()
+    }
+
+    fn stop(&mut self) -> Result<(), &'static str> {
         todo!()
     }
 }

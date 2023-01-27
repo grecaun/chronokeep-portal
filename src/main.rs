@@ -10,6 +10,7 @@ pub mod database;
 pub mod network;
 pub mod objects;
 pub mod reader;
+pub mod types;
 pub mod util;
 pub mod llrp;
 

@@ -10,7 +10,7 @@ use crate::objects::participant;
 use crate::objects::read;
 use crate::objects::setting;
 use crate::objects::sighting;
-use crate::reader::{self, Reader, llrp};
+use crate::reader::{self, Reader, zebra};
 
 mod test_reader;
 
@@ -243,11 +243,11 @@ fn test_get_setting() {
 #[test]
 fn test_save_reader() {
     let unique_path = "./test_save_reader.sqlite";
-    let original = llrp::LLRP::new(
+    let original = zebra::Zebra::new(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.100"),
-        llrp::DEFAULT_ZEBRA_PORT);
+        zebra::DEFAULT_ZEBRA_PORT);
     let sqlite = setup_tests(unique_path);
     let result = sqlite.save_reader(&original);
     assert!(result.is_ok());
@@ -263,7 +263,7 @@ fn test_save_reader() {
     // Test auto update feature of the 
     let updated_ip = "random_ip";
     let updated_port = 12345;
-    let result = sqlite.save_reader(&llrp::LLRP::new(
+    let result = sqlite.save_reader(&zebra::Zebra::new(
             0,
             String::from(original.nickname()),
             String::from(updated_ip),
@@ -302,11 +302,11 @@ fn test_save_reader() {
 #[test]
 fn test_get_reader() {
     let unique_path = "./test_get_reader.sqlite";
-    let original = llrp::LLRP::new(
+    let original = zebra::Zebra::new(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
-        llrp::DEFAULT_ZEBRA_PORT + 1
+        zebra::DEFAULT_ZEBRA_PORT + 1
     );
     let sqlite = setup_tests(unique_path);
     _ = sqlite.save_reader(&original);
@@ -332,11 +332,11 @@ fn test_get_reader() {
 #[test]
 fn test_get_readers() {
     let unique_path = "./test_get_readers.sqlite";
-    let original = llrp::LLRP::new(
+    let original = zebra::Zebra::new(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
-        llrp::DEFAULT_ZEBRA_PORT + 1);
+        zebra::DEFAULT_ZEBRA_PORT + 1);
     let sqlite = setup_tests(unique_path);
     _ = sqlite.save_reader(&original);
     let results = sqlite.get_readers();
@@ -347,20 +347,20 @@ fn test_get_readers() {
     assert!(first.equal(&original));
     // add a bunch of readers to test that we can get them all
     for i in 2..8 {
-        _ = sqlite.save_reader(&llrp::LLRP::new(
+        _ = sqlite.save_reader(&zebra::Zebra::new(
             0,
             format!("zebra-{i}"),
             format!("192.168.1.10{i}"),
-            llrp::DEFAULT_ZEBRA_PORT + i));
+            zebra::DEFAULT_ZEBRA_PORT + i));
     }
     let results = sqlite.get_readers();
     assert!(results.is_ok());
     let readers = results.unwrap();
     assert_eq!(7, readers.len());
     for reader in readers {
-        let num = reader.port() - llrp::DEFAULT_ZEBRA_PORT;
+        let num = reader.port() - zebra::DEFAULT_ZEBRA_PORT;
         assert_eq!(format!("zebra-{num}"), reader.nickname());
-        assert_eq!(reader::READER_KIND_LLRP, reader.kind());
+        assert_eq!(reader::READER_KIND_ZEBRA, reader.kind());
         assert_eq!(format!("192.168.1.10{num}"), reader.ip_address());
     }
     drop(sqlite);
@@ -370,11 +370,11 @@ fn test_get_readers() {
 #[test]
 fn test_delete_reader() {
     let unique_path = "./test_delete_reader.sqlite";
-    let mut original = llrp::LLRP::new(
+    let mut original = zebra::Zebra::new(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
-        llrp::DEFAULT_ZEBRA_PORT + 1);
+        zebra::DEFAULT_ZEBRA_PORT + 1);
     let sqlite = setup_tests(unique_path);
     original.set_id(sqlite.save_reader(&original).unwrap());
     let readers = sqlite.get_readers().unwrap();
@@ -393,11 +393,11 @@ fn test_delete_reader() {
     let middle = 4;
     let mut middle_ix: i64 = -1;
     for i in 0..(middle * 2) {
-        let ix = sqlite.save_reader(&llrp::LLRP::new(
+        let ix = sqlite.save_reader(&zebra::Zebra::new(
             0,
             format!("zebra-{i}"),
             format!("192.168.1.10{i}"),
-            llrp::DEFAULT_ZEBRA_PORT
+            zebra::DEFAULT_ZEBRA_PORT
         )).unwrap();
         if i == middle {
             middle_ix = ix;

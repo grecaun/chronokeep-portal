@@ -1,14 +1,14 @@
 
 use std::io;
 use std::str::FromStr;
+use std::sync;
 use std::thread::JoinHandle;
 
 use crate::database::Database;
 use crate::database::sqlite;
-use crate::llrp::requests;
 use crate::objects::setting;
 use crate::reader::{self, Reader};
-use crate::reader::llrp;
+use crate::reader::zebra;
 use crate::util;
 
 pub fn control_loop(sqlite: &sqlite::SQLite) {
@@ -104,14 +104,9 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                         match connected.iter().position(|x| x.id() == id) {
                             Some(ix) => {
                                 let mut reader =  connected.remove(ix);
-                                let msg = requests::get_rospecs(&reader.get_next_id());
-                                match reader.send(&msg) {
-                                    Ok(_) => {
-                                        println!("Sent message successfully.");
-                                    },
-                                    Err(e) => {
-                                        println!("Error sending message. {e}");
-                                    }
+                                match reader.initialize() {
+                                    Ok(_) => (),
+                                    Err(e) => println!("Error initializing reader. {e}")
                                 };
                                 connected.push(reader);
                             },
@@ -206,8 +201,8 @@ fn connect_reader(
         },
     };
     match reader.kind() {
-        reader::READER_KIND_LLRP => {
-            let mut r = reader::llrp::LLRP::new(
+        reader::READER_KIND_ZEBRA => {
+            let mut r = reader::zebra::Zebra::new(
                 reader.id(),
                 String::from(reader.nickname()),
                 String::from(reader.ip_address()),
@@ -252,12 +247,11 @@ fn list_readers(sqlite: &sqlite::SQLite) {
 
 fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQLite) -> i64 {
     match kind {
-        "l" | "llrp" => {
+        "z" | "zebra" => {
             let port: u16 = u16::from_str(port).unwrap_or_else(|_err| {
-                println!("Invalid or no port specified. Using default.");
-                llrp::DEFAULT_ZEBRA_PORT
+                zebra::DEFAULT_ZEBRA_PORT
             });
-            match sqlite.save_reader(&llrp::LLRP::new(
+            match sqlite.save_reader(&zebra::Zebra::new(
                 0,
                 String::from(name),
                 String::from(ip),

@@ -1,7 +1,7 @@
 use crate::objects::{setting, participant, read, sighting};
 use crate::network::results;
 use crate::database::DBError;
-use crate::reader::{self, llrp};
+use crate::reader::{self, zebra};
 
 use std::str::FromStr;
 use std::sync;
@@ -199,7 +199,7 @@ impl super::Database for SQLite {
     // Readers
     fn save_reader(&self, reader: &dyn reader::Reader) -> Result<i64, DBError> {
         match reader.kind() {
-            reader::READER_KIND_LLRP => {},
+            reader::READER_KIND_ZEBRA => {},
             reader::READER_KIND_IMPINJ => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
             reader::READER_KIND_RFID => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
             _ => return Err(DBError::DataInsertionError(String::from("unknown reader kind specified")))
@@ -231,9 +231,9 @@ impl super::Database for SQLite {
             }) {
                 Ok(r) => {
                     match &r.kind[..] {
-                        reader::READER_KIND_LLRP => {
+                        reader::READER_KIND_ZEBRA => {
                             return Ok(Box::new(
-                                llrp::LLRP::new(
+                                zebra::Zebra::new(
                                     r.id,
                                     r.nickname,
                                     r.ip_address,
@@ -276,9 +276,9 @@ impl super::Database for SQLite {
                 match row {
                     Ok(r) => {
                         match &r.kind[..] {
-                            reader::READER_KIND_LLRP => {
+                            reader::READER_KIND_ZEBRA => {
                                 output.push(Box::new(
-                                    llrp::LLRP::new(
+                                    zebra::Zebra::new(
                                         r.id,
                                         r.nickname,
                                         r.ip_address,
