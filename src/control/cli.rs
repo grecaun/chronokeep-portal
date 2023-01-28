@@ -1,7 +1,8 @@
 
 use std::io;
 use std::str::FromStr;
-use std::sync;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread::JoinHandle;
 
 use crate::database::Database;
@@ -11,7 +12,7 @@ use crate::reader::{self, Reader};
 use crate::reader::zebra;
 use crate::util;
 
-pub fn control_loop(sqlite: &sqlite::SQLite) {
+pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>) {
     let mut keepalive: bool = true;
     let mut input: String = String::new();
     let mut connected: Vec<Box<dyn reader::Reader>> = Vec::new();
@@ -37,14 +38,28 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                             continue
                         }
                         let port = if parts.len() < 6  {""} else {parts[5]};
-                        add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sqlite);
+                        let sq = match sqlite.lock() {
+                            Ok(sq) => sq,
+                            Err(_) => {
+                                println!("Error grabbing database mutex.");
+                                continue
+                            }
+                        };
+                        add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sq);
                     },
                     "c" | "connect" => {
                         if parts.len() > 5 {
                             let port = if parts.len() < 6  {""} else {parts[5]};
-                            let id = add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sqlite);
+                            let sq = match sqlite.lock() {
+                                Ok(sq) => sq,
+                                Err(_) => {
+                                    println!("Error grabbing database mutex.");
+                                    continue
+                                }
+                            };
+                            let id = add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sq);
                             if id > 0 {
-                                connect_reader(id, &sqlite, &mut connected, &mut joiners);
+                                connect_reader(id, &sq, &mut connected, &mut joiners);
                             }
                             continue
                         }
@@ -53,7 +68,14 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                             continue
                         }
                         if let Ok(id) = i64::from_str(parts[2]) {
-                            connect_reader(id, &sqlite, &mut connected, &mut joiners);
+                            let sq = match sqlite.lock() {
+                                Ok(sq) => sq,
+                                Err(_) => {
+                                    println!("Error grabbing database mutex.");
+                                    continue
+                                }
+                            };
+                            connect_reader(id, &sq, &mut connected, &mut joiners);
                         } else {
                             println!("Invalid reader number.");
                         }
@@ -84,10 +106,24 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                                 continue
                             },
                         };
-                        remove_reader(id, &sqlite, &mut connected);
+                        let sq = match sqlite.lock() {
+                            Ok(sq) => sq,
+                            Err(_) => {
+                                println!("Error grabbing database mutex.");
+                                continue
+                            }
+                        };
+                        remove_reader(id, &sq, &mut connected);
                     },
                     "l" | "list" => {
-                        list_readers(&sqlite);
+                        let sq = match sqlite.lock() {
+                            Ok(sq) => sq,
+                            Err(_) => {
+                                println!("Error grabbing database mutex.");
+                                continue
+                            }
+                        };
+                        list_readers(&sq);
                     },
                     "s" | "send" => {
                         if parts.len() < 3 {
@@ -125,7 +161,14 @@ pub fn control_loop(sqlite: &sqlite::SQLite) {
                     println!("Invalid number of arguments specified.");
                     continue
                 }
-                change_setting(parts[1].to_lowercase().as_str(), parts[2], &sqlite);
+                let sq = match sqlite.lock() {
+                    Ok(sq) => sq,
+                    Err(_) => {
+                        println!("Error grabbing database mutex.");
+                        continue
+                    }
+                };
+                change_setting(parts[1].to_lowercase().as_str(), parts[2], &sq);
             },
             "q" | "quit" | "exit" => {
                 keepalive = false;
