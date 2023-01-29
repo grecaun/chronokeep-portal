@@ -1,5 +1,7 @@
 use core::panic;
 use std::env;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::database::sqlite;
 use crate::database::Database;
@@ -16,7 +18,7 @@ pub mod llrp;
 
 fn main() {
     println!("Chronokeep Portal starting up...");
-    let sqlite = sqlite::SQLite::new().unwrap();
+    let mut sqlite = sqlite::SQLite::new().unwrap();
     match sqlite.setup() {
         Ok(_) => println!("Database successfully setup."),
         Err(e) => {
@@ -25,6 +27,7 @@ fn main() {
         }
     }
     let control = control::Control::new(&sqlite).unwrap();
+    let sqlite = Arc::new(Mutex::new(sqlite));
     println!("Control values retrieved from database.");
     println!("Portal is named '{}'.", control.name);
     println!("Sightings will be ignored if received within {}", util::pretty_time(&u64::from(control.sighting_period)));
@@ -34,7 +37,7 @@ fn main() {
         // implement server control logic
         // control::server::control_loop(&sqlite);
     }  else {
-        control::cli::control_loop(&sqlite);
+        control::cli::control_loop(sqlite.clone());
     }
     println!("Goodbye!")
 }

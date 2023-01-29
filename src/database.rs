@@ -36,7 +36,7 @@ impl fmt::Display for DBError {
 
 pub trait Database {
     // Setup functions
-    fn setup(&self) -> Result<(), DBError>;
+    fn setup(&mut self) -> Result<(), DBError>;
     // Application settings
     fn set_setting(&self, setting: &setting::Setting) -> Result<setting::Setting, DBError>;
     fn get_setting(&self, name: &str) -> Result<setting::Setting, DBError>;
@@ -50,16 +50,16 @@ pub trait Database {
     fn get_apis(&self) -> Result<Vec<results::ResultsApi>, DBError>;
     fn delete_api(&self, name: &str) -> Result<usize, DBError>;
     // Information gathered from readers
-    fn save_reads(&self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
+    fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
     fn get_reads(&self, start: u64, end: u64) -> Result<Vec<read::Read>, DBError>;
     fn delete_reads(&self, start: u64, end: u64) -> Result<usize, DBError>;
     // Participant information
-    fn add_participants(&self, participants: &Vec<participant::Participant>) -> Result<usize, DBError>;
+    fn add_participants(&mut self, participants: &Vec<participant::Participant>) -> Result<usize, DBError>;
     fn delete_participants(&self) -> Result<usize, DBError>;
     fn delete_participant(&self, bib: &str) -> Result<usize, DBError>;
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError>;
     // Sighting information
-    fn save_sightings(&self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError>;
+    fn save_sightings(&mut self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError>;
     fn get_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError>;
     fn delete_sightings(&self) -> Result<usize, DBError>;
 }

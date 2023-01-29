@@ -278,7 +278,7 @@ fn process_tags(
     tags: &mut Vec<TagData>,
     read_window: u8,
     chip_type: &str,
-    sqlite: SQLite,
+    sqlite: &mut SQLite,
     r_name: &str
 ) -> Result<(), &'static str> {
     let since_epoch = match SystemTime::now().duration_since(UNIX_EPOCH) {

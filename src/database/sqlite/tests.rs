@@ -1,6 +1,5 @@
 use core::panic;
 use std::collections::HashMap;
-use std::sync;
 use std::fs;
 use super::SQLite;
 use crate::database::DBError;
@@ -30,8 +29,8 @@ fn setup_tests(path: &str) -> SQLite {
             panic!();
         }
     }
-    let output = SQLite {
-        mutex: sync::Mutex::new(new_conn)
+    let mut output = SQLite {
+        conn: new_conn
     };
     match output.setup() {
         Ok(_) => {},
@@ -121,7 +120,7 @@ fn setup_v1(path: &str) -> SQLite {
         }
     }
     SQLite {
-        mutex: sync::Mutex::new(new_conn)
+        conn: new_conn
     }
 }
 
@@ -131,8 +130,8 @@ fn test_setup() {
     {
         let new_conn = rusqlite::Connection::open(unique_path);
         assert!(new_conn.is_ok());
-        let sqlite = SQLite {
-            mutex: sync::Mutex::new(new_conn.unwrap())
+        let mut sqlite = SQLite {
+            conn: new_conn.unwrap()
         };
         let res = sqlite.setup();
         match res {
@@ -150,12 +149,8 @@ fn test_setup() {
 fn test_update() {
     let unique_path = "./test_update.sqlite";
     {
-        let sqlite = setup_v1(unique_path);
-        let mut conn = match sqlite.mutex.lock() {
-            Ok(c) => c,
-            Err(e) => panic!("{}", e)
-        };
-        match sqlite.update(&mut conn, 1, 1) {
+        let mut sqlite = setup_v1(unique_path);
+        match sqlite.update(1, 1) {
             Ok(_) => println!("Everything went ok!"),
             Err(e) => {
                 println!("Something went wrong! {}", e);
@@ -627,7 +622,7 @@ fn make_reads() -> Vec<read::Read> {
 fn test_save_reads() {
     let unique_path = "./test_save_reads.sqlite";
     let new_reads = make_reads();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     let result = sqlite.save_reads(&new_reads);
     assert!(result.is_ok());
     assert_eq!(new_reads.len() - 1, result.unwrap());
@@ -669,7 +664,7 @@ fn test_save_reads() {
 fn test_get_reads() {
     let unique_path = "./test_get_reads.sqlite";
     let new_reads = make_reads();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     _ = sqlite.save_reads(&new_reads);
     let result = sqlite.get_reads(0, 2000);
     assert!(result.is_ok());
@@ -692,7 +687,7 @@ fn test_get_reads() {
 fn test_delete_reads() {
     let unique_path = "./test_delete_reads.sqlite";
     let new_reads = make_reads();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     let count = sqlite.save_reads(&new_reads).unwrap();
     let result = sqlite.delete_reads(2000, 90000);
     assert!(result.is_ok());
@@ -780,7 +775,7 @@ fn make_participants() -> Vec<participant::Participant> {
 fn test_add_participants() {
     let unique_path = "./test_add_participants.sqlite";
     let participants = make_participants();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     let result = sqlite.add_participants(&participants);
     assert!(result.is_ok());
     assert_eq!(participants.len(), result.unwrap());
@@ -830,7 +825,7 @@ fn test_add_participants() {
 fn test_delete_participants() {
     let unique_path = "./test_delete_participants.sqlite";
     let participants = make_participants();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     _ = sqlite.add_participants(&participants);
     let parts = sqlite.get_participants().unwrap();
     assert_eq!(participants.len(), parts.len());
@@ -847,7 +842,7 @@ fn test_delete_participants() {
 fn test_delete_participant() {
     let unique_path = "./test_delete_participant.sqlite";
     let participants = make_participants();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     _ = sqlite.add_participants(&participants);
     let parts = sqlite.get_participants().unwrap();
     assert_eq!(participants.len(), parts.len());
@@ -873,7 +868,7 @@ fn test_delete_participant() {
     finalize_tests(unique_path);
 }
 
-fn make_sightings(sqlite: &SQLite) -> Vec<sighting::Sighting> {
+fn make_sightings(sqlite:&mut SQLite) -> Vec<sighting::Sighting> {
     // store all participants in the database
     let parts = make_participants();
     _ = sqlite.add_participants(&parts);
@@ -946,8 +941,8 @@ fn make_sightings(sqlite: &SQLite) -> Vec<sighting::Sighting> {
 #[test]
 fn test_save_sightings() {
     let unique_path = "./test_save_sightings.sqlite";
-    let sqlite = setup_tests(unique_path);
-    let sightings = make_sightings(&sqlite);
+    let mut sqlite = setup_tests(unique_path);
+    let sightings = make_sightings(&mut sqlite);
     let result = sqlite.save_sightings(&sightings);
     assert!(result.is_ok());
     assert_eq!(sightings.len(), result.unwrap());
@@ -987,8 +982,8 @@ fn test_save_sightings() {
 #[test]
 fn test_get_sightings() {
     let unique_path = "./test_get_sightings.sqlite";
-    let sqlite = setup_tests(unique_path);
-    let sightings = make_sightings(&sqlite);
+    let mut sqlite = setup_tests(unique_path);
+    let sightings = make_sightings(&mut sqlite);
     _ = sqlite.save_sightings(&sightings);
     let result = sqlite.get_sightings();
     assert!(result.is_ok());
@@ -1001,8 +996,8 @@ fn test_get_sightings() {
 #[test]
 fn test_delete_sightings() {
     let unique_path = "./test_delete_sightings.sqlite";
-    let sqlite = setup_tests(unique_path);
-    let sightings = make_sightings(&sqlite);
+    let mut sqlite = setup_tests(unique_path);
+    let sightings = make_sightings(&mut sqlite);
     _ = sqlite.save_sightings(&sightings);
     let sights = sqlite.get_sightings().unwrap();
     assert_eq!(sightings.len(), sights.len());
