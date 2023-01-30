@@ -37,7 +37,7 @@ fn main() {
         // implement server control logic
         // control::server::control_loop(&sqlite);
     }  else {
-        control::cli::control_loop(sqlite.clone());
+        control::cli::control_loop(sqlite.clone(), control);
     }
     println!("Goodbye!")
 }

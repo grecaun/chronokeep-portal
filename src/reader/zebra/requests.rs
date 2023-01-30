@@ -119,24 +119,24 @@ pub fn add_rospec(id: &u32, rospec_id: &u32) -> [u8;96] {
             0x00, 0x0b,
             // 1... .... .... .... - enable rospec id - yes
             // .0.. .... .... .... - enable spec index - no
-            // ..0. .... .... .... - enable inventory spec id - n
+            // ..0. .... .... .... - enable inventory spec id - no
             // ...1 .... .... .... - enable antenna id - yes
             // .... 0... .... .... - enable channel index - no
             // .... .1.. .... .... - enable peak rssi - yes
             // .... ..1. .... .... - enable first seen timestamp - yes
-            // .... ...1 .... .... - enable last seen timestamp - yes
+            // .... ...0 .... .... - enable last seen timestamp - no
             // .... .... 0... .... - enable tag seen count - no
             // .... .... .0.. .... - enable accessspec id - no
-            0x97, 0x00,
+            0x96, 0x00,
                 // TLV Param - C1G2 EPC Memory Selector
                 ((parameter_types::C1G2_EPC_MEMORY_SELECTOR & 0xFF00) >> 8) as u8,
                 (parameter_types::C1G2_EPC_MEMORY_SELECTOR & 0xFF) as u8,
                 // length 5
                 0x00, 0x05,
-                // 1... .... - enable crc - yes
-                // .1.. .... - enable pc bits - yes
+                // 0... .... - enable crc - no
+                // .0.. .... - enable pc bits - no
                 // ..0. .... - enable xpc bits - no
-                0xc0,
+                0x00,
             // Custom Parameter
             ((parameter_types::CUSTOM_PARAMETER & 0xFF00) >> 8) as u8,
             (parameter_types::CUSTOM_PARAMETER & 0xFF) as u8,

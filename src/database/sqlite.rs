@@ -4,7 +4,6 @@ use crate::database::DBError;
 use crate::reader::{self, zebra};
 
 use std::str::FromStr;
-use std::sync;
 
 #[cfg(test)]
 mod tests;

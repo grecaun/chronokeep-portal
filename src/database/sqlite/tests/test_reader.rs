@@ -1,6 +1,6 @@
-use std::{thread::JoinHandle, sync};
+use std::{thread::JoinHandle, sync::{Arc, Mutex}};
 
-use crate::database::sqlite::SQLite;
+use crate::{database::sqlite, control};
 
 pub struct TestReader {
     id: i64,
@@ -59,7 +59,7 @@ impl crate::reader::Reader for TestReader {
             self.port == other.port()
     }
 
-    fn connect(&mut self) -> Result<JoinHandle<()>, &'static str> {
+    fn connect(&mut self, _sqlite: &Arc<Mutex<sqlite::SQLite>>, _control: &control::Control) -> Result<JoinHandle<()>, &'static str> {
         todo!()
     }
 

@@ -1,7 +1,7 @@
-use std::{str, net::TcpStream, thread::{self, JoinHandle}, sync::{self, Arc}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
+use std::{str, net::TcpStream, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{llrp::{self, parameter_types}, database::{sqlite::SQLite, Database}, objects::read, types, defaults};
+use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control};
 
 pub mod requests;
 
@@ -74,7 +74,7 @@ impl super::Reader for Zebra {
             self.port == other.port()
     }
 
-    fn connect(&mut self) -> Result<JoinHandle<()>, &'static str> {
+    fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str> {
         let res = TcpStream::connect(format!("{}:{}", self.ip_address, self.port));
         match res {
             Err(_) => return Err("unable to connect"),
@@ -96,7 +96,10 @@ impl super::Reader for Zebra {
                 let t_mutex = self.keepalive.clone();
                 let msg_id = self.msg_id.clone();
                 let reading = self.reading.clone();
-                let t_reader_name = self.nickname();
+                let t_reader_name = self.nickname.clone();
+                let t_sqlite = sqlite.clone();
+                let t_window = controls.read_window.clone();
+                let t_chip_type = controls.chip_type.clone();
 
                 let output = thread::spawn(move|| {
                     let buf: &mut [u8; 51200] = &mut [0;51200];
@@ -106,7 +109,7 @@ impl super::Reader for Zebra {
                             println!("Error setting read timeout. {e}")
                         }
                     }
-                    let read_map: HashMap<u128, (u64, TagData)> = HashMap::new();
+                    let mut read_map: HashMap<u128, (u64, TagData)> = HashMap::new();
                     loop {
                         if let Ok(keepalive) = t_mutex.lock() {
                             // check if we've been told to quit
@@ -118,15 +121,27 @@ impl super::Reader for Zebra {
                             break;
                         }
                         match read(&mut t_stream, buf) {
-                            Ok(tags) => {
-                                //process_tags(&mut read_map, &mut tags, defaults::DEFAULT_READ_WINDOW, defaults::DEFAULT_CHIP_TYPE, t_sqlite, t_reader_name);
+                            Ok(mut tags) => {
+                                match process_tags(&mut read_map, &mut tags, t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
+                                    Ok(_) => {
+                                        //println!("Tags processed.");
+                                    },
+                                    Err(e) => println!("Error processing tags. {e}"),
+                                };
                             },
                             Err(e) => {
                                 match e.kind() {
                                     ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
                                         break;
                                     }
-                                    ErrorKind::TimedOut => (),
+                                    ErrorKind::TimedOut => {
+                                        match process_tags(&mut read_map, &mut Vec::new(), t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
+                                            Ok(_) => {
+                                                //println!("Timeout tags processed.");
+                                            },
+                                            Err(e) => println!("Error processing tags. {e}"),
+                                        }
+                                    },
                                     _ => println!("Error reading from reader. {e}"),
                                 }
                             }
@@ -278,25 +293,28 @@ fn process_tags(
     tags: &mut Vec<TagData>,
     read_window: u8,
     chip_type: &str,
-    sqlite: &mut SQLite,
+    sqlite: &Arc<Mutex<sqlite::SQLite>>,
     r_name: &str
 ) -> Result<(), &'static str> {
     let since_epoch = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(v) => v.as_micros() as u64,
         Err(_) => return Err("something went wrong trying to get current time")
     };
-    // get the read window from seconds to milliseconds
-    let window = (read_window as u64) * 1000000;
+    // get the read window from 1/10 of a second to milliseconds
+    let window = (read_window as u64) * 100000;
     // sort tags so the earliest seen are first
     tags.sort_by(|a, b| a.first_seen.cmp(&b.first_seen));
     let mut reads: Vec<read::Read> = Vec::new();
     for tag in tags {
+        // check if the map contains the tag
         if map.contains_key(&tag.tag) {
             let (fs, old_data) = match map.remove(&tag.tag) {
                 Some(v) => v,
                 None => return Err("didn't find data we expected")
             };
             // check if we're in the window
+            // First Seen + Window is a value greater than when we've seen this tag
+            // then we are in the window
             if fs + window > tag.first_seen {
                 // if our new tag has a higher rssi we want to record it
                 if tag.rssi > old_data.rssi {
@@ -332,6 +350,15 @@ fn process_tags(
                     last_seen: tag.last_seen,
                 }));
             }
+        // else add the tag to the map
+        } else {
+            map.insert(tag.tag, (tag.first_seen, TagData{
+                tag: tag.tag,
+                rssi: tag.rssi,
+                antenna: tag.antenna,
+                first_seen: tag.first_seen,
+                last_seen: tag.last_seen,
+            }));
         }
     }
     let mut removed: Vec<u128> = Vec::new();
@@ -356,10 +383,16 @@ fn process_tags(
     for to_remove in removed {
         map.remove(&to_remove);
     }
-    // upload reads to database
-    match sqlite.save_reads(&reads) {
-        Ok(n) => println!("Successfully saved {n} reads."),
-        Err(_) => return Err("something went wrong saving reads"),
+    if reads.len() > 0 {
+        // upload reads to database
+        if let Ok(mut db) = sqlite.lock() {
+            match db.save_reads(&reads) {
+                Ok(n) => println!("Successfully saved {n} reads."),
+                Err(_) => return Err("something went wrong saving reads"),
+            }
+        } else {
+            return Err("unable to get database lock")
+        }
     }
     Ok(())
 }
@@ -479,10 +512,10 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;51200]) -> Result<Vec<TagData>
                         if max_ix > num {
                             return Err(std::io::Error::new(ErrorKind::InvalidData, "overflow error"))
                         }
-                        let found_type = match llrp::message_types::get_message_name(info.kind) {
+                        /*let found_type = match llrp::message_types::get_message_name(info.kind) {
                             Some(found) => found,
                             _ => "UNKNOWN",
-                        };
+                        }; // */
                         match info.kind {
                             llrp::message_types::KEEPALIVE => {
                                 let response = requests::keepalive_ack(&info.id);
@@ -503,7 +536,7 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;51200]) -> Result<Vec<TagData>
                                 };
                             },
                             _ => {
-                                println!("Message Type Found! V: {} - {}", info.version, found_type);
+                                //println!("Message Type Found! V: {} - {}", info.version, found_type);
                             },
                         }
                         cur_ix = max_ix;

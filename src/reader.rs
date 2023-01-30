@@ -1,6 +1,6 @@
-use std::{thread::JoinHandle, sync};
+use std::{thread::JoinHandle, sync::{Mutex, Arc}};
 
-use crate::database::sqlite::SQLite;
+use crate::{database::sqlite, control};
 
 pub mod zebra;
 
@@ -17,7 +17,7 @@ pub trait Reader {
     fn ip_address(&self) -> &str;
     fn port(&self) -> u16;
     fn equal(&self, other: &dyn Reader) -> bool;
-    fn connect(&mut self) -> Result<JoinHandle<()>, &'static str>;
+    fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str>;
     fn disconnect(&mut self) -> Result<(), &'static str>;
     fn initialize(&mut self) -> Result<(), &'static str>;
     fn stop(&mut self) -> Result<(), &'static str>;

@@ -12,7 +12,7 @@ use crate::reader::{self, Reader};
 use crate::reader::zebra;
 use crate::util;
 
-pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>) {
+pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
     let mut keepalive: bool = true;
     let mut input: String = String::new();
     let mut connected: Vec<Box<dyn reader::Reader>> = Vec::new();
@@ -58,8 +58,9 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>) {
                                 }
                             };
                             let id = add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sq);
+                            drop(sq);
                             if id > 0 {
-                                connect_reader(id, &sq, &mut connected, &mut joiners);
+                                connect_reader(id, &sqlite, &mut connected, &mut joiners, &controls);
                             }
                             continue
                         }
@@ -68,14 +69,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>) {
                             continue
                         }
                         if let Ok(id) = i64::from_str(parts[2]) {
-                            let sq = match sqlite.lock() {
-                                Ok(sq) => sq,
-                                Err(_) => {
-                                    println!("Error grabbing database mutex.");
-                                    continue
-                                }
-                            };
-                            connect_reader(id, &sq, &mut connected, &mut joiners);
+                            connect_reader(id, &sqlite, &mut connected, &mut joiners, &controls);
                         } else {
                             println!("Invalid reader number.");
                         }
@@ -185,6 +179,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>) {
             Err(e) => println!("Error disconnecting from {}. {e}", reader.nickname()),
         }
     }
+
     while joiners.len() > 0 {
         let cur_thread = joiners.remove(0);
         match cur_thread.join() {
@@ -232,10 +227,18 @@ fn remove_reader(
 
 fn connect_reader(
     id: i64,
-    sqlite: &sqlite::SQLite,
+    mtx: &Arc<Mutex<sqlite::SQLite>>,
     connected: &mut Vec<Box<dyn reader::Reader>>,
-    joiners: &mut Vec<JoinHandle<()>>
+    joiners: &mut Vec<JoinHandle<()>>,
+    controls: &super::Control
 ) {
+    let sqlite = match mtx.lock() {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Unable to get database mutex. {e}");
+            return
+        }
+    };
     let reader = match sqlite.get_reader(&id) {
         Ok(r) => r,
         Err(e) => {
@@ -243,6 +246,7 @@ fn connect_reader(
             return
         },
     };
+    drop(sqlite);
     match reader.kind() {
         reader::READER_KIND_ZEBRA => {
             let mut r = reader::zebra::Zebra::new(
@@ -251,7 +255,7 @@ fn connect_reader(
                 String::from(reader.ip_address()),
                 reader.port(),
             );
-            match r.connect() {
+            match r.connect(mtx, &controls) {
                 Ok(j) => {
                     connected.push(Box::new(r));
                     joiners.push(j);

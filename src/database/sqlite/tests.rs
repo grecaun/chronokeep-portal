@@ -322,6 +322,8 @@ fn test_get_reader() {
             panic!("Expected error, found something.")
         }
     }
+    drop(sqlite);
+    finalize_tests(unique_path);
 }
 
 #[test]
