@@ -19,6 +19,7 @@ pub struct Zebra {
     pub msg_id: Arc<sync::Mutex<u32>>,
 
     pub reading: Arc<sync::Mutex<bool>>,
+    pub connected: Arc<sync::Mutex<bool>>,
 }
 
 impl Zebra {
@@ -38,7 +39,16 @@ impl Zebra {
             keepalive: Arc::new(sync::Mutex::new(true)),
             msg_id: Arc::new(sync::Mutex::new(0)),
             reading: Arc::new(sync::Mutex::new(false)),
+            connected: Arc::new(sync::Mutex::new(false)),
         }
+    }
+
+    fn is_connected(&self) -> Option<bool> {
+        let mut output: Option<bool> = None;
+        if let Ok(con) = self.connected.lock() {
+            output = Some(*con);
+        }
+        output
     }
 }
 
@@ -91,6 +101,9 @@ impl super::Reader for Zebra {
                         return Err("error copying stream to thread")
                     }
                 };
+                if let Ok(mut con) = self.connected.lock() {
+                    *con = true;
+                }
                 // copy values for out thread
                 let mut t_stream = tcp_stream;
                 let t_mutex = self.keepalive.clone();
@@ -100,6 +113,7 @@ impl super::Reader for Zebra {
                 let t_sqlite = sqlite.clone();
                 let t_window = controls.read_window.clone();
                 let t_chip_type = controls.chip_type.clone();
+                let t_connected = self.connected.clone();
 
                 let output = thread::spawn(move|| {
                     let buf: &mut [u8; 51200] = &mut [0;51200];
@@ -148,6 +162,10 @@ impl super::Reader for Zebra {
                         }
                     }
                     finalize(&mut t_stream, &msg_id, &reading);
+                    save_reads(&mut read_map, &t_chip_type, &t_sqlite, t_reader_name.as_str());
+                    if let Ok(mut con) = t_connected.lock() {
+                        *con = false;
+                    }
                     println!("Thread reading from this reader has now closed.")
                 });
                 Ok(output)
@@ -285,6 +303,42 @@ impl super::Reader for Zebra {
             *v = output;
         }
         output
+    }
+}
+
+fn save_reads(
+    map: &mut HashMap<u128, (u64, TagData)>,
+    chip_type: &str,
+    sqlite: &Arc<Mutex<sqlite::SQLite>>,
+    r_name: &str
+) {
+    let mut reads: Vec<read::Read> = Vec::new();
+    for (_, old_tag) in map.values() {
+        let chip = if chip_type == types::TYPE_CHIP_DEC {format!("{}", old_tag.tag)} else {format!("{:x}", old_tag.tag)};
+        reads.push(read::Read::new(
+            0,
+            chip,
+            old_tag.first_seen / 1000000,
+            ((old_tag.first_seen / 1000) % 1000) as u32,
+            old_tag.antenna as u32,
+            String::from(r_name),
+            format!("{}", old_tag.rssi),
+            0,
+            0
+        ));
+    }
+    if reads.len() > 0 {
+        match sqlite.lock() {
+            Ok(mut db) => {
+                match db.save_reads(&reads) {
+                    Ok(num) => println!("Saved {num} reads."),
+                    Err(e) => println!("Error saving reads. {e}"),
+                }
+            },
+            Err(e) => {
+                println!("Error saving reads on thread close. {e}");
+            }
+        }
     }
 }
 
