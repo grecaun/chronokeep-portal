@@ -2,6 +2,7 @@ use crate::{database::{sqlite, self, Database, DBError}, defaults, objects::sett
 use rand::prelude::random;
 
 pub mod cli;
+pub mod socket;
 
 pub const SETTING_SIGHTING_PERIOD: &str = "SETTING_SIGHTING_PERIOD";
 pub const SETTING_ZERO_CONF_PORT: &str = "SETTING_ZERO_CONF_PORT";

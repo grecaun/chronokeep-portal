@@ -16,6 +16,8 @@ pub mod types;
 pub mod util;
 pub mod llrp;
 
+const CONTROL_TYPE: &str = "socket";
+
 fn main() {
     println!("Chronokeep Portal starting up...");
     let mut sqlite = sqlite::SQLite::new().unwrap();
@@ -37,7 +39,17 @@ fn main() {
         // implement server control logic
         // control::server::control_loop(&sqlite);
     }  else {
-        control::cli::control_loop(sqlite.clone(), control);
+        match CONTROL_TYPE {
+            "socket" => {
+                control::socket::control_loop(sqlite.clone(), control)
+            },
+            "cli" => {
+                control::cli::control_loop(sqlite.clone(), control);
+            },
+            other => {
+                println!("'{other}' is not a valid control type.");
+            }
+        }
     }
     println!("Goodbye!")
 }

@@ -4,7 +4,7 @@ use std::fs;
 use super::SQLite;
 use crate::database::DBError;
 use crate::database::Database;
-use crate::network::results;
+use crate::network::api;
 use crate::objects::participant;
 use crate::objects::read;
 use crate::objects::setting;
@@ -414,10 +414,10 @@ fn test_delete_reader() {
 #[test]
 fn test_save_api() {
     let unique_path = "./test_save_api.sqlite";
-    let original = results::ResultsApi::new(
+    let original = api::Api::new(
         0,
         String::from("results-api"),
-        String::from(results::API_TYPE_CHRONOKEEP),
+        String::from(api::API_TYPE_CHRONOKEEP_RESULTS),
         String::from("random-token-value"),
         String::from("https:://example.com/"));
     let sqlite = setup_tests(unique_path);
@@ -430,10 +430,10 @@ fn test_save_api() {
     assert!(first.equal(&original));
     // test update functionality (nickname stays the same)
     let results = sqlite.save_api(
-        &results::ResultsApi::new(
+        &api::Api::new(
             0,
             String::from(original.nickname()),
-            String::from(results::API_TYPE_CKEEP_SELF),
+            String::from(api::API_TYPE_CKEEP_RESULTS_SELF),
             String::from("a-different-random-token"),
             String::from("https:://random.com/")
         ));
@@ -454,10 +454,10 @@ fn test_save_api() {
     let first = apis.first().unwrap();
     assert!(first.equal(&original));
     // save new entry
-    let results = sqlite.save_api(&results::ResultsApi::new(
+    let results = sqlite.save_api(&api::Api::new(
         0,
         String::from("new-nickname"),
-        String::from(results::API_TYPE_CKEEP_SELF),
+        String::from(api::API_TYPE_CKEEP_RESULTS_SELF),
         String::from(original.token()),
         String::from(original.uri())
     ));
@@ -471,7 +471,7 @@ fn test_save_api() {
     assert_eq!(original.token(), first.token());
     assert_eq!(original.uri(), first.uri());
     // attempt to save invalid type
-    let result = sqlite.save_api(&results::ResultsApi::new(
+    let result = sqlite.save_api(&api::Api::new(
         0,
         String::from("invalid_type_name"),
         String::from("invalid-type"),
@@ -497,10 +497,10 @@ fn test_save_api() {
 #[test]
 fn test_get_apis() {
     let unique_path = "./test_get_apis.sqlite";
-    let original = results::ResultsApi::new(
+    let original = api::Api::new(
         0,
         String::from("results-api"),
-        String::from(results::API_TYPE_CHRONOKEEP),
+        String::from(api::API_TYPE_CHRONOKEEP_RESULTS),
         String::from("random-token-value"),
         String::from("https:://example.com/"));
     let sqlite = setup_tests(unique_path);
@@ -512,10 +512,10 @@ fn test_get_apis() {
     assert!(first.equal(&original));
     // test that we can add a whole bunch of api entries and retrieve them
     for i in 0..5 {
-        _ = sqlite.save_api(&results::ResultsApi::new(
+        _ = sqlite.save_api(&api::Api::new(
             0,
             format!("api-{i}"),
-            String::from(results::API_TYPE_CHRONOKEEP),
+            String::from(api::API_TYPE_CHRONOKEEP_RESULTS),
             format!("token-number-10302031{i}"),
             String::from("https::api.chronokeep.com/")
         ))
@@ -529,10 +529,10 @@ fn test_get_apis() {
 #[test]
 fn test_delete_api() {
     let unique_path = "./test_delete_api.sqlite";
-    let original = results::ResultsApi::new(
+    let original = api::Api::new(
         0,
         String::from("results-api"),
-        String::from(results::API_TYPE_CHRONOKEEP),
+        String::from(api::API_TYPE_CHRONOKEEP_RESULTS),
         String::from("random-token-value"),
         String::from("https:://example.com/"));
     let sqlite = setup_tests(unique_path);
@@ -549,10 +549,10 @@ fn test_delete_api() {
     assert_eq!(0, result.unwrap());
     // verify that we only delete one from a list of apis
     for i in 0..10 {
-        _ = sqlite.save_api(&results::ResultsApi::new(
+        _ = sqlite.save_api(&api::Api::new(
             0,
             format!("results-api-{i}"),
-            String::from(results::API_TYPE_CHRONOKEEP),
+            String::from(api::API_TYPE_CHRONOKEEP_RESULTS),
             format!("random-token-value-{i}"),
             String::from("https:://example.com/")
         ))

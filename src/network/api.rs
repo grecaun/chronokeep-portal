@@ -1,7 +1,12 @@
-pub const API_TYPE_CHRONOKEEP: &str = "CHRONOKEEP";
-pub const API_TYPE_CKEEP_SELF: &str = "CHRONOKEEP_SELF";
+pub const API_TYPE_CHRONOKEEP_RESULTS: &str = "CHRONOKEEP_RESULTS";
+pub const API_TYPE_CKEEP_RESULTS_SELF: &str = "CHRONOKEEP_RESULTS_SELF";
+pub const API_TYPE_CHRONOKEEP_REMOTE: &str = "CHRONOKEEP_REMOTE";
+pub const API_TYPE_CKEEP_REMOTE_SELF: &str = "CHRONOKEEP_REMOTE_SELF";
 
-pub struct ResultsApi {
+pub const API_URI_CHRONOKEEP_RESULTS: &str = "https://api.chronokeep.com/";
+pub const API_URI_CHRONOKEEP_REMOTE: &str = "https://remote.chronokeep.com/";
+
+pub struct Api {
     id: usize,
     nickname: String,
     kind: String,
@@ -9,14 +14,14 @@ pub struct ResultsApi {
     uri: String,
 }
 
-impl ResultsApi {
+impl Api {
     pub fn new(
         id: usize,
         nickname: String,
         kind: String,
         token: String,
-        uri: String) -> ResultsApi {
-        ResultsApi {
+        uri: String) -> Api {
+        Api {
             id,
             nickname,
             kind,
@@ -45,7 +50,7 @@ impl ResultsApi {
         &self.uri
     }
 
-    pub fn equal(&self, other: &ResultsApi) -> bool {
+    pub fn equal(&self, other: &Api) -> bool {
         self.nickname == other.nickname &&
             self.kind == other.kind &&
             self.token == other.token &&

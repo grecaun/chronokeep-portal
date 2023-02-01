@@ -7,6 +7,7 @@ use std::thread::JoinHandle;
 
 use crate::database::Database;
 use crate::database::sqlite;
+use crate::network::api;
 use crate::objects::setting;
 use crate::reader::{self, Reader};
 use crate::reader::zebra;
@@ -164,6 +165,54 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 };
                 change_setting(parts[1].to_lowercase().as_str(), parts[2], &sq);
             },
+            "a" | "api" => {
+                match parts[1].to_lowercase().as_str() {
+                    "a" | "add" => {
+                        // name, type, token, uri
+                        if parts.len() < 5 {
+                            println!("Invalid number of arugments specified.");
+                            continue
+                        }
+                        let uri = if parts.len() < 6 {"https://api.chronokeep.com/"} else {parts[5]};
+                        let sq = match sqlite.lock() {
+                            Ok(sq) => sq,
+                            Err(_) => {
+                                println!("Error grabbing database mutex.");
+                                continue
+                            }
+                        };
+                        add_api(parts[2], parts[3], parts[4], uri, &sq);
+                    },
+                    "l" | "list" => {
+                        let sq = match sqlite.lock() {
+                            Ok(sq) => sq,
+                            Err(_) => {
+                                println!("Error grabbing database mutex.");
+                                continue
+                            }
+                        };
+                        list_api(&sq);
+                    },
+                    "r" | "remove" => {
+                        if parts.len() < 3 {
+                            println!("Invalid number of arguments specified.");
+                            continue
+                        }
+                        let sq = match sqlite.lock() {
+                            Ok(sq) => sq,
+                            Err(_) => {
+                                println!("Error grabbing database mutex.");
+                                continue
+                            }
+                        };
+                        remove_api(parts[2], &sq);
+                    },
+                    _ => {
+                        println!("Unknown command.");
+                        continue
+                    },
+                }
+            },
             "q" | "quit" | "exit" => {
                 keepalive = false;
             },
@@ -289,6 +338,75 @@ fn list_readers(sqlite: &sqlite::SQLite) {
         Err(e) => {
             println!("Error retrieving readers. {e}");
         }
+    }
+}
+
+fn list_api(sqlite: &sqlite::SQLite) {
+    let res = sqlite.get_apis();
+    match res {
+        Ok(apis) => {
+            if apis.len() == 0 {
+                println!("No apis saved.");
+                return
+            }
+            for api in apis {
+                println!("API {0:<4}  - {1}", api.id(), api.nickname());
+                println!("     Kind  - {}", api.kind());
+                println!("     URI   - {}", api.uri());
+                println!("     Token - {}", api.token());
+            }
+        },
+        Err(e) => {
+            println!("Error retrieving readers. {e}");
+        }
+    }
+}
+
+fn add_api(name: &str, kind: &str, token: &str, uri: &str, sqlite: &sqlite::SQLite) {
+    let l_kind: &str;
+    let l_uri: &str;
+    match kind {
+        "c" | "chronokeep_results" => {
+            l_kind = api::API_TYPE_CHRONOKEEP_RESULTS;
+            l_uri = api::API_URI_CHRONOKEEP_RESULTS;
+        },
+        "chronokeep_results_self" => {
+            l_kind = api::API_TYPE_CKEEP_RESULTS_SELF;
+            l_uri = uri;
+        },
+        "chronokeep_remote" => {
+            l_kind = api::API_TYPE_CHRONOKEEP_REMOTE;
+            l_uri = api::API_URI_CHRONOKEEP_REMOTE;
+        },
+        "chronokeep_remote_self" => {
+            l_kind = api::API_TYPE_CKEEP_REMOTE_SELF;
+            l_uri = uri;
+        },
+        kind => {
+            println!("'{kind}' is not a valid api type.");
+            return
+        },
+    }
+    match sqlite.save_api(&api::Api::new(
+        0,
+        String::from(name),
+        String::from(l_kind),
+        String::from(token),
+        String::from(l_uri)
+    )) {
+        Ok(_) => {
+            println!("API saved.");
+        },
+        Err(e) => {
+            println!("Unable to save API. {e}");
+        }
+    }
+}
+
+fn remove_api(name: &str, sqlite: &sqlite::SQLite) {
+    match sqlite.delete_api(name) {
+        Ok(_) => println!("Successfully removed {name} from saved api list."),
+        Err(e) => println!("Error removing the api from saved api list. {e}"),
     }
 }
 

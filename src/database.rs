@@ -1,5 +1,5 @@
 use crate::objects::{setting, participant, read, sighting};
-use crate::network::results;
+use crate::network::api;
 use crate::reader;
 use std::fmt;
 
@@ -46,9 +46,9 @@ pub trait Database {
     fn get_readers(&self) -> Result<Vec<Box<dyn reader::Reader>>, DBError>;
     fn delete_reader(&self, id: &i64) -> Result<usize, DBError>;
     // API information
-    fn save_api(&self, api: &results::ResultsApi) -> Result<usize, DBError>;
-    fn get_apis(&self) -> Result<Vec<results::ResultsApi>, DBError>;
-    fn delete_api(&self, name: &str) -> Result<usize, DBError>;
+    fn save_api(&self, api: &api::Api) -> Result<usize, DBError>;
+    fn get_apis(&self) -> Result<Vec<api::Api>, DBError>;
+    fn delete_api(&self, id: &str) -> Result<usize, DBError>;
     // Information gathered from readers
     fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
     fn get_reads(&self, start: u64, end: u64) -> Result<Vec<read::Read>, DBError>;

@@ -1,5 +1,5 @@
 use crate::objects::{setting, participant, read, sighting};
-use crate::network::results;
+use crate::network::api;
 use crate::database::DBError;
 use crate::reader::{self, zebra};
 
@@ -287,9 +287,13 @@ impl super::Database for SQLite {
     }
 
     // Results API
-    fn save_api(&self, api: &results::ResultsApi) -> Result<usize, DBError> {
+    fn save_api(&self, api: &api::Api) -> Result<usize, DBError> {
         match api.kind() {
-            results::API_TYPE_CHRONOKEEP | results::API_TYPE_CKEEP_SELF => {},
+            api::API_TYPE_CHRONOKEEP_RESULTS |
+            api::API_TYPE_CKEEP_RESULTS_SELF |
+            api::API_TYPE_CHRONOKEEP_REMOTE |
+            api::API_TYPE_CKEEP_REMOTE_SELF =>
+            {},
             _ => return Err(DBError::DataInsertionError(String::from("invalid kind specified")))
         }
         match self.conn.execute(
@@ -306,7 +310,7 @@ impl super::Database for SQLite {
         }
     }
 
-    fn get_apis(&self) -> Result<Vec<results::ResultsApi>, DBError> {
+    fn get_apis(&self) -> Result<Vec<api::Api>, DBError> {
         let mut stmt = match self.conn.prepare("SELECT * FROM results_api;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
@@ -314,7 +318,7 @@ impl super::Database for SQLite {
         let results = match stmt.query_map(
             [],
             |row|{
-                Ok(results::ResultsApi::new(
+                Ok(api::Api::new(
                     row.get(0)?,
                     row.get(1)?,
                     row.get(2)?,
@@ -325,12 +329,18 @@ impl super::Database for SQLite {
                 Ok(r) => r,
                 Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
             };
-        let mut output: Vec<results::ResultsApi> = Vec::new();
+        let mut output: Vec<api::Api> = Vec::new();
         for row in results {
             match row {
                 Ok(r) => {
                     match r.kind() {
-                        results::API_TYPE_CHRONOKEEP | results::API_TYPE_CKEEP_SELF => output.push(r),
+                        api::API_TYPE_CHRONOKEEP_RESULTS |
+                        api::API_TYPE_CKEEP_RESULTS_SELF |
+                        api::API_TYPE_CHRONOKEEP_REMOTE |
+                        api::API_TYPE_CKEEP_REMOTE_SELF =>
+                        {
+                            output.push(r)
+                        },
                         _ => return Err(DBError::DataRetrievalError(String::from("invalid api type")))
                     }
                 },
