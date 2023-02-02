@@ -82,4 +82,12 @@ impl crate::reader::Reader for TestReader {
     fn stop(&mut self) -> Result<(), &'static str> {
         todo!()
     }
+
+    fn is_connected(&self) -> Option<bool> {
+        todo!()
+    }
+
+    fn is_reading(&self) -> Option<bool> {
+        todo!()
+    }
 }

@@ -8,7 +8,7 @@ pub const READER_KIND_ZEBRA: &str = "ZEBRA";
 pub const READER_KIND_RFID: &str = "RFID";
 pub const READER_KIND_IMPINJ: &str = "IMPINJ";
 
-pub trait Reader {
+pub trait Reader : Send {
     // get functions for fields
     fn set_id(&mut self, id: i64);
     fn id(&self) -> i64;
@@ -22,5 +22,7 @@ pub trait Reader {
     fn initialize(&mut self) -> Result<(), &'static str>;
     fn stop(&mut self) -> Result<(), &'static str>;
     fn send(&mut self, buf: &[u8]) -> Result<(), &'static str>;
+    fn is_connected(&self) -> Option<bool>;
+    fn is_reading(&self) -> Option<bool>;
     fn get_next_id(&mut self) -> u32;
 }

@@ -686,6 +686,11 @@ fn test_get_reads() {
 }
 
 #[test]
+fn test_get_all_reads() {
+    todo!()
+}
+
+#[test]
 fn test_delete_reads() {
     let unique_path = "./test_delete_reads.sqlite";
     let new_reads = make_reads();
@@ -706,6 +711,11 @@ fn test_delete_reads() {
     assert_eq!(0, result.unwrap());
     drop(sqlite);
     finalize_tests(unique_path);
+}
+
+#[test]
+fn test_delete_all_reads() {
+    todo!()
 }
 
 fn make_participants() -> Vec<participant::Participant> {

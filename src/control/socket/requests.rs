@@ -6,89 +6,73 @@ pub enum Request {
     Unknown,
     ReaderList,
     ReaderAdd {
-        details: ReaderAddDetails,
+        name: String,
+        kind: String,
+        ip_address: String,
+        port: u16,
     },
     ReaderRemove {
-        details: ReaderDetails,
+        id: i64,
     },
     ReaderConnect {
-        details: ReaderDetails,
+        id: i64,
     },
     ReaderDisconnect {
-        details: ReaderDetails,
+        id: i64,
     },
     ReaderStart {
-        details: ReaderDetails,
+        id: i64,
     },
     ReaderStop {
-        details: ReaderDetails,
+        id: i64,
     },
     SettingsGet,
-    SetingSet {
-        details: SettingDetail,
+    SettingSet {
+        name: String,
+        value: String,
     },
     Quit,
     ApiList,
     ApiAdd {
-        details: ApiAddDetail,
+        name: String,
+        kind: String,
+        uri: String,
+        token: String,
     },
     ApiRemove {
-        details: ApiDetail,
+        name: String,
     },
     ApiRemoteManualUpload {
-        details: ApiDetail,
+        name: String,
     },
     ApiRemoteAutoUpload {
-        details: ApiDetail,
+        name: String,
     },
     ApiResultsEventsGet {
-        details: ApiDetail,
+        name: String,
     },
     ApiResultsParticipantsGet {
-        details: ApiResultsParticipantsGetDetail
+        api_name: String,
+        event_slug: String,
+        event_year: String,
     },
     ApiParticipantsRemove,
     ReadsGet {
-        details: ReadsDetail,
+        start_seconds: u64,
+        end_seconds: u64,
     },
     ReadsGetAll,
     ReadsDelete {
-        details: ReadsDetail,
+        start_seconds: u64,
+        end_seconds: u64,
     },
     ReadsDeleteAll,
     TimeGet,
     TimeSet {
-        details: TimeDetail,
+        time: String,
+    },
+    Subscribe {
+        reads: bool,
+        sightings: bool,
     }
 }
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ReaderAddDetails {}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ReaderDetails {}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct SettingDetail {}
-
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiAddDetail {}
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiDetail {}
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiResultsParticipantsGetDetail {}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ReadsDetail {}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct TimeDetail {}

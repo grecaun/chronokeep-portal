@@ -48,11 +48,13 @@ pub trait Database {
     // API information
     fn save_api(&self, api: &api::Api) -> Result<usize, DBError>;
     fn get_apis(&self) -> Result<Vec<api::Api>, DBError>;
-    fn delete_api(&self, id: &str) -> Result<usize, DBError>;
+    fn delete_api(&self, name: &str) -> Result<usize, DBError>;
     // Information gathered from readers
     fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
     fn get_reads(&self, start: u64, end: u64) -> Result<Vec<read::Read>, DBError>;
+    fn get_all_reads(&self) -> Result<Vec<read::Read>, DBError>;
     fn delete_reads(&self, start: u64, end: u64) -> Result<usize, DBError>;
+    fn delete_all_reads(&self) -> Result<usize, DBError>;
     // Participant information
     fn add_participants(&mut self, participants: &Vec<participant::Participant>) -> Result<usize, DBError>;
     fn delete_participants(&self) -> Result<usize, DBError>;

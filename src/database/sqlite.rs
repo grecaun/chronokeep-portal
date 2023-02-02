@@ -426,10 +426,55 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
+    fn get_all_reads(&self) -> Result<Vec<read::Read>, DBError> {
+        let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads;") {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
+        };
+        let results = match stmt.query_map(
+            [],
+            |row| {
+                Ok(read::Read::new(
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))
+            }) {
+                Ok(r) => r,
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            };
+        let mut output: Vec<read::Read> = Vec::new();
+        for row in results {
+            match row {
+                Ok(r) => {
+                    output.push(r);
+                },
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            }
+        }
+        return Ok(output);
+    }
+
     fn delete_reads(&self, start: u64, end: u64) -> Result<usize, DBError> {
         match self.conn.execute(
             "DELETE FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;",
             [start, end]
+        ) {
+            Ok(num) => return Ok(num),
+            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+        }
+    }
+
+    fn delete_all_reads(&self) -> Result<usize, DBError> {
+        match self.conn.execute(
+            "DELETE FROM chip_reads;",
+            []
         ) {
             Ok(num) => return Ok(num),
             Err(e) => return Err(DBError::DataDeletionError(e.to_string()))

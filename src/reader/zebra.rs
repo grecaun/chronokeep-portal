@@ -42,14 +42,6 @@ impl Zebra {
             connected: Arc::new(sync::Mutex::new(false)),
         }
     }
-
-    fn is_connected(&self) -> Option<bool> {
-        let mut output: Option<bool> = None;
-        if let Ok(con) = self.connected.lock() {
-            output = Some(*con);
-        }
-        output
-    }
 }
 
 impl super::Reader for Zebra {
@@ -82,6 +74,22 @@ impl super::Reader for Zebra {
             self.kind == other.kind() &&
             self.ip_address == other.ip_address() &&
             self.port == other.port()
+    }
+
+    fn is_connected(&self) -> Option<bool> {
+        let mut output: Option<bool> = None;
+        if let Ok(con) = self.connected.lock() {
+            output = Some(*con);
+        }
+        output
+    }
+
+    fn is_reading(&self) -> Option<bool> {
+        let mut output: Option<bool> = None;
+        if let Ok(con) = self.reading.lock() {
+            output = Some(*con);
+        }
+        output
     }
 
     fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str> {
