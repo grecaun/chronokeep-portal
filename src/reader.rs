@@ -12,9 +12,13 @@ pub trait Reader : Send {
     // get functions for fields
     fn set_id(&mut self, id: i64);
     fn id(&self) -> i64;
+    fn set_nickname(&mut self, name: String);
     fn nickname(&self) -> &str;
+    fn set_kind(&mut self, kind: String);
     fn kind(&self) -> &str;
+    fn set_ip_address(&mut self, ip_address: String);
     fn ip_address(&self) -> &str;
+    fn set_port(&mut self, port: u16);
     fn port(&self) -> u16;
     fn equal(&self, other: &dyn Reader) -> bool;
     fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str>;

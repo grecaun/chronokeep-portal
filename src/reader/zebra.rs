@@ -312,6 +312,22 @@ impl super::Reader for Zebra {
         }
         output
     }
+
+    fn set_nickname(&mut self, name: String) {
+        self.nickname = name;
+    }
+
+    fn set_kind(&mut self, kind: String) {
+        self.kind = kind;
+    }
+
+    fn set_ip_address(&mut self, ip_address: String) {
+        self.ip_address = ip_address;
+    }
+
+    fn set_port(&mut self, port: u16) {
+        self.port = port;
+    }
 }
 
 fn save_reads(

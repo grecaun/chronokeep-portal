@@ -2,7 +2,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 
 use chrono::Utc;
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::setting, network::api};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant}, network::api};
 
 pub mod requests;
 pub mod responses;
@@ -18,6 +18,9 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     let read_repeaters: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
     // Sighting repeaters are sockets that want sightings to be sent to them as they're being saved.
     let sighting_repeaters: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    // Control sockets are sockets that are connected and should be relayed any changes in settings / readers / apis
+    // when another socket changes/deletes/adds something.
+    let control_sockets: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
 
     let listener = match TcpListener::bind(format!("127.0.0.1:{}", controls.control_port)) {
         Ok(list) => list,
@@ -81,6 +84,12 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_read_repeaters = read_repeaters.clone();
                 let t_sighting_repeaters = sighting_repeaters.clone();
                 let t_sqlite = sqlite.clone();
+                let t_control_sockets = control_sockets.clone();
+                if let Ok(c_sock) = stream.try_clone() {
+                    if let Ok(c_sockets) = control_sockets.lock() {
+                        c_sockets.push(c_sock);
+                    }
+                }
                 let l_joiner = thread::spawn(move|| {
                     handle_stream(
                         t_stream,
@@ -90,6 +99,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                         t_joiners,
                         t_read_repeaters,
                         t_sighting_repeaters,
+                        t_control_sockets,
                         t_sqlite
                     );
                 });
@@ -114,6 +124,7 @@ fn handle_stream(
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     read_reapeaters: Arc<Mutex<Vec<TcpStream>>>,
     sighting_repeaters: Arc<Mutex<Vec<TcpStream>>>,
+    control_sockets: Arc<Mutex<Vec<TcpStream>>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
 ) {
     let mut data = [0 as u8; 51200];
@@ -161,9 +172,27 @@ fn handle_stream(
                                 );
                                 match sq.save_reader(&tmp) {
                                     Ok(val) => {
-                                        if let Ok(mut r) = readers.lock() {
-                                            tmp.set_id(val);
-                                            r.push(Box::new(tmp));
+                                        if let Ok(mut u_readers) = readers.lock() {
+                                            match u_readers.iter().position(|x| x.nickname() == name) {
+                                                Some(ix) => {
+                                                    let mut tmp = u_readers.remove(ix);
+                                                    tmp.set_nickname(name);
+                                                    tmp.set_ip_address(ip_address);
+                                                    tmp.set_port(port);
+                                                    u_readers.push(tmp);
+                                                },
+                                                None => {
+                                                    tmp.set_id(val);
+                                                    u_readers.push(Box::new(tmp));
+                                                }
+                                            }
+                                            if let Ok(c_socks) = control_sockets.lock() {
+                                                for sock in c_socks.iter() {
+                                                    write_reader_list(&sock, u_readers);
+                                                }
+                                            } else {
+                                                write_reader_list(&stream, u_readers);
+                                            }
                                         }
                                     },
                                     Err(e) => {
@@ -176,9 +205,6 @@ fn handle_stream(
                                 write_error(&stream, format!("'{}' is not a valid reader type. Valid Types: '{}'", other, reader::READER_KIND_ZEBRA));
                             },
                         }
-                    }
-                    if let Ok(u_readers) = readers.lock() {
-                        write_reader_list(&stream, u_readers);
                     }
                 },
                 requests::Request::ReaderRemove { id } => {
@@ -202,7 +228,13 @@ fn handle_stream(
                         }
                     }
                     if let Ok(u_readers) = readers.lock() {
-                        write_reader_list(&stream, u_readers);
+                        if let Ok(c_socks) = control_sockets.lock() {
+                            for sock in c_socks.iter() {
+                                write_reader_list(&sock, u_readers);
+                            }
+                        } else {
+                            write_reader_list(&stream, u_readers);
+                        }
                     }
                 },
                 requests::Request::ReaderConnect { id } => {
@@ -241,6 +273,13 @@ fn handle_stream(
                                 write_error(&stream, String::from("reader not found"));
                             }
                         };
+                        if let Ok(c_socks) = control_sockets.lock() {
+                            for sock in c_socks.iter() {
+                                write_reader_list(&sock, u_readers);
+                            }
+                        } else {
+                            write_reader_list(&stream, u_readers);
+                        }
                     }
                 },
                 requests::Request::ReaderDisconnect { id } => {
@@ -261,6 +300,13 @@ fn handle_stream(
                                 write_error(&stream, String::from("reader not found"));
                             }
                         };
+                        if let Ok(c_socks) = control_sockets.lock() {
+                            for sock in c_socks.iter() {
+                                write_reader_list(&sock, u_readers);
+                            }
+                        } else {
+                            write_reader_list(&stream, u_readers);
+                        }
                     }
                 },
                 requests::Request::ReaderStart { id } => {
@@ -281,6 +327,13 @@ fn handle_stream(
                                 write_error(&stream, String::from("reader not found"));
                             }
                         };
+                        if let Ok(c_socks) = control_sockets.lock() {
+                            for sock in c_socks.iter() {
+                                write_reader_list(&sock, u_readers);
+                            }
+                        } else {
+                            write_reader_list(&stream, u_readers);
+                        }
                     }
                 },
                 requests::Request::ReaderStop { id } => {
@@ -301,11 +354,18 @@ fn handle_stream(
                                 write_error(&stream, String::from("reader not found"));
                             }
                         };
+                        if let Ok(c_socks) = control_sockets.lock() {
+                            for sock in c_socks.iter() {
+                                write_reader_list(&sock, u_readers);
+                            }
+                        } else {
+                            write_reader_list(&stream, u_readers);
+                        }
                     }
                 },
                 requests::Request::SettingsGet => {
                     if let Ok(sq) = sqlite.lock() {
-                        write_settings(&stream, &sq);
+                        write_settings(&stream, &get_settings(&sq));
                     }
                 },
                 requests::Request::SettingSet { name, value } => {
@@ -329,7 +389,14 @@ fn handle_stream(
                                                 controls
                                             }
                                         };
-                                        write_settings(&stream, &sq);
+                                        let settings = get_settings(&sq);
+                                        if let Ok(c_socks) = control_sockets.lock() {
+                                            for sock in c_socks.iter() {
+                                                write_settings(&sock, &settings);
+                                            }
+                                        } else {
+                                            write_settings(&stream, &settings);
+                                        }
                                     },
                                     Err(e) => {
                                         println!("Error saving setting. {e}");
@@ -353,7 +420,15 @@ fn handle_stream(
                 },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
-                        write_api_list(&stream, &sq);
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                write_api_list(&stream, &apis);
+                            },
+                            Err(e) => {
+                                println!("error getting api list. {e}");
+                                write_error(&stream, format!("error getting api list: {e}"));
+                            }
+                        }
                     }
                 },
                 requests::Request::ApiAdd { name, kind, uri, token } => {
@@ -382,7 +457,23 @@ fn handle_stream(
                                     t_uri
                                 )) {
                                     Ok(_) => {
-                                        write_api_list(&stream, &sq);
+                                        if let Ok(sq) = sqlite.lock() {
+                                            match sq.get_apis() {
+                                                Ok(apis) => {
+                                                    if let Ok(c_socks) = control_sockets.lock() {
+                                                        for sock in c_socks.iter() {
+                                                            write_api_list(&sock, &apis);
+                                                        }
+                                                    } else {
+                                                        write_api_list(&stream, &apis);
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    println!("error getting api list. {e}");
+                                                    write_error(&stream, format!("error getting api list: {e}"));
+                                                }
+                                            }
+                                        }
                                     },
                                     Err(e) => {
                                         println!("Error saving api {e}");
@@ -401,7 +492,23 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_api(&name) {
                             Ok(_) => {
-                                write_api_list(&stream, &sq)
+                                if let Ok(sq) = sqlite.lock() {
+                                    match sq.get_apis() {
+                                        Ok(apis) => {
+                                            if let Ok(c_socks) = control_sockets.lock() {
+                                                for sock in c_socks.iter() {
+                                                    write_api_list(&sock, &apis);
+                                                }
+                                            } else {
+                                                write_api_list(&stream, &apis);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("error getting api list. {e}");
+                                            write_error(&stream, format!("error getting api list: {e}"));
+                                        }
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error deleting api {e}");
@@ -423,10 +530,39 @@ fn handle_stream(
                 requests::Request::ApiResultsParticipantsGet { api_name, event_slug, event_year } => {
                     // TODO
                 }, */
-                requests::Request::ApiParticipantsRemove => {
+                requests::Request::ParticipantsGet => {
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_participants() {
+                            Ok(parts) => {
+                                write_participants(&stream, &parts);
+                            },
+                            Err(e) => {
+                                println!("error getting participants from database. {e}");
+                                write_error(&stream, format!("error getting participants from database: {e}"));
+                            }
+                        }
+                    }
+                }
+                requests::Request::ParticipantsRemove => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_participants() {
-                            Ok(_) => {},
+                            Ok(_) => {
+                                match sq.get_participants() {
+                                    Ok(parts) => {
+                                        if let Ok(c_socks) = control_sockets.lock() {
+                                            for sock in c_socks.iter() {
+                                                write_participants(&sock, &parts);
+                                            }
+                                        } else {
+                                            write_participants(&stream, &parts);
+                                        }
+                                    },
+                                    Err(e) => {
+                                        println!("error getting participants. {e}");
+                                        write_error(&stream, format!("error getting participants: {e}"));
+                                    }
+                                }
+                            },
                             Err(e) => {
                                 println!("Error deleting participants. {e}");
                                 write_error(&stream, format!("error deleting participants: {e}"));
@@ -515,7 +651,9 @@ fn handle_stream(
                 },
                 /*
                 requests::Request::TimeSet { time } => {
-
+                    if on linux {
+                        std::process::Command::new("COMMAND").arg("ARG").arg("ARG").spawn()
+                    }
                 }, */
                 requests::Request::Subscribe { reads, sightings } => {
                     if reads {
@@ -565,7 +703,7 @@ fn write_time(stream: &TcpStream) {
     }
 }
 
-fn write_settings(stream: &TcpStream, sqlite: &MutexGuard<sqlite::SQLite>) {
+fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
     let setting_names = [
         super::SETTING_CHIP_TYPE,
         super::SETTING_PORTAL_NAME,
@@ -583,6 +721,10 @@ fn write_settings(stream: &TcpStream, sqlite: &MutexGuard<sqlite::SQLite>) {
             Err(_) => (),
         }
     }
+    settings
+}
+
+fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) {
     match serde_json::to_writer(stream, &responses::Settings{
         settings,
     }) {
@@ -616,25 +758,18 @@ fn write_reader_list(stream: &TcpStream, u_readers: MutexGuard<Vec<Box<dyn reade
     }
 }
 
-fn write_api_list(stream: &TcpStream, sqlite: &MutexGuard<sqlite::SQLite>) {
-    match sqlite.get_apis() {
-        Ok(apis) => {
-            match serde_json::to_writer(stream, &responses::ApiList{
-                apis
-            }) {
-                Ok(_) => (),
-                Err(e) => {
-                    println!("Something went wrong writing to socket. {e}");
-                }
-            }
-        },
+fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) {
+    match serde_json::to_writer(stream, &responses::ApiList{
+        apis
+    }) {
+        Ok(_) => (),
         Err(e) => {
-            println!("error getting apis {e}");
+            println!("Something went wrong writing to socket. {e}");
         }
     }
 }
 
-fn write_reads(stream: &TcpStream, reads: Vec<responses::Read>) {
+fn write_reads(stream: &TcpStream, reads: &Vec<responses::Read>) {
     match serde_json::to_writer(stream, &responses::Reads{
         list: reads,
     }) {
@@ -652,6 +787,17 @@ fn write_success(stream: &TcpStream, count: usize) {
         Ok(_) => (),
         Err(e) => {
             println!("Something went wrong writing to socket. {e}");
+        }
+    }
+}
+
+fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>) {
+    match serde_json::to_writer(stream, &responses::Participants {
+        participants: parts,
+    }) {
+        Ok(_) => (),
+        Err(e) => {
+            println!("Something went wrong writing to the socket. {e}");
         }
     }
 }

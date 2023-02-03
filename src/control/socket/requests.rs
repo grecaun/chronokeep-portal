@@ -56,7 +56,8 @@ pub enum Request {
         event_slug: String,
         event_year: String,
     },
-    ApiParticipantsRemove,
+    ParticipantsGet,
+    ParticipantsRemove,
     ReadsGet {
         start_seconds: u64,
         end_seconds: u64,

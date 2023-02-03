@@ -90,4 +90,20 @@ impl crate::reader::Reader for TestReader {
     fn is_reading(&self) -> Option<bool> {
         todo!()
     }
+
+    fn set_nickname(&mut self, name: String) {
+        todo!()
+    }
+
+    fn set_kind(&mut self, kind: String) {
+        todo!()
+    }
+
+    fn set_ip_address(&mut self, ip_address: String) {
+        todo!()
+    }
+
+    fn set_port(&mut self, port: u16) {
+        todo!()
+    }
 }
