@@ -86,7 +86,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_sqlite = sqlite.clone();
                 let t_control_sockets = control_sockets.clone();
                 if let Ok(c_sock) = stream.try_clone() {
-                    if let Ok(c_sockets) = control_sockets.lock() {
+                    if let Ok(mut c_sockets) = control_sockets.lock() {
                         c_sockets.push(c_sock);
                     }
                 }
@@ -156,7 +156,7 @@ fn handle_stream(
             match cmd {
                 requests::Request::ReaderList => {
                     if let Ok(u_readers) = readers.lock() {
-                        write_reader_list(&stream, u_readers);
+                        write_reader_list(&stream, &u_readers);
                     }
                 },
                 requests::Request::ReaderAdd { name, kind, ip_address, port } => {
@@ -173,13 +173,13 @@ fn handle_stream(
                                 match sq.save_reader(&tmp) {
                                     Ok(val) => {
                                         if let Ok(mut u_readers) = readers.lock() {
-                                            match u_readers.iter().position(|x| x.nickname() == name) {
+                                            match u_readers.iter().position(|x| x.nickname() == tmp.nickname()) {
                                                 Some(ix) => {
-                                                    let mut tmp = u_readers.remove(ix);
-                                                    tmp.set_nickname(name);
-                                                    tmp.set_ip_address(ip_address);
-                                                    tmp.set_port(port);
-                                                    u_readers.push(tmp);
+                                                    let mut itmp = u_readers.remove(ix);
+                                                    itmp.set_nickname(String::from(tmp.nickname()));
+                                                    itmp.set_ip_address(String::from(tmp.ip_address()));
+                                                    itmp.set_port(port);
+                                                    u_readers.push(itmp);
                                                 },
                                                 None => {
                                                     tmp.set_id(val);
@@ -188,10 +188,10 @@ fn handle_stream(
                                             }
                                             if let Ok(c_socks) = control_sockets.lock() {
                                                 for sock in c_socks.iter() {
-                                                    write_reader_list(&sock, u_readers);
+                                                    write_reader_list(&sock, &u_readers);
                                                 }
                                             } else {
-                                                write_reader_list(&stream, u_readers);
+                                                write_reader_list(&stream, &u_readers);
                                             }
                                         }
                                     },
@@ -230,10 +230,10 @@ fn handle_stream(
                     if let Ok(u_readers) = readers.lock() {
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, u_readers);
+                                write_reader_list(&sock, &u_readers);
                             }
                         } else {
-                            write_reader_list(&stream, u_readers);
+                            write_reader_list(&stream, &u_readers);
                         }
                     }
                 },
@@ -275,10 +275,10 @@ fn handle_stream(
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, u_readers);
+                                write_reader_list(&sock, &u_readers);
                             }
                         } else {
-                            write_reader_list(&stream, u_readers);
+                            write_reader_list(&stream, &u_readers);
                         }
                     }
                 },
@@ -302,10 +302,10 @@ fn handle_stream(
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, u_readers);
+                                write_reader_list(&sock, &u_readers);
                             }
                         } else {
-                            write_reader_list(&stream, u_readers);
+                            write_reader_list(&stream, &u_readers);
                         }
                     }
                 },
@@ -329,10 +329,10 @@ fn handle_stream(
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, u_readers);
+                                write_reader_list(&sock, &u_readers);
                             }
                         } else {
-                            write_reader_list(&stream, u_readers);
+                            write_reader_list(&stream, &u_readers);
                         }
                     }
                 },
@@ -356,10 +356,10 @@ fn handle_stream(
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, u_readers);
+                                write_reader_list(&sock, &u_readers);
                             }
                         } else {
-                            write_reader_list(&stream, u_readers);
+                            write_reader_list(&stream, &u_readers);
                         }
                     }
                 },
@@ -586,7 +586,7 @@ fn handle_stream(
                                         rssi: String::from(read.rssi())
                                     });
                                 }
-                                write_reads(&stream, t_reads);
+                                write_reads(&stream, &t_reads);
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
@@ -611,7 +611,7 @@ fn handle_stream(
                                         rssi: String::from(read.rssi())
                                     });
                                 }
-                                write_reads(&stream, t_reads);
+                                write_reads(&stream, &t_reads);
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
@@ -726,7 +726,7 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
 
 fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) {
     match serde_json::to_writer(stream, &responses::Settings{
-        settings,
+        settings: settings.to_vec(),
     }) {
         Ok(_) => {},
         Err(e) => {
@@ -735,7 +735,7 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) {
     }
 }
 
-fn write_reader_list(stream: &TcpStream, u_readers: MutexGuard<Vec<Box<dyn reader::Reader>>>) {
+fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn reader::Reader>>>) {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         list.push(responses::Reader{
@@ -760,7 +760,7 @@ fn write_reader_list(stream: &TcpStream, u_readers: MutexGuard<Vec<Box<dyn reade
 
 fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) {
     match serde_json::to_writer(stream, &responses::ApiList{
-        apis
+        apis: apis.to_vec()
     }) {
         Ok(_) => (),
         Err(e) => {
@@ -771,7 +771,7 @@ fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) {
 
 fn write_reads(stream: &TcpStream, reads: &Vec<responses::Read>) {
     match serde_json::to_writer(stream, &responses::Reads{
-        list: reads,
+        list: reads.to_vec(),
     }) {
         Ok(_) => (),
         Err(e) => {
@@ -793,7 +793,7 @@ fn write_success(stream: &TcpStream, count: usize) {
 
 fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>) {
     match serde_json::to_writer(stream, &responses::Participants {
-        participants: parts,
+        participants: parts.to_vec(),
     }) {
         Ok(_) => (),
         Err(e) => {

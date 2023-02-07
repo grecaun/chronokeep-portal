@@ -672,22 +672,53 @@ fn test_get_reads() {
     assert!(result.is_ok());
     let reads = result.unwrap();
     assert_eq!(new_reads.len()-2, reads.len());
+    let mut count = 0;
     for outer in reads.iter() {
         let mut found = false;
         for inner in new_reads.iter() {
             if outer.equals(&inner) {
-                found = true
+                found = true;
+                break;
             }
+        }
+        if found {
+            count = count + 1;
         }
         assert!(found)
     }
+    assert_eq!(reads.len(), count);
     drop(sqlite);
     finalize_tests(unique_path);
 }
 
 #[test]
 fn test_get_all_reads() {
-    todo!()
+    let unique_path = "./test_get_all_reads.sqlite";
+    let new_reads = make_reads();
+    let mut sqlite = setup_tests(unique_path);
+    _ = sqlite.save_reads(&new_reads);
+    let results = sqlite.get_all_reads();
+    assert!(results.is_ok());
+    let reads = results.unwrap();
+    // should be a duplicate read in new_reads
+    assert_eq!(new_reads.len() - 1, reads.len());
+    let mut count = 0;
+    for outer in reads.iter() {
+        let mut found = false;
+        for inner in new_reads.iter() {
+            if outer.equals(&inner) {
+                found = true;
+                break;
+            }
+        }
+        if found {
+            count = count + 1;
+        }
+        assert!(found)
+    }
+    assert_eq!(reads.len(), count);
+    drop(sqlite);
+    finalize_tests(unique_path);
 }
 
 #[test]
@@ -699,12 +730,12 @@ fn test_delete_reads() {
     let result = sqlite.delete_reads(2000, 90000);
     assert!(result.is_ok());
     assert_eq!(1, result.unwrap());
-    let reads = sqlite.get_reads(0, 90000).unwrap();
+    let reads = sqlite.get_all_reads().unwrap();
     assert_eq!(count-1, reads.len());
     let result = sqlite.delete_reads(0, 2000);
     assert!(result.is_ok());
     assert_eq!(count-1, result.unwrap());
-    let reads = sqlite.get_reads(0, 90000).unwrap();
+    let reads = sqlite.get_all_reads().unwrap();
     assert_eq!(0, reads.len());
     let result = sqlite.delete_reads(0, 90000);
     assert!(result.is_ok());
@@ -715,7 +746,17 @@ fn test_delete_reads() {
 
 #[test]
 fn test_delete_all_reads() {
-    todo!()
+    let unique_path = "./test_delete_all_reads.sqlite";
+    let new_reads = make_reads();
+    let mut sqlite = setup_tests(unique_path);
+    let count = sqlite.save_reads(&new_reads).unwrap();
+    let result = sqlite.delete_all_reads();
+    assert!(result.is_ok());
+    assert_eq!(count, result.unwrap());
+    let reads = sqlite.get_all_reads().unwrap();
+    assert_eq!(0, reads.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
 }
 
 fn make_participants() -> Vec<participant::Participant> {

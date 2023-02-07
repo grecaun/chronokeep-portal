@@ -1,3 +1,6 @@
+use serde::Serialize;
+
+#[derive(Serialize, Debug, Clone)]
 pub struct Participant {
     id: u64,
     bib: String,

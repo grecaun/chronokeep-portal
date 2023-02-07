@@ -91,19 +91,19 @@ impl crate::reader::Reader for TestReader {
         todo!()
     }
 
-    fn set_nickname(&mut self, name: String) {
+    fn set_nickname(&mut self, _name: String) {
         todo!()
     }
 
-    fn set_kind(&mut self, kind: String) {
+    fn set_kind(&mut self, _kind: String) {
         todo!()
     }
 
-    fn set_ip_address(&mut self, ip_address: String) {
+    fn set_ip_address(&mut self, _ip_address: String) {
         todo!()
     }
 
-    fn set_port(&mut self, port: u16) {
+    fn set_port(&mut self, _port: u16) {
         todo!()
     }
 }

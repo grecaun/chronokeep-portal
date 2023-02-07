@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{objects::setting, network::api};
+use crate::{objects::{setting, participant::Participant}, network::api};
 
 #[derive(Serialize, Debug)]
 #[serde(tag="type", rename_all="camelCase")]
@@ -44,7 +44,7 @@ pub struct Reads {
     pub list: Vec<Read>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all="camelCase")]
 pub struct Read {
     pub id: u64,
@@ -67,4 +67,10 @@ pub struct Success {
 pub struct Time {
     pub local: String,
     pub utc: String,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(tag="type", rename_all="camelCase")]
+pub struct Participants {
+    pub participants: Vec<Participant>
 }
