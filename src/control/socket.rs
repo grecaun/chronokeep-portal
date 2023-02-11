@@ -29,7 +29,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     // Our control port will be semi-random at the start to try to ensure we don't try to get a port in use.
     let control_port = get_available_port();
 
-    let listener = match TcpListener::bind(("127.0.0.1", control_port)) {
+    let listener = match TcpListener::bind(("0.0.0.0", control_port)) {
         Ok(list) => list,
         Err(e) => {
             println!("Error opening listener. {e}");
