@@ -303,6 +303,7 @@ fn connect_reader(
                 String::from(reader.nickname()),
                 String::from(reader.ip_address()),
                 reader.port(),
+                reader::AUTO_CONNECT_FALSE
             );
             match r.connect(mtx, &controls) {
                 Ok(j) => {
@@ -420,7 +421,8 @@ fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQL
                 0,
                 String::from(name),
                 String::from(ip),
-                port
+                port,
+                reader::AUTO_CONNECT_FALSE
             )) {
                 Ok(val) => {
                     println!("Reader saved.");
@@ -485,32 +487,6 @@ fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
             }
             println!("Invalid time value for sighting period specified. Type h for help.");
         },
-        "z" | "zeroconf" => {
-            if let Ok(port) = u16::from_str(value) {
-                let res = sqlite.set_setting(&setting::Setting::new(
-                    String::from(super::SETTING_ZERO_CONF_PORT),
-                    port.to_string()));
-                match res {
-                    Ok(_) => println!("Zero configuration port set to {}.", port),
-                    Err(e) => println!("Unable to set zero configuration port. {e}"),
-                }
-                return;
-            }
-            println!("Invalid port specified. Type h for help.")
-        },
-        "c" | "control" => {
-            if let Ok(port) = u16::from_str(value) {
-                let res = sqlite.set_setting(&setting::Setting::new(
-                    String::from(super::SETTING_CONTROL_PORT),
-                    port.to_string()));
-                match res {
-                    Ok(_) => println!("Control port set to {}.", port),
-                    Err(e) => println!("Unable to set control port. {e}"),
-                }
-                return;
-            }
-            println!("Invalid port specified. Type h for help.")
-        },
         "n" | "name" => {
             let res = sqlite.set_setting(&setting::Setting::new(
                 String::from(super::SETTING_PORTAL_NAME),
@@ -531,8 +507,6 @@ fn change_setting(setting: &str, value: &str, sqlite: &sqlite::SQLite) {
 fn print_help() {
     println!("(s)etting -- Type s or setting to change a setting.  Valid values to change are:");
     println!("    (s)ighting <X>    - Define the period of time where we should ignore any subsequent chip reads after the first. Can be given in number of seconds or (h):MM:ss format.");
-    println!("    (z)eroconf <X>    - Define the port to be used for the zero configuration lookup utility. Useful for determining the IP of this machine. 1-65356");
-    println!("    (c)ontrol  <X>    - Define the port to be used for connecting to the control and information command interfaces. 1-65356");
     println!("    (n)ame     <X>    - Changes the advertised name of this device.");
     println!("(r)eader  -- Type r or reading to deal with readers. Valid values are:");
     println!("    (l)ist            - List all saved readers. Number is used for other commands.");

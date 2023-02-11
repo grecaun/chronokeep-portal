@@ -4,31 +4,67 @@ use chrono::Utc;
 
 use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant}, network::api};
 
+use super::zero_conf::ZeroConf;
+
 pub mod requests;
 pub mod responses;
 
 pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
     // Keepalive is the boolean that tells us if we need to keep running.
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
+
     // Joiners are join handles for threads we spin up.
     let joiners: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
     // Readers are chip readers that are saved.  They may be connected or reading as well.
     let readers: Arc<Mutex<Vec<Box<dyn reader::Reader>>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Control sockets are sockets that are connected and should be relayed any changes in settings / readers / apis
+    // when another socket changes/deletes/adds something.
+    let control_sockets: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
     // Read repeaters are sockets that want reads to be sent to them as they're being saved.
     let read_repeaters: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
     // Sighting repeaters are sockets that want sightings to be sent to them as they're being saved.
     let sighting_repeaters: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
-    // Control sockets are sockets that are connected and should be relayed any changes in settings / readers / apis
-    // when another socket changes/deletes/adds something.
-    let control_sockets: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    
+    // Our control port will be semi-random at the start to try to ensure we don't try to get a port in use.
+    let control_port = get_available_port();
 
-    let listener = match TcpListener::bind(format!("127.0.0.1:{}", controls.control_port)) {
+    let listener = match TcpListener::bind(("127.0.0.1", control_port)) {
         Ok(list) => list,
         Err(e) => {
             println!("Error opening listener. {e}");
             return
         }
     };
+
+    // create our zero configuration udp socket struct
+    let zero = match ZeroConf::new(
+        super::Control {
+            sighting_period: controls.sighting_period.clone(),
+            zero_conf_port: controls.zero_conf_port.clone(),
+            name: controls.name.clone(),
+            chip_type: controls.chip_type.clone(),
+            read_window: controls.read_window.clone(),                    
+        },
+        &control_port,
+        keepalive.clone()
+    ) {
+        Ok(zc) => zc,
+        Err(e) => {
+            println!("Error getting zero conf: {e}");
+            return
+        }
+    };
+
+    // then start the thread and push the join handle to our bunch of handles
+    let z_joiner = thread::spawn(move|| {
+        zero.run_loop();
+    });
+    if let Ok(mut j) = joiners.lock() {
+        j.push(z_joiner);
+    } else {
+        println!("Unable to get joiners lock.");
+    }
 
     // Get all known readers so we can work on them later.
     match sqlite.lock() {
@@ -74,7 +110,6 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_controls = super::Control {
                     sighting_period: controls.sighting_period.clone(),
                     zero_conf_port: controls.zero_conf_port.clone(),
-                    control_port: controls.control_port.clone(),
                     name: controls.name.clone(),
                     chip_type: controls.chip_type.clone(),
                     read_window: controls.read_window.clone(),                    
@@ -95,6 +130,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                         t_stream,
                         t_keepalive,
                         t_controls,
+                        &control_port,
                         t_readers,
                         t_joiners,
                         t_read_repeaters,
@@ -120,6 +156,7 @@ fn handle_stream(
     mut stream: TcpStream,
     keepalive: Arc<Mutex<bool>>,
     mut controls: super::Control,
+    control_port: &u16,
     readers: Arc<Mutex<Vec<Box<dyn reader::Reader>>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     read_reapeaters: Arc<Mutex<Vec<TcpStream>>>,
@@ -168,7 +205,8 @@ fn handle_stream(
                                     0,
                                     name,
                                     ip_address,
-                                    port
+                                    port,
+                                    reader::AUTO_CONNECT_FALSE
                                 );
                                 match sq.save_reader(&tmp) {
                                     Ok(val) => {
@@ -249,6 +287,7 @@ fn handle_stream(
                                             String::from(reader.nickname()),
                                             String::from(reader.ip_address()),
                                             reader.port(),
+                                            reader::AUTO_CONNECT_FALSE
                                         );
                                         match reader.connect(&sqlite, &controls) {
                                             Ok(j) => {
@@ -371,11 +410,9 @@ fn handle_stream(
                 requests::Request::SettingSet { name, value } => {
                     match name.as_str() {
                         super::SETTING_CHIP_TYPE |
-                        super::SETTING_CONTROL_PORT |
                         super::SETTING_PORTAL_NAME |
                         super::SETTING_READ_WINDOW |
-                        super::SETTING_SIGHTING_PERIOD |
-                        super::SETTING_ZERO_CONF_PORT => {
+                        super::SETTING_SIGHTING_PERIOD => {
                             if let Ok(sq) = sqlite.lock() {
                                 match sq.set_setting(&setting::Setting::new(
                                     name,
@@ -416,7 +453,7 @@ fn handle_stream(
                         *ka = false;
                     }
                     // connect to ensure the spawning thread will exit the accept call
-                    _ = TcpStream::connect(format!("127.0.0.1:{}", controls.control_port));
+                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
                 },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
@@ -677,6 +714,18 @@ fn handle_stream(
     }
 }
 
+fn get_available_port() -> u16 {
+    match (4488..5588).find(|port| {
+        match TcpListener::bind(("127.0.0.1", *port)) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }) {
+        Some(port) => port,
+        None => 0
+    }
+}
+
 fn write_error(stream: &TcpStream, message: String) {
     match serde_json::to_writer(stream, &responses::Error{
         message,
@@ -709,8 +758,6 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
         super::SETTING_PORTAL_NAME,
         super::SETTING_READ_WINDOW,
         super::SETTING_SIGHTING_PERIOD,
-        super::SETTING_CONTROL_PORT,
-        super::SETTING_ZERO_CONF_PORT
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

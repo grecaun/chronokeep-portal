@@ -8,6 +8,9 @@ pub const READER_KIND_ZEBRA: &str = "ZEBRA";
 pub const READER_KIND_RFID: &str = "RFID";
 pub const READER_KIND_IMPINJ: &str = "IMPINJ";
 
+pub const AUTO_CONNECT_TRUE: u8 = 1;
+pub const AUTO_CONNECT_FALSE: u8 = 0;
+
 pub trait Reader : Send {
     // get functions for fields
     fn set_id(&mut self, id: i64);
@@ -20,6 +23,8 @@ pub trait Reader : Send {
     fn ip_address(&self) -> &str;
     fn set_port(&mut self, port: u16);
     fn port(&self) -> u16;
+    fn auto_connect(&self) -> u8;
+    fn set_auto_connect(&mut self, auto_connect: u8);
     fn equal(&self, other: &dyn Reader) -> bool;
     fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str>;
     fn disconnect(&mut self) -> Result<(), &'static str>;

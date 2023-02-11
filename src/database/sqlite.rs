@@ -23,6 +23,7 @@ struct TempReader {
     kind: String,
     ip_address: String,
     port: u16,
+    auto_connect: u8,
 }
 
 impl SQLite {
@@ -85,6 +86,7 @@ impl SQLite {
                     kind VARCHAR(50) NOT NULL,
                     ip_address VARCHAR(100) NOT NULL,
                     port INTEGER NOT NULL,
+                    auto_connect INTEGER NOT NULL DEFAULT 0,
                     UNIQUE (nickname) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS chip_reads (
@@ -195,8 +197,8 @@ impl super::Database for SQLite {
             _ => return Err(DBError::DataInsertionError(String::from("unknown reader kind specified")))
         }
         match self.conn.execute(
-            "INSERT INTO readers (nickname, kind, ip_address, port) VALUES (?1, ?2, ?3, ?4);",
-            (reader.nickname(), reader.kind(), reader.ip_address(), reader.port()),
+            "INSERT INTO readers (nickname, kind, ip_address, port, auto_connect) VALUES (?1, ?2, ?3, ?4, ?5);",
+            (reader.nickname(), reader.kind(), reader.ip_address(), reader.port(), reader.auto_connect()),
         ) {
             Ok(_) => return Ok(self.conn.last_insert_rowid()),
             Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
@@ -213,6 +215,7 @@ impl super::Database for SQLite {
                     kind: row.get(2)?,
                     ip_address: row.get(3)?,
                     port: row.get(4)?,
+                    auto_connect: row.get(5)?,
                 })
         }) {
             Ok(r) => {
@@ -223,7 +226,9 @@ impl super::Database for SQLite {
                                 r.id,
                                 r.nickname,
                                 r.ip_address,
-                                r.port)
+                                r.port,
+                                r.auto_connect
+                            )
                         ))
                     },
                     reader::READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
@@ -249,6 +254,7 @@ impl super::Database for SQLite {
                     kind: row.get(2)?,
                     ip_address: row.get(3)?,
                     port: row.get(4)?,
+                    auto_connect: row.get(5)?
                 })
             }) {
                 Ok(r) => r,
@@ -265,7 +271,9 @@ impl super::Database for SQLite {
                                     r.id,
                                     r.nickname,
                                     r.ip_address,
-                                    r.port)
+                                    r.port,
+                                    r.auto_connect
+                                )
                             ))
                         },
                         reader::READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),

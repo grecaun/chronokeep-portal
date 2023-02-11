@@ -15,7 +15,7 @@ impl TestReader {
         nickname: String,
         kind: String,
         ip_address: String,
-        port: u16
+        port: u16,
     ) -> TestReader {
         TestReader {
             id: 0,
@@ -104,6 +104,14 @@ impl crate::reader::Reader for TestReader {
     }
 
     fn set_port(&mut self, _port: u16) {
+        todo!()
+    }
+
+    fn auto_connect(&self) -> u8 {
+        todo!()
+    }
+
+    fn set_auto_connect(&mut self, _auto_connect: u8) {
         todo!()
     }
 }

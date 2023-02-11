@@ -84,6 +84,7 @@ fn setup_v1(path: &str) -> SQLite {
                 kind VARCHAR(50) NOT NULL,
                 ip_address VARCHAR(100) NOT NULL,
                 port INTEGER NOT NULL,
+                auto_connect INTEGER NOT NULL DEFAULT 0,
                 UNIQUE (nickname) ON CONFLICT REPLACE
             );",
             "CREATE TABLE IF NOT EXISTS chip_reads (
@@ -242,7 +243,9 @@ fn test_save_reader() {
         0,
         String::from("zebra-1"),
         String::from("192.168.1.100"),
-        zebra::DEFAULT_ZEBRA_PORT);
+        zebra::DEFAULT_ZEBRA_PORT,
+        reader::AUTO_CONNECT_TRUE
+    );
     let sqlite = setup_tests(unique_path);
     let result = sqlite.save_reader(&original);
     assert!(result.is_ok());
@@ -255,6 +258,7 @@ fn test_save_reader() {
     assert_eq!(original.kind(), first.kind());
     assert_eq!(original.ip_address(), first.ip_address());
     assert_eq!(original.port(), first.port());
+    assert_eq!(original.auto_connect(), first.auto_connect());
     // Test auto update feature of the 
     let updated_ip = "random_ip";
     let updated_port = 12345;
@@ -262,7 +266,8 @@ fn test_save_reader() {
             0,
             String::from(original.nickname()),
             String::from(updated_ip),
-            updated_port
+            updated_port,
+            reader::AUTO_CONNECT_FALSE
         ));
     assert!(result.is_ok());
     // second entry, row id should be 2
@@ -274,12 +279,13 @@ fn test_save_reader() {
     assert_eq!(original.kind(), first.kind());
     assert_eq!(updated_ip, first.ip_address());
     assert_eq!(updated_port, first.port());
+    assert_eq!(reader::AUTO_CONNECT_FALSE, first.auto_connect());
     // Test invalid reader kind
     let result = sqlite.save_reader(&test_reader::TestReader::new(
         String::from(original.nickname()),
         String::from("random_type"),
         String::from(updated_ip),
-        updated_port
+        updated_port,
     ));
     assert!(result.is_err());
     match result {
@@ -301,7 +307,8 @@ fn test_get_reader() {
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
-        zebra::DEFAULT_ZEBRA_PORT + 1
+        zebra::DEFAULT_ZEBRA_PORT + 1,
+        reader::AUTO_CONNECT_FALSE
     );
     let sqlite = setup_tests(unique_path);
     _ = sqlite.save_reader(&original);
@@ -333,7 +340,9 @@ fn test_get_readers() {
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
-        zebra::DEFAULT_ZEBRA_PORT + 1);
+        zebra::DEFAULT_ZEBRA_PORT + 1,
+        reader::AUTO_CONNECT_FALSE
+    );
     let sqlite = setup_tests(unique_path);
     _ = sqlite.save_reader(&original);
     let results = sqlite.get_readers();
@@ -348,7 +357,9 @@ fn test_get_readers() {
             0,
             format!("zebra-{i}"),
             format!("192.168.1.10{i}"),
-            zebra::DEFAULT_ZEBRA_PORT + i));
+            zebra::DEFAULT_ZEBRA_PORT + i,
+            reader::AUTO_CONNECT_FALSE
+        ));
     }
     let results = sqlite.get_readers();
     assert!(results.is_ok());
@@ -371,7 +382,9 @@ fn test_delete_reader() {
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
-        zebra::DEFAULT_ZEBRA_PORT + 1);
+        zebra::DEFAULT_ZEBRA_PORT + 1,
+        reader::AUTO_CONNECT_FALSE
+    );
     let sqlite = setup_tests(unique_path);
     original.set_id(sqlite.save_reader(&original).unwrap());
     let readers = sqlite.get_readers().unwrap();
@@ -394,7 +407,8 @@ fn test_delete_reader() {
             0,
             format!("zebra-{i}"),
             format!("192.168.1.10{i}"),
-            zebra::DEFAULT_ZEBRA_PORT
+            zebra::DEFAULT_ZEBRA_PORT,
+            reader::AUTO_CONNECT_FALSE
         )).unwrap();
         if i == middle {
             middle_ix = ix;

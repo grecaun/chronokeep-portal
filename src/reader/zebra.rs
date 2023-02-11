@@ -13,6 +13,7 @@ pub struct Zebra {
     kind: String,
     ip_address: String,
     port: u16,
+    auto_connect: u8,
 
     pub socket: sync::Mutex<Option<TcpStream>>,
     pub keepalive: Arc<sync::Mutex<bool>>,
@@ -28,6 +29,7 @@ impl Zebra {
         nickname: String,
         ip_address: String,
         port: u16,
+        auto_connect: u8,
     ) -> Zebra {
         Zebra {
             id,
@@ -40,6 +42,7 @@ impl Zebra {
             msg_id: Arc::new(sync::Mutex::new(0)),
             reading: Arc::new(sync::Mutex::new(false)),
             connected: Arc::new(sync::Mutex::new(false)),
+            auto_connect
         }
     }
 }
@@ -67,6 +70,10 @@ impl super::Reader for Zebra {
 
     fn port(&self) -> u16 {
         self.port
+    }
+
+    fn auto_connect(&self) -> u8 {
+        self.auto_connect
     }
 
     fn equal(&self, other: &dyn super::Reader) -> bool {
@@ -327,6 +334,10 @@ impl super::Reader for Zebra {
 
     fn set_port(&mut self, port: u16) {
         self.port = port;
+    }
+
+    fn set_auto_connect(&mut self, auto_connect: u8) {
+        self.auto_connect = auto_connect
     }
 }
 
