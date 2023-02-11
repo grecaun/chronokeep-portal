@@ -1,2 +1,6 @@
 /target
 *.sqlite
+*.pdf
+*.cfg
+*.pcapng
+*.csv
