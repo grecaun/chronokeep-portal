@@ -2,13 +2,14 @@ use std::{net::UdpSocket, sync::{Arc, Mutex}, time::Duration, io::ErrorKind};
 
 use rand::{thread_rng, Rng};
 
-use super::Control;
+use crate::{database::{Database, sqlite}, defaults};
+
+use super::SETTING_PORTAL_NAME;
 
 pub const ZERO_CONF_REQUEST: &str = "[DISCOVER_CHRONO_SERVER_REQUEST]";
-pub const ZERO_CONF_SERVER_COMPAT: &str = "0010"; // 0010 means control only
 
 pub struct ZeroConf {
-    controls: Control,
+    sqlite: Arc<Mutex<sqlite::SQLite>>,
     server_id: String,
     control_port: u16,
     keepalive: Arc<Mutex<bool>>,
@@ -16,15 +17,15 @@ pub struct ZeroConf {
 }
 
 impl ZeroConf {
-    pub fn new(controls: Control, control_port: &u16, keepalive: Arc<Mutex<bool>>) -> Result<ZeroConf, &'static str> {
+    pub fn new(sqlite: Arc<Mutex<sqlite::SQLite>>, control_port: &u16, keepalive: Arc<Mutex<bool>>) -> Result<ZeroConf, &'static str> {
         let chars: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
         let mut server_id = String::from("");
         let mut rng = thread_rng();
         for _ in 0..10 {
             server_id.push(chars[rng.gen_range(0..chars.len())])
         }
-        println!("Server id is {}, port is {}", server_id, controls.zero_conf_port);
-        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", controls.zero_conf_port)) {
+        println!("Zero Conf Server id is {}, port is {}", server_id, defaults::DEFAULT_ZERO_CONF_PORT);
+        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", defaults::DEFAULT_ZERO_CONF_PORT)) {
             Ok(sock) => sock,
             Err(e) => {
                 println!("Something went wrong trying to connect to zero conf port: {e}");
@@ -40,7 +41,7 @@ impl ZeroConf {
         }
         let control_port = *control_port;
         return Ok(ZeroConf {
-            controls,
+            sqlite,
             server_id,
             control_port,
             keepalive,
@@ -66,7 +67,7 @@ impl ZeroConf {
                     match e.kind() {
                         ErrorKind::TimedOut => {},
                         _ => {
-                            println!("Error receiving: {e}");
+                            println!("Zero Conf - Error receiving: {e}");
                         }
                     }
                     continue
@@ -76,7 +77,17 @@ impl ZeroConf {
                 Ok(rcvd) => { 
                     match rcvd {
                         ZERO_CONF_REQUEST => {
-                            let response = format!("[{}|{}|{}|{}]", self.controls.name, self.server_id, self.control_port, ZERO_CONF_SERVER_COMPAT);
+                            let mut response = format!("[{}|{}|{}]", "Unknown", self.server_id, self.control_port);
+                            if let Ok(sq) = self.sqlite.lock() {
+                                match sq.get_setting(SETTING_PORTAL_NAME) {
+                                    Ok(name) => {
+                                        response = format!("[{}|{}|{}]", name.value(), self.server_id, self.control_port)
+                                    }
+                                    Err(e) => {
+                                        println!("Error getting server name: {e}")
+                                    }
+                                }
+                            }
                             match self.socket.send_to(response.as_bytes(), src) {
                                 Ok(num) => {
                                     println!("Sent {response} -- {num} bytes.");

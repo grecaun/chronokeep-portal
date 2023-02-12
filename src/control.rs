@@ -4,6 +4,7 @@ use rand::prelude::random;
 pub mod cli;
 pub mod socket;
 pub mod zero_conf;
+pub mod keepalive;
 
 pub const SETTING_SIGHTING_PERIOD: &str = "SETTING_SIGHTING_PERIOD";
 pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";
@@ -12,7 +13,6 @@ pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
 
 pub struct Control {
     pub sighting_period: u32,
-    pub zero_conf_port: u16,
     pub name: String,
     pub chip_type: String,
     pub read_window: u8,
@@ -22,7 +22,6 @@ impl Control {
     pub fn new(sqlite: &sqlite::SQLite) -> Result<Control, database::DBError> {
         let mut output = Control {
             sighting_period: defaults::DEFAULT_SIGHTING_PERIOD,
-            zero_conf_port: defaults::DEFAULT_ZERO_CONF_PORT,
             name: String::from(""),
             chip_type: String::from(defaults::DEFAULT_CHIP_TYPE),
             read_window: defaults::DEFAULT_READ_WINDOW

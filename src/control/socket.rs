@@ -9,6 +9,10 @@ use super::zero_conf::ZeroConf;
 pub mod requests;
 pub mod responses;
 
+pub const MAX_CONNECTED: usize = 4;
+pub const CONNECTION_TYPE: &str = "chrono_portal";
+pub const CONNECTION_VERS: usize = 1;
+
 pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
     // Keepalive is the boolean that tells us if we need to keep running.
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
@@ -19,12 +23,12 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     let readers: Arc<Mutex<Vec<Box<dyn reader::Reader>>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Control sockets are sockets that are connected and should be relayed any changes in settings / readers / apis
-    // when another socket changes/deletes/adds something.
-    let control_sockets: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    // when another socket changes/deletes/adds something. -- Last spot is reserved for localhost to send shutdown command
+    let control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>> = Arc::new(Mutex::new(Default::default()));
     // Read repeaters are sockets that want reads to be sent to them as they're being saved.
-    let read_repeaters: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    let read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>> = Arc::new(Mutex::new([false;MAX_CONNECTED]));
     // Sighting repeaters are sockets that want sightings to be sent to them as they're being saved.
-    let sighting_repeaters: Arc<Mutex<Vec<TcpStream>>> = Arc::new(Mutex::new(Vec::new()));
+    let sighting_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>> = Arc::new(Mutex::new([false;MAX_CONNECTED]));
     
     // Our control port will be semi-random at the start to try to ensure we don't try to get a port in use.
     let control_port = get_available_port();
@@ -39,13 +43,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
 
     // create our zero configuration udp socket struct
     let zero = match ZeroConf::new(
-        super::Control {
-            sighting_period: controls.sighting_period.clone(),
-            zero_conf_port: controls.zero_conf_port.clone(),
-            name: controls.name.clone(),
-            chip_type: controls.chip_type.clone(),
-            read_window: controls.read_window.clone(),                    
-        },
+        sqlite.clone(),
         &control_port,
         keepalive.clone()
     ) {
@@ -55,13 +53,20 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
             return
         }
     };
-
     // then start the thread and push the join handle to our bunch of handles
     let z_joiner = thread::spawn(move|| {
         zero.run_loop();
     });
+
+    // run a thread for keepalive to check in on threads so we can close them
+    let keep = super::keepalive::KeepAlive::new(control_sockets.clone(), keepalive.clone());
+    let k_joiner = thread::spawn(move|| {
+        keep.run_loop();
+    });
+
     if let Ok(mut j) = joiners.lock() {
         j.push(z_joiner);
+        j.push(k_joiner);
     } else {
         println!("Unable to get joiners lock.");
     }
@@ -109,7 +114,6 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_keepalive = keepalive.clone();
                 let t_controls = super::Control {
                     sighting_period: controls.sighting_period.clone(),
-                    zero_conf_port: controls.zero_conf_port.clone(),
                     name: controls.name.clone(),
                     chip_type: controls.chip_type.clone(),
                     read_window: controls.read_window.clone(),                    
@@ -120,29 +124,61 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_sighting_repeaters = sighting_repeaters.clone();
                 let t_sqlite = sqlite.clone();
                 let t_control_sockets = control_sockets.clone();
+                let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
                     if let Ok(mut c_sockets) = control_sockets.lock() {
-                        c_sockets.push(c_sock);
+                        for i in 0..(MAX_CONNECTED + 1) {
+                            if c_sockets[i].is_none() && i < MAX_CONNECTED {
+                                c_sockets[i] = Some(c_sock);
+                                placed = i;
+                                break;
+                            // Index MAX_CONNECTED is reserved for the system to tell itself to stop running in case of 
+                            // power failure or some other reason the system needs to shut itself off.
+                            } else if i == MAX_CONNECTED && addr.ip().is_loopback() && c_sockets[MAX_CONNECTED].is_none() {
+                                c_sockets[i] = Some(c_sock);
+                                placed = i;
+                                break;
+                            }
+                        }
                     }
-                }
-                let l_joiner = thread::spawn(move|| {
-                    handle_stream(
-                        t_stream,
-                        t_keepalive,
-                        t_controls,
-                        &control_port,
-                        t_readers,
-                        t_joiners,
-                        t_read_repeaters,
-                        t_sighting_repeaters,
-                        t_control_sockets,
-                        t_sqlite
-                    );
-                });
-                if let Ok(mut j) = joiners.lock() {
-                    j.push(l_joiner);
+                    if placed <= MAX_CONNECTED {
+                        let l_joiner = thread::spawn(move|| {
+                            handle_stream(
+                                placed,
+                                t_stream,
+                                t_keepalive,
+                                t_controls,
+                                &control_port,
+                                t_readers,
+                                t_joiners,
+                                t_read_repeaters,
+                                t_sighting_repeaters,
+                                t_control_sockets,
+                                t_sqlite
+                            );
+                        });
+                        if let Ok(mut j) = joiners.lock() {
+                            j.push(l_joiner);
+                        } else {
+                            println!("Unable to get joiners lock.");
+                        }
+                    } else {
+                        match write_error(&stream, String::from("too many connections")) {
+                            Ok(_) => (),
+                            Err(_) => {
+                                println!("error writing to socket")
+                                // TODO break and kill program?
+                            }
+                        }
+                    }
                 } else {
-                    println!("Unable to get joiners lock.");
+                    match write_error(&stream, String::from("unable to clone stream")) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            println!("error writing to socket")
+                            // TODO break and kill program?
+                        }
+                    }
                 }
             },
             Err(e) => {
@@ -153,18 +189,26 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
 }
 
 fn handle_stream(
+    index: usize,
     mut stream: TcpStream,
     keepalive: Arc<Mutex<bool>>,
     mut controls: super::Control,
     control_port: &u16,
     readers: Arc<Mutex<Vec<Box<dyn reader::Reader>>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
-    read_reapeaters: Arc<Mutex<Vec<TcpStream>>>,
-    sighting_repeaters: Arc<Mutex<Vec<TcpStream>>>,
-    control_sockets: Arc<Mutex<Vec<TcpStream>>>,
+    read_reapeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+    sighting_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
 ) {
     let mut data = [0 as u8; 51200];
+    match write_connection_successful(&stream) {
+        Ok(_) => (),
+        Err(_) => {
+            println!("error writing to socket")
+            // TODO break and close this connection?
+        }
+    }
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
@@ -193,7 +237,13 @@ fn handle_stream(
             match cmd {
                 requests::Request::ReaderList => {
                     if let Ok(u_readers) = readers.lock() {
-                        write_reader_list(&stream, &u_readers);
+                        match write_reader_list(&stream, &u_readers) {
+                            Ok(_) => (),
+                            Err(_) => {
+                                println!("error writing to socket")
+                                // TODO break and close this connection?
+                            }
+                        }
                     }
                 },
                 requests::Request::ReaderAdd { name, kind, ip_address, port } => {
@@ -226,21 +276,47 @@ fn handle_stream(
                                             }
                                             if let Ok(c_socks) = control_sockets.lock() {
                                                 for sock in c_socks.iter() {
-                                                    write_reader_list(&sock, &u_readers);
+                                                    if let Some(sock) = sock {
+                                                        match write_reader_list(&sock, &u_readers) {
+                                                            Ok(_) => (),
+                                                            Err(_) => {
+                                                                println!("error writing to socket")
+                                                                // TODO break and close this connection?
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             } else {
-                                                write_reader_list(&stream, &u_readers);
+                                                match write_reader_list(&stream, &u_readers) {
+                                                    Ok(_) => (),
+                                                    Err(_) => {
+                                                        println!("error writing to socket")
+                                                        // TODO break and close this connection?
+                                                    }
+                                                }
                                             }
                                         }
                                     },
                                     Err(e) => {
                                         println!("Error saving reader to database: {e}");
-                                        write_error(&stream, format!("unexpected error saving reader to database: {e}"));
+                                        match write_error(&stream, format!("unexpected error saving reader to database: {e}")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                     },
                                 };
                             },
                             other => {
-                                write_error(&stream, format!("'{}' is not a valid reader type. Valid Types: '{}'", other, reader::READER_KIND_ZEBRA));
+                                match write_error(&stream, format!("'{}' is not a valid reader type. Valid Types: '{}'", other, reader::READER_KIND_ZEBRA)) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                         }
                     }
@@ -261,17 +337,37 @@ fn handle_stream(
                             },
                             Err(e) => {
                                 println!("Error removing database from reader: {e}");
-                                write_error(&stream, format!("unexpected error removing reader from database: {e}"));
+                                match write_error(&stream, format!("unexpected error removing reader from database: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                         }
                     }
                     if let Ok(u_readers) = readers.lock() {
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, &u_readers);
+                                if let Some(sock) = sock {
+                                    match write_reader_list(&sock, &u_readers) {
+                                        Ok(_) => (),
+                                        Err(_) => {
+                                            println!("error writing to socket")
+                                            // TODO break and close this connection?
+                                        }
+                                    }
+                                }
                             }
                         } else {
-                            write_reader_list(&stream, &u_readers);
+                            match write_reader_list(&stream, &u_readers) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    println!("error writing to socket")
+                                    // TODO break and close this connection?
+                                }
+                            }
                         }
                     }
                 },
@@ -297,27 +393,59 @@ fn handle_stream(
                                             },
                                             Err(e) => {
                                                 println!("Error connecting to reader: {e}");
-                                                write_error(&stream, format!("error connecting to reader: {e}"));
+                                                match write_error(&stream, format!("error connecting to reader: {e}")) {
+                                                    Ok(_) => (),
+                                                    Err(_) => {
+                                                        println!("error writing to socket")
+                                                        // TODO break and close this connection?
+                                                    }
+                                                }
                                             }
                                         }
                                         u_readers.push(Box::new(reader));
                                     },
                                     other => {
-                                        write_error(&stream, format!("'{other}' reader type not yet implemented or invalid"));
+                                        match write_error(&stream, format!("'{other}' reader type not yet implemented or invalid")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                         u_readers.push(reader);
                                     }
                                 }
                             },
                             None => {
-                                write_error(&stream, String::from("reader not found"));
+                                match write_error(&stream, String::from("reader not found")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, &u_readers);
+                                if let Some(sock) = sock {
+                                    match write_reader_list(&sock, &u_readers) {
+                                        Ok(_) => (),
+                                        Err(_) => {
+                                            println!("error writing to socket")
+                                            // TODO break and close this connection?
+                                        }
+                                    }
+                                }
                             }
                         } else {
-                            write_reader_list(&stream, &u_readers);
+                            match write_reader_list(&stream, &u_readers) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    println!("error writing to socket")
+                                    // TODO break and close this connection?
+                                }
+                            }
                         }
                     }
                 },
@@ -330,21 +458,47 @@ fn handle_stream(
                                     Ok(_) => {},
                                     Err(e) => {
                                         println!("Error connecting to reader: {e}");
-                                        write_error(&stream, format!("error connecting to reader: {e}"));
+                                        match write_error(&stream, format!("error connecting to reader: {e}")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                     }
                                 }
                                 u_readers.push(reader);
                             },
                             None => {
-                                write_error(&stream, String::from("reader not found"));
+                                match write_error(&stream, String::from("reader not found")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, &u_readers);
+                                if let Some(sock) = sock {
+                                    match write_reader_list(&sock, &u_readers) {
+                                        Ok(_) => (),
+                                        Err(_) => {
+                                            println!("error writing to socket")
+                                            // TODO break and close this connection?
+                                        }
+                                    }
+                                }
                             }
                         } else {
-                            write_reader_list(&stream, &u_readers);
+                            match write_reader_list(&stream, &u_readers) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    println!("error writing to socket")
+                                    // TODO break and close this connection?
+                                }
+                            }
                         }
                     }
                 },
@@ -357,21 +511,47 @@ fn handle_stream(
                                     Ok(_) => {},
                                     Err(e) => {
                                         println!("Error connecting to reader: {e}");
-                                        write_error(&stream, format!("error connecting to reader: {e}"));
+                                        match write_error(&stream, format!("error connecting to reader: {e}")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                     }
                                 }
                                 u_readers.push(reader);
                             },
                             None => {
-                                write_error(&stream, String::from("reader not found"));
+                                match write_error(&stream, String::from("reader not found")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, &u_readers);
+                                if let Some(sock) = sock {
+                                    match write_reader_list(&sock, &u_readers) {
+                                        Ok(_) => (),
+                                        Err(_) => {
+                                            println!("error writing to socket")
+                                            // TODO break and close this connection?
+                                        }
+                                    }
+                                }
                             }
                         } else {
-                            write_reader_list(&stream, &u_readers);
+                            match write_reader_list(&stream, &u_readers) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    println!("error writing to socket")
+                                    // TODO break and close this connection?
+                                }
+                            }
                         }
                     }
                 },
@@ -384,27 +564,59 @@ fn handle_stream(
                                     Ok(_) => {},
                                     Err(e) => {
                                         println!("Error connecting to reader: {e}");
-                                        write_error(&stream, format!("error connecting to reader: {e}"));
+                                        match write_error(&stream, format!("error connecting to reader: {e}")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                     }
                                 }
                                 u_readers.push(reader);
                             },
                             None => {
-                                write_error(&stream, String::from("reader not found"));
+                                match write_error(&stream, String::from("reader not found")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         };
                         if let Ok(c_socks) = control_sockets.lock() {
                             for sock in c_socks.iter() {
-                                write_reader_list(&sock, &u_readers);
+                                if let Some(sock) = sock {
+                                    match write_reader_list(&sock, &u_readers) {
+                                        Ok(_) => (),
+                                        Err(_) => {
+                                            println!("error writing to socket")
+                                            // TODO break and close this connection?
+                                        }
+                                    }
+                                }
                             }
                         } else {
-                            write_reader_list(&stream, &u_readers);
+                            match write_reader_list(&stream, &u_readers) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    println!("error writing to socket")
+                                    // TODO break and close this connection?
+                                }
+                            }
                         }
                     }
                 },
                 requests::Request::SettingsGet => {
                     if let Ok(sq) = sqlite.lock() {
-                        write_settings(&stream, &get_settings(&sq));
+                        match write_settings(&stream, &get_settings(&sq)) {
+                            Ok(_) => (),
+                            Err(_) => {
+                                println!("error writing to socket")
+                                // TODO break and close this connection?
+                            }
+                        }
                     }
                 },
                 requests::Request::SettingSet { name, value } => {
@@ -429,22 +641,48 @@ fn handle_stream(
                                         let settings = get_settings(&sq);
                                         if let Ok(c_socks) = control_sockets.lock() {
                                             for sock in c_socks.iter() {
-                                                write_settings(&sock, &settings);
+                                                if let Some(sock) = sock {
+                                                    match write_settings(&sock, &settings) {
+                                                        Ok(_) => (),
+                                                        Err(_) => {
+                                                            println!("error writing to socket")
+                                                            // TODO break and close this connection?
+                                                        }
+                                                    }
+                                                }
                                             }
                                         } else {
-                                            write_settings(&stream, &settings);
+                                            match write_settings(&stream, &settings) {
+                                                Ok(_) => (),
+                                                Err(_) => {
+                                                    println!("error writing to socket")
+                                                    // TODO break and close this connection?
+                                                }
+                                            }
                                         }
                                     },
                                     Err(e) => {
                                         println!("Error saving setting. {e}");
-                                        write_error(&stream, format!("error saving setting: {e}"));
+                                        match write_error(&stream, format!("error saving setting: {e}")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                     }
                                 }
                             }
                         },
                         other => {
                             println!("'{other}' is not a valid setting");
-                            write_error(&stream, format!("'{other}' is not a valid setting"));
+                            match write_error(&stream, format!("'{other}' is not a valid setting")) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    println!("error writing to socket")
+                                    // TODO break and close this connection?
+                                }
+                            }
                         }
                     }
                 },
@@ -459,11 +697,23 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
-                                write_api_list(&stream, &apis);
+                                match write_api_list(&stream, &apis) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("error getting api list. {e}");
-                                write_error(&stream, format!("error getting api list: {e}"));
+                                match write_error(&stream, format!("error getting api list: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
@@ -499,29 +749,61 @@ fn handle_stream(
                                                 Ok(apis) => {
                                                     if let Ok(c_socks) = control_sockets.lock() {
                                                         for sock in c_socks.iter() {
-                                                            write_api_list(&sock, &apis);
+                                                            if let Some(sock) = sock {
+                                                                match write_api_list(&sock, &apis) {
+                                                                    Ok(_) => (),
+                                                                    Err(_) => {
+                                                                        println!("error writing to socket")
+                                                                        // TODO break and close this connection?
+                                                                    }
+                                                                }
+                                                            }
                                                         }
                                                     } else {
-                                                        write_api_list(&stream, &apis);
+                                                        match write_api_list(&stream, &apis) {
+                                                            Ok(_) => (),
+                                                            Err(_) => {
+                                                                println!("error writing to socket")
+                                                                // TODO break and close this connection?
+                                                            }
+                                                        }
                                                     }
                                                 },
                                                 Err(e) => {
                                                     println!("error getting api list. {e}");
-                                                    write_error(&stream, format!("error getting api list: {e}"));
+                                                    match write_error(&stream, format!("error getting api list: {e}")) {
+                                                        Ok(_) => (),
+                                                        Err(_) => {
+                                                            println!("error writing to socket")
+                                                            // TODO break and close this connection?
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     },
                                     Err(e) => {
                                         println!("Error saving api {e}");
-                                        write_error(&stream, format!("error saving api {e}"));
+                                        match write_error(&stream, format!("error saving api {e}")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                     }
                                 }
                             }
                         },
                         other => {
                             println!("'{other}' is not a valid api type");
-                            write_error(&stream, format!("'{other}' is not a valid api type"));
+                            match write_error(&stream, format!("'{other}' is not a valid api type")) {
+                                Ok(_) => (),
+                                Err(_) => {
+                                    println!("error writing to socket")
+                                    // TODO break and close this connection?
+                                }
+                            }
                         }
                     }
                 },
@@ -534,22 +816,48 @@ fn handle_stream(
                                         Ok(apis) => {
                                             if let Ok(c_socks) = control_sockets.lock() {
                                                 for sock in c_socks.iter() {
-                                                    write_api_list(&sock, &apis);
+                                                    if let Some(sock) = sock {
+                                                        match write_api_list(&sock, &apis) {
+                                                            Ok(_) => (),
+                                                            Err(_) => {
+                                                                println!("error writing to socket")
+                                                                // TODO break and close this connection?
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             } else {
-                                                write_api_list(&stream, &apis);
+                                                match write_api_list(&stream, &apis) {
+                                                    Ok(_) => (),
+                                                    Err(_) => {
+                                                        println!("error writing to socket")
+                                                        // TODO break and close this connection?
+                                                    }
+                                                }
                                             }
                                         },
                                         Err(e) => {
                                             println!("error getting api list. {e}");
-                                            write_error(&stream, format!("error getting api list: {e}"));
+                                            match write_error(&stream, format!("error getting api list: {e}")) {
+                                                Ok(_) => (),
+                                                Err(_) => {
+                                                    println!("error writing to socket")
+                                                    // TODO break and close this connection?
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             },
                             Err(e) => {
                                 println!("Error deleting api {e}");
-                                write_error(&stream, format!("error deleting api: {e}"))
+                                match write_error(&stream, format!("error deleting api: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
@@ -571,11 +879,23 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_participants() {
                             Ok(parts) => {
-                                write_participants(&stream, &parts);
+                                match write_participants(&stream, &parts) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("error getting participants from database. {e}");
-                                write_error(&stream, format!("error getting participants from database: {e}"));
+                                match write_error(&stream, format!("error getting participants from database: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
@@ -588,21 +908,47 @@ fn handle_stream(
                                     Ok(parts) => {
                                         if let Ok(c_socks) = control_sockets.lock() {
                                             for sock in c_socks.iter() {
-                                                write_participants(&sock, &parts);
+                                                if let Some(sock) = sock {
+                                                    match write_participants(&sock, &parts) {
+                                                        Ok(_) => (),
+                                                        Err(_) => {
+                                                            println!("error writing to socket")
+                                                            // TODO break and close this connection?
+                                                        }
+                                                    }
+                                                }
                                             }
                                         } else {
-                                            write_participants(&stream, &parts);
+                                            match write_participants(&stream, &parts) {
+                                                Ok(_) => (),
+                                                Err(_) => {
+                                                    println!("error writing to socket")
+                                                    // TODO break and close this connection?
+                                                }
+                                            }
                                         }
                                     },
                                     Err(e) => {
                                         println!("error getting participants. {e}");
-                                        write_error(&stream, format!("error getting participants: {e}"));
+                                        match write_error(&stream, format!("error getting participants: {e}")) {
+                                            Ok(_) => (),
+                                            Err(_) => {
+                                                println!("error writing to socket")
+                                                // TODO break and close this connection?
+                                            }
+                                        }
                                     }
                                 }
                             },
                             Err(e) => {
                                 println!("Error deleting participants. {e}");
-                                write_error(&stream, format!("error deleting participants: {e}"));
+                                match write_error(&stream, format!("error deleting participants: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
@@ -623,11 +969,23 @@ fn handle_stream(
                                         rssi: String::from(read.rssi())
                                     });
                                 }
-                                write_reads(&stream, &t_reads);
+                                match write_reads(&stream, &t_reads) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
-                                write_error(&stream, format!("error getting reads: {e}"));
+                                match write_error(&stream, format!("error getting reads: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
@@ -648,11 +1006,23 @@ fn handle_stream(
                                         rssi: String::from(read.rssi())
                                     });
                                 }
-                                write_reads(&stream, &t_reads);
+                                match write_reads(&stream, &t_reads) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
-                                write_error(&stream, format!("error getting reads: {e}"));
+                                match write_error(&stream, format!("error getting reads: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
@@ -661,11 +1031,23 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_reads(start_seconds, end_seconds) {
                             Ok(count) => {
-                                write_success(&stream, count);
+                                match write_success(&stream, count) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error deleting reads. {e}");
-                                write_error(&stream, format!("error deleting reads: {e}"));
+                                match write_error(&stream, format!("error deleting reads: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
@@ -674,17 +1056,35 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_all_reads() {
                             Ok(count) => {
-                                write_success(&stream, count);
+                                match write_success(&stream, count) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error deleting reads. {e}");
-                                write_error(&stream, format!("error deleting reads: {e}"));
+                                match write_error(&stream, format!("error deleting reads: {e}")) {
+                                    Ok(_) => (),
+                                    Err(_) => {
+                                        println!("error writing to socket")
+                                        // TODO break and close this connection?
+                                    }
+                                }
                             }
                         }
                     }
                 },
                 requests::Request::TimeGet => {
-                    write_time(&stream);
+                    match write_time(&stream) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            println!("error writing to socket")
+                            // TODO break and close this connection?
+                        }
+                    }
                 },
                 /*
                 requests::Request::TimeSet { time } => {
@@ -693,17 +1093,29 @@ fn handle_stream(
                     }
                 }, */
                 requests::Request::Subscribe { reads, sightings } => {
-                    if reads {
-                        if let Ok(mut repeaters) = read_reapeaters.lock() {
-                            if let Ok(t_stream) = stream.try_clone() {
-                                repeaters.push(t_stream);
-                            }
+                    let mut message:String = String::from("");
+                    if let Ok(mut repeaters) = read_reapeaters.lock() {
+                        if (repeaters[index] == true && reads == true)
+                        || (repeaters[index] == false && reads == false) {
+                            message = format!("reads already set to {reads}")
+                        } else {
+                            repeaters[index] = reads
                         }
                     }
-                    if sightings {
-                        if let Ok(mut repeaters) = sighting_repeaters.lock() {
-                            if let Ok(t_stream) = stream.try_clone() {
-                                repeaters.push(t_stream);
+                    if let Ok(mut repeaters) = sighting_repeaters.lock() {
+                        if (repeaters[index] == true && sightings == true)
+                        || (repeaters[index] == false && sightings == false) {
+                            message = if message.len() > 0 {format!("{message} sightings already set to {sightings}")} else {format!("sightings already set to {sightings}")}
+                        } else {
+                            repeaters[index] = sightings
+                        }
+                    }
+                    if message.len() > 0 {
+                        match write_error(&stream, message) {
+                            Ok(_) => (),
+                            Err(_) => {
+                                println!("error writing to socket")
+                                // TODO break and close this connection?
                             }
                         }
                     }
@@ -726,28 +1138,30 @@ fn get_available_port() -> u16 {
     }
 }
 
-fn write_error(stream: &TcpStream, message: String) {
-    match serde_json::to_writer(stream, &responses::Error{
+fn write_error(stream: &TcpStream, message: String) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::Error{
         message,
     }) {
-        Ok(_) => {},
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to socket. {e}");
+            println!("1/ Something went wrong writing to socket. {e}");
+            Err("error writing to socket")
         }
     }
 }
 
-fn write_time(stream: &TcpStream) {
+fn write_time(stream: &TcpStream) -> Result<(), &'static str> {
     let time = Utc::now();
     let utc = time.naive_utc();
     let local = time.naive_local();
-    match serde_json::to_writer(stream, &responses::Time{
+    match serde_json::to_writer(stream, &responses::Responses::Time{
         local: local.format("%Y-%m-%d %H:%M:%S").to_string(),
         utc: utc.format("%Y-%m-%d %H:%M:%S").to_string(),
     }) {
-        Ok(_) => (),
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to socket. {e}");
+            println!("2/ Something went wrong writing to socket. {e}");
+            Err("error writing to socket")
         }
     }
 }
@@ -771,18 +1185,19 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
     settings
 }
 
-fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) {
-    match serde_json::to_writer(stream, &responses::Settings{
+fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::Settings{
         settings: settings.to_vec(),
     }) {
-        Ok(_) => {},
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to socket. {e}");
+            println!("3/ Something went wrong writing to socket. {e}");
+            Err("error writing to socket")
         }
     }
 }
 
-fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn reader::Reader>>>) {
+fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn reader::Reader>>>) -> Result<(), &'static str> {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         list.push(responses::Reader{
@@ -795,56 +1210,84 @@ fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn read
             connected: r.is_connected(),
         })
     };
-    match serde_json::to_writer(stream, &responses::Readers{
+    match serde_json::to_writer(stream, &responses::Responses::Readers{
         readers: list,
     }) {
-        Ok(_) => {},
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to socket. {e}");
+            println!("4/ Something went wrong writing to socket. {e}");
+            Err("error writing to socket")
         }
     }
 }
 
-fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) {
-    match serde_json::to_writer(stream, &responses::ApiList{
+fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::ApiList{
         apis: apis.to_vec()
     }) {
-        Ok(_) => (),
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to socket. {e}");
+            println!("5/ Something went wrong writing to socket. {e}");
+            Err("error writing to socket")
         }
     }
 }
 
-fn write_reads(stream: &TcpStream, reads: &Vec<responses::Read>) {
-    match serde_json::to_writer(stream, &responses::Reads{
+fn write_reads(stream: &TcpStream, reads: &Vec<responses::Read>) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::Reads{
         list: reads.to_vec(),
     }) {
-        Ok(_) => (),
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to socket. {e}");
+            println!("6/ Something went wrong writing to socket. {e}");
+            Err("error writing to socket")
         }
     }
 }
 
-fn write_success(stream: &TcpStream, count: usize) {
-    match serde_json::to_writer(stream, &responses::Success {
+fn write_success(stream: &TcpStream, count: usize) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::Success {
         count
     }) {
-        Ok(_) => (),
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to socket. {e}");
+            println!("7/ Something went wrong writing to socket. {e}");
+            Err("error writing to socket")
         }
     }
 }
 
-fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>) {
-    match serde_json::to_writer(stream, &responses::Participants {
+fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::Participants {
         participants: parts.to_vec(),
     }) {
-        Ok(_) => (),
+        Ok(_) => Ok(()),
         Err(e) => {
-            println!("Something went wrong writing to the socket. {e}");
+            println!("8/ Something went wrong writing to the socket. {e}");
+            Err("error writing to socket")
+        }
+    }
+}
+
+fn write_connection_successful(stream: &TcpStream) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
+        kind: String::from(CONNECTION_TYPE),
+        version: CONNECTION_VERS
+    }) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            println!("9/ Something went wrong writing to the socket. {e}");
+            Err("error writing to socket")
+        }
+    }
+}
+
+pub fn write_keepalive(stream: &TcpStream) -> Result<(), &'static str> {
+    match serde_json::to_writer(stream, &responses::Responses::Keepalive{}) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            println!("10/ Something went wrong writing to the socket. {e}");
+            Err("error writing to socket")
         }
     }
 }

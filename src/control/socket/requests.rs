@@ -1,9 +1,11 @@
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
-#[serde(tag="command", rename_all="camelCase")]
+#[serde(tag="command", rename_all="snake_case")]
 pub enum Request {
     Unknown,
+    Connect,
+    KeepaliveAck,
     ReaderList,
     ReaderAdd {
         name: String,
