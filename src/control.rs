@@ -4,7 +4,6 @@ use rand::prelude::random;
 pub mod cli;
 pub mod socket;
 pub mod zero_conf;
-pub mod keepalive;
 
 pub const SETTING_SIGHTING_PERIOD: &str = "SETTING_SIGHTING_PERIOD";
 pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";

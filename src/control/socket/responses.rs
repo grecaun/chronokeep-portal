@@ -2,6 +2,8 @@ use serde::Serialize;
 
 use crate::{objects::{setting, participant::Participant}, network::api};
 
+use super::errors;
+
 #[derive(Serialize, Debug)]
 #[serde(tag="command", rename_all="snake_case")]
 pub enum Responses {
@@ -9,7 +11,7 @@ pub enum Responses {
         readers: Vec<Reader>,
     },
     Error {
-        message: String,
+        error: errors::Errors,
     },
     Settings {
         settings: Vec<setting::Setting>,
