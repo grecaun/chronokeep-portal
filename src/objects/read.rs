@@ -1,9 +1,13 @@
+use serde::Serialize;
+
 pub const READ_STATUS_UNUSED: u8 = 0;
 pub const READ_STATUS_USED: u8 = 1;
 pub const READ_STATUS_TOO_SOON: u8 = 3;
 
 pub const READ_UPLOADED_FALSE: u8 = 0;
 
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all="snake_case")]
 pub struct Read {
     // ID should be implemented database side.
     id: u64,
@@ -15,7 +19,10 @@ pub struct Read {
     reader: String,
     rssi: String,
     // Status will be used for when the system processes reads.
+    // do not serialize these fields
+    #[serde(skip_serializing)]
     status: u8,
+    #[serde(skip_serializing)]
     uploaded: u8,
 }
 

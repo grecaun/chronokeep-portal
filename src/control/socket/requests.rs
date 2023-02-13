@@ -5,6 +5,7 @@ use serde::Deserialize;
 pub enum Request {
     Unknown,
     Connect,
+    Disconnect,
     KeepaliveAck,
     ReaderList,
     ReaderAdd {

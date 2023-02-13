@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{objects::{setting, participant::Participant}, network::api};
+use crate::{objects::{setting, participant::Participant, sighting::Sighting, read}, network::api};
 
 use super::errors;
 
@@ -20,7 +20,7 @@ pub enum Responses {
         apis: Vec<api::Api>,
     },
     Reads {
-        list: Vec<Read>,
+        list: Vec<read::Read>,
     },
     Success {
         count: usize,
@@ -31,6 +31,9 @@ pub enum Responses {
     },
     Participants {
         participants: Vec<Participant>,
+    },
+    Sightings {
+        sightings: Vec<Sighting>,
     },
     ConnectionSuccessful {
         kind: String,
@@ -49,16 +52,4 @@ pub struct Reader {
     pub port: u16,
     pub reading: Option<bool>,
     pub connected: Option<bool>,
-}
-
-#[derive(Serialize, Debug, Clone)]
-#[serde(rename_all="snake_case")]
-pub struct Read {
-    pub id: u64,
-    pub chip: String,
-    pub seconds: u64,
-    pub milliseconds: u32,
-    pub antenna: u32,
-    pub reader: String,
-    pub rssi: String
 }

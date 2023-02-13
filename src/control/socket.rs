@@ -2,7 +2,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 
 use chrono::Utc;
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant}, network::api};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read}, network::api};
 
 use super::zero_conf::ZeroConf;
 
@@ -736,19 +736,7 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_reads(start_seconds, end_seconds) {
                             Ok(reads) => {
-                                let mut t_reads: Vec<responses::Read> = Vec::new();
-                                for read in reads {
-                                    t_reads.push(responses::Read {
-                                        id: read.id(),
-                                        chip: String::from(read.chip()),
-                                        seconds: read.seconds(),
-                                        milliseconds: read.milliseconds(),
-                                        antenna: read.antenna(),
-                                        reader: String::from(read.reader()),
-                                        rssi: String::from(read.rssi())
-                                    });
-                                }
-                                no_error = write_reads(&stream, &t_reads);
+                                no_error = write_reads(&stream, &reads);
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
@@ -763,19 +751,7 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_all_reads() {
                             Ok(reads) => {
-                                let mut t_reads: Vec<responses::Read> = Vec::new();
-                                for read in reads {
-                                    t_reads.push(responses::Read {
-                                        id: read.id(),
-                                        chip: String::from(read.chip()),
-                                        seconds: read.seconds(),
-                                        milliseconds: read.milliseconds(),
-                                        antenna: read.antenna(),
-                                        reader: String::from(read.reader()),
-                                        rssi: String::from(read.rssi())
-                                    });
-                                }
-                                no_error = write_reads(&stream, &t_reads);
+                                no_error = write_reads(&stream, &reads);
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
@@ -983,7 +959,7 @@ fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
     }
 }
 
-fn write_reads(stream: &TcpStream, reads: &Vec<responses::Read>) -> bool {
+fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
     match serde_json::to_writer(stream, &responses::Responses::Reads{
         list: reads.to_vec(),
     }) {

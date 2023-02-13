@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 #[derive(Serialize, Debug)]
-#[serde(tag="error_type", rename_all="snake_case")]
+#[serde(tag="error_type", rename_all="SCREAMING_SNAKE_CASE")]
 pub enum Errors {
     UnknownCommand,
     TooManyConnections,
