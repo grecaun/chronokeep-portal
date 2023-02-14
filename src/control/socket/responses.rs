@@ -36,10 +36,12 @@ pub enum Responses {
         sightings: Vec<Sighting>,
     },
     ConnectionSuccessful {
+        name: String,
         kind: String,
         version: usize,
     },
-    Keepalive
+    Keepalive,
+    Disconnect,
 }
 
 #[derive(Serialize, Debug)]

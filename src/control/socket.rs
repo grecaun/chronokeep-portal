@@ -2,7 +2,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 
 use chrono::Utc;
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read}, network::api};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read}, network::api, control::SETTING_PORTAL_NAME};
 
 use super::zero_conf::ZeroConf;
 
@@ -240,8 +240,20 @@ fn handle_stream(
                 },
             };
             match cmd {
+                requests::Request::Disconnect => {
+                    // client requested to close the connection
+                    _ = write_disconnect(&stream);
+                    // tell then to close it and then break the loop to exit the thread
+                    break;
+                },
                 requests::Request::Connect => {
-                    no_error = write_connection_successful(&stream);
+                    let mut name = String::from("Unknown");
+                    if let Ok(sq) = sqlite.lock() {
+                        if let Ok(set) = sq.get_setting(SETTING_PORTAL_NAME) {
+                            name = String::from(set.value())
+                        }
+                    }
+                    no_error = write_connection_successful(&stream, name);
                 },
                 requests::Request::KeepaliveAck => {
 
@@ -494,17 +506,14 @@ fn handle_stream(
                         no_error = write_settings(&stream, &get_settings(&sq));
                     }
                 },
-                requests::Request::SettingSet { name, value } => {
-                    match name.as_str() {
+                requests::Request::SettingSet { setting } => {
+                    match setting.name() {
                         super::SETTING_CHIP_TYPE |
                         super::SETTING_PORTAL_NAME |
                         super::SETTING_READ_WINDOW |
                         super::SETTING_SIGHTING_PERIOD => {
                             if let Ok(sq) = sqlite.lock() {
-                                match sq.set_setting(&setting::Setting::new(
-                                    name,
-                                    value
-                                )) {
+                                match sq.set_setting(&setting) {
                                     Ok(_) => {
                                         controls = match super::Control::new(&sq) {
                                             Ok(c) => c,
@@ -832,7 +841,11 @@ fn handle_stream(
             // if we haven't received a message in 2 x the keep alive period then we've
             // probably disconnected
             if last_received_at + (2*KEEPALIVE_INTERVAL_SECONDS) < time.as_secs() {
-                no_error = false
+                // write disconnect to tell the client what's going on if they're still
+                // actually listening
+                _ = write_disconnect(&stream);
+                // and we can exit the loop because we're definitely disconnecting
+                break;
             // send a keepalive message if we haven't heard from the socket in KEEPALIVE_INTERVAL_SECONDS
             } else if last_received_at + KEEPALIVE_INTERVAL_SECONDS < time.as_secs() {
                 no_error = write_keepalive(&stream) && no_error;
@@ -995,8 +1008,9 @@ fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>)
     }
 }
 
-fn write_connection_successful(stream: &TcpStream) -> bool {
+fn write_connection_successful(stream: &TcpStream, name: String) -> bool {
     match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
+        name,
         kind: String::from(CONNECTION_TYPE),
         version: CONNECTION_VERS
     }) {
@@ -1009,10 +1023,20 @@ fn write_connection_successful(stream: &TcpStream) -> bool {
 }
 
 pub fn write_keepalive(stream: &TcpStream) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Keepalive{}) {
+    match serde_json::to_writer(stream, &responses::Responses::Keepalive) {
         Ok(_) => true,
         Err(e) => {
             println!("10/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    }
+}
+
+pub fn write_disconnect(stream: &TcpStream) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Disconnect) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("11/ Something went wrong writing to the socket. {e}");
             false
         }
     }
