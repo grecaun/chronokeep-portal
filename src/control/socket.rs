@@ -1,4 +1,4 @@
-use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown}, io::{Read, ErrorKind}, time::{SystemTime, UNIX_EPOCH, Duration}};
+use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}};
 
 use chrono::Utc;
 
@@ -233,7 +233,10 @@ fn handle_stream(
                 }
             };
             let cmd: requests::Request = match serde_json::from_slice(&data[0..size]) {
-                Ok(data) => data,
+                Ok(data) => {
+                    println!("Received message: {:?}", data);
+                    data
+                },
                 Err(e) => {
                     println!("Error deserializing request. {e}");
                     requests::Request::Unknown
@@ -242,25 +245,35 @@ fn handle_stream(
             match cmd {
                 requests::Request::Disconnect => {
                     // client requested to close the connection
-                    _ = write_disconnect(&stream);
+                    _ = write_disconnect(&mut stream);
                     // tell then to close it and then break the loop to exit the thread
                     break;
                 },
-                requests::Request::Connect => {
+                requests::Request::Connect { reads, sightings } => {
                     let mut name = String::from("Unknown");
                     if let Ok(sq) = sqlite.lock() {
                         if let Ok(set) = sq.get_setting(SETTING_PORTAL_NAME) {
                             name = String::from(set.value())
                         }
                     }
-                    no_error = write_connection_successful(&stream, name);
+                    if let Ok(mut repeaters) = read_reapeaters.lock() {
+                        repeaters[index] = reads;
+                    }
+                    if let Ok(mut repeaters) = sighting_repeaters.lock() {
+                        repeaters[index] = sightings;
+                    }
+                    if let Ok(u_readers) = readers.lock() {
+                        no_error = write_connection_successful(&mut stream, name, reads, sightings, &u_readers);
+                    } else {
+                        no_error = write_error(&mut stream, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
+                    }
                 },
                 requests::Request::KeepaliveAck => {
 
                 },
                 requests::Request::ReaderList => {
                     if let Ok(u_readers) = readers.lock() {
-                        no_error = write_reader_list(&stream, &u_readers);
+                        no_error = write_reader_list(&mut stream, &u_readers);
                     }
                 },
                 requests::Request::ReaderAdd { name, kind, ip_address, port } => {
@@ -859,6 +872,13 @@ fn handle_stream(
     }
     // if we've exited the loop we should ensure the program knows we can close this stream
     println!("Closing socket for index {index}.");
+    // unsubscribe to notifications
+    if let Ok(mut repeaters) = read_reapeaters.lock() {
+        repeaters[index] = false;
+    }
+    if let Ok(mut repeaters) = sighting_repeaters.lock() {
+        repeaters[index] = false;
+    }
     stream.shutdown(Shutdown::Both).unwrap();
     if let Ok(mut c_socks) = control_sockets.lock() {
         c_socks[index] = None;
@@ -867,7 +887,7 @@ fn handle_stream(
 
 fn get_available_port() -> u16 {
     match (4488..5588).find(|port| {
-        match TcpListener::bind(("127.0.0.1", *port)) {
+        match TcpListener::bind(("0.0.0.0", *port)) {
             Ok(_) => true,
             Err(_) => false,
         }
@@ -878,7 +898,7 @@ fn get_available_port() -> u16 {
 }
 
 fn write_error(stream: &TcpStream, error: errors::Errors) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Error{
+    let output = match serde_json::to_writer(stream, &responses::Responses::Error{
         error,
     }) {
         Ok(_) => true,
@@ -886,14 +906,23 @@ fn write_error(stream: &TcpStream, error: errors::Errors) -> bool {
             println!("1/ Something went wrong writing to socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("1/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 fn write_time(stream: &TcpStream) -> bool {
     let time = Utc::now();
     let utc = time.naive_utc();
     let local = time.naive_local();
-    match serde_json::to_writer(stream, &responses::Responses::Time{
+    let output = match serde_json::to_writer(stream, &responses::Responses::Time{
         local: local.format("%Y-%m-%d %H:%M:%S").to_string(),
         utc: utc.format("%Y-%m-%d %H:%M:%S").to_string(),
     }) {
@@ -902,7 +931,16 @@ fn write_time(stream: &TcpStream) -> bool {
             println!("2/ Something went wrong writing to socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("2/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
@@ -925,7 +963,7 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
 }
 
 fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Settings{
+    let output = match serde_json::to_writer(stream, &responses::Responses::Settings{
         settings: settings.to_vec(),
     }) {
         Ok(_) => true,
@@ -933,7 +971,16 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool 
             println!("3/ Something went wrong writing to socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("3/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn reader::Reader>>>) -> bool {
@@ -949,7 +996,7 @@ fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn read
             connected: r.is_connected(),
         })
     };
-    match serde_json::to_writer(stream, &responses::Responses::Readers{
+    let output = match serde_json::to_writer(stream, &responses::Responses::Readers{
         readers: list,
     }) {
         Ok(_) => true,
@@ -957,11 +1004,20 @@ fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn read
             println!("4/ Something went wrong writing to socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("4/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::ApiList{
+    let output = match serde_json::to_writer(stream, &responses::Responses::ApiList{
         apis: apis.to_vec()
     }) {
         Ok(_) => true,
@@ -969,11 +1025,20 @@ fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
             println!("5/ Something went wrong writing to socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("5/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Reads{
+    let output = match serde_json::to_writer(stream, &responses::Responses::Reads{
         list: reads.to_vec(),
     }) {
         Ok(_) => true,
@@ -981,11 +1046,20 @@ fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
             println!("6/ Something went wrong writing to socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("6/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 fn write_success(stream: &TcpStream, count: usize) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Success {
+    let output = match serde_json::to_writer(stream, &responses::Responses::Success {
         count
     }) {
         Ok(_) => true,
@@ -993,11 +1067,20 @@ fn write_success(stream: &TcpStream, count: usize) -> bool {
             println!("7/ Something went wrong writing to socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("7/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Participants {
+    let output = match serde_json::to_writer(stream, &responses::Responses::Participants {
         participants: parts.to_vec(),
     }) {
         Ok(_) => true,
@@ -1005,39 +1088,90 @@ fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>)
             println!("8/ Something went wrong writing to the socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("8/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
-fn write_connection_successful(stream: &TcpStream, name: String) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
+fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, sightings: bool, u_readers: &MutexGuard<Vec<Box<dyn reader::Reader>>>) -> bool {
+    let mut list: Vec<responses::Reader> = Vec::new();
+    for r in u_readers.iter() {
+        list.push(responses::Reader{
+            id: r.id(),
+            name: String::from(r.nickname()),
+            kind: String::from(r.kind()),
+            ip_address: String::from(r.ip_address()),
+            port: r.port(),
+            reading: r.is_reading(),
+            connected: r.is_connected(),
+        })
+    };
+    let output = match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
         name,
         kind: String::from(CONNECTION_TYPE),
-        version: CONNECTION_VERS
+        version: CONNECTION_VERS,
+        reads_subscribed: reads,
+        sightings_subscribed: sightings,
+        readers: list
     }) {
         Ok(_) => true,
         Err(e) => {
             println!("9/ Something went wrong writing to the socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("9/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 pub fn write_keepalive(stream: &TcpStream) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Keepalive) {
+    let output = match serde_json::to_writer(stream, &responses::Responses::Keepalive) {
         Ok(_) => true,
         Err(e) => {
             println!("10/ Something went wrong writing to the socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("10/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }
 
 pub fn write_disconnect(stream: &TcpStream) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Disconnect) {
+    let output = match serde_json::to_writer(stream, &responses::Responses::Disconnect) {
         Ok(_) => true,
         Err(e) => {
             println!("11/ Something went wrong writing to the socket. {e}");
             false
         }
-    }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("11/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
 }

@@ -39,6 +39,9 @@ pub enum Responses {
         name: String,
         kind: String,
         version: usize,
+        reads_subscribed: bool,
+        sightings_subscribed: bool,
+        readers: Vec<Reader>
     },
     Keepalive,
     Disconnect,

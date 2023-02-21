@@ -32,7 +32,10 @@ pub enum Request {
         event_year: String,
     },
     // Connection or program related requests
-    Connect,
+    Connect {
+        reads: bool,
+        sightings: bool,
+    },
     Disconnect,
     KeepaliveAck,
     Quit,
