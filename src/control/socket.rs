@@ -519,49 +519,51 @@ fn handle_stream(
                         no_error = write_settings(&stream, &get_settings(&sq));
                     }
                 },
-                requests::Request::SettingSet { setting } => {
-                    match setting.name() {
-                        super::SETTING_CHIP_TYPE |
-                        super::SETTING_PORTAL_NAME |
-                        super::SETTING_READ_WINDOW |
-                        super::SETTING_SIGHTING_PERIOD => {
-                            if let Ok(sq) = sqlite.lock() {
-                                match sq.set_setting(&setting) {
-                                    Ok(_) => {
-                                        controls = match super::Control::new(&sq) {
-                                            Ok(c) => c,
-                                            Err(e) => {
-                                                println!("error getting controls for some reason {e}");
-                                                controls
-                                            }
-                                        };
-                                        let settings = get_settings(&sq);
-                                        if let Ok(c_socks) = control_sockets.lock() {
-                                            for sock in c_socks.iter() {
-                                                if let Some(sock) = sock {
-                                                    // we might be writing to other sockets
-                                                    // so errors here shouldn't close our connection
-                                                    _ = write_settings(&sock, &settings);
+                requests::Request::SettingsSet { settings } => {
+                    for setting in settings {
+                        match setting.name() {
+                            super::SETTING_CHIP_TYPE |
+                            super::SETTING_PORTAL_NAME |
+                            super::SETTING_READ_WINDOW |
+                            super::SETTING_SIGHTING_PERIOD => {
+                                if let Ok(sq) = sqlite.lock() {
+                                    match sq.set_setting(&setting) {
+                                        Ok(_) => {
+                                            controls = match super::Control::new(&sq) {
+                                                Ok(c) => c,
+                                                Err(e) => {
+                                                    println!("error getting controls for some reason {e}");
+                                                    controls
                                                 }
+                                            };
+                                            let settings = get_settings(&sq);
+                                            if let Ok(c_socks) = control_sockets.lock() {
+                                                for sock in c_socks.iter() {
+                                                    if let Some(sock) = sock {
+                                                        // we might be writing to other sockets
+                                                        // so errors here shouldn't close our connection
+                                                        _ = write_settings(&sock, &settings);
+                                                    }
+                                                }
+                                            } else {
+                                                no_error = write_settings(&stream, &settings);
                                             }
-                                        } else {
-                                            no_error = write_settings(&stream, &settings);
+                                        },
+                                        Err(e) => {
+                                            println!("Error saving setting. {e}");
+                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                message: format!("error saving setting: {e}")
+                                            });
                                         }
-                                    },
-                                    Err(e) => {
-                                        println!("Error saving setting. {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error saving setting: {e}")
-                                        });
                                     }
                                 }
+                            },
+                            other => {
+                                println!("'{other}' is not a valid setting");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("'{other}' is not a valid setting")
+                                });
                             }
-                        },
-                        other => {
-                            println!("'{other}' is not a valid setting");
-                            no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                message: format!("'{other}' is not a valid setting")
-                            });
                         }
                     }
                 },

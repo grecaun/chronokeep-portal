@@ -77,8 +77,8 @@ pub enum Request {
         end_seconds: u64,
     },
     // Settings related requests
-    SettingSet {
-        setting: Setting
+    SettingsSet {
+        settings: Vec<Setting>
     },
     SettingsGet,
     // Subscription request to subscribe to new reads/sightings.
