@@ -618,11 +618,8 @@ fn handle_stream(
                                         match sq.get_apis() {
                                             Ok(apis) => {
                                                 if let Ok(c_socks) = control_sockets.lock() {
-                                                    let mut count = 1;
                                                     for sock in c_socks.iter() {
                                                         if let Some(sock) = sock {
-                                                            println!("writing to socket {count}");
-                                                            count = count + 1;
                                                             // we might be writing to other sockets
                                                             // so errors here shouldn't close our connection
                                                             _ = write_api_list(&sock, &apis);
