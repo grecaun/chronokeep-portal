@@ -615,27 +615,28 @@ fn handle_stream(
                                     t_uri
                                 )) {
                                     Ok(_) => {
-                                        if let Ok(sq) = sqlite.lock() {
-                                            match sq.get_apis() {
-                                                Ok(apis) => {
-                                                    if let Ok(c_socks) = control_sockets.lock() {
-                                                        for sock in c_socks.iter() {
-                                                            if let Some(sock) = sock {
-                                                                // we might be writing to other sockets
-                                                                // so errors here shouldn't close our connection
-                                                                _ = write_api_list(&sock, &apis);
-                                                            }
+                                        match sq.get_apis() {
+                                            Ok(apis) => {
+                                                if let Ok(c_socks) = control_sockets.lock() {
+                                                    let mut count = 1;
+                                                    for sock in c_socks.iter() {
+                                                        if let Some(sock) = sock {
+                                                            println!("writing to socket {count}");
+                                                            count = count + 1;
+                                                            // we might be writing to other sockets
+                                                            // so errors here shouldn't close our connection
+                                                            _ = write_api_list(&sock, &apis);
                                                         }
-                                                    } else {
-                                                        no_error = write_api_list(&stream, &apis);
                                                     }
-                                                },
-                                                Err(e) => {
-                                                    println!("error getting api list. {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                        message: format!("error getting api list: {e}")
-                                                    });
+                                                } else {
+                                                    no_error = write_api_list(&stream, &apis);
                                                 }
+                                            },
+                                            Err(e) => {
+                                                println!("error getting api list. {e}");
+                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    message: format!("error getting api list: {e}")
+                                                });
                                             }
                                         }
                                     },
@@ -660,27 +661,25 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_api(&name) {
                             Ok(_) => {
-                                if let Ok(sq) = sqlite.lock() {
-                                    match sq.get_apis() {
-                                        Ok(apis) => {
-                                            if let Ok(c_socks) = control_sockets.lock() {
-                                                for sock in c_socks.iter() {
-                                                    if let Some(sock) = sock {
-                                                        // we might be writing to other sockets
-                                                        // so errors here shouldn't close our connection
-                                                        _ = write_api_list(&sock, &apis);
-                                                    }
+                                match sq.get_apis() {
+                                    Ok(apis) => {
+                                        if let Ok(c_socks) = control_sockets.lock() {
+                                            for sock in c_socks.iter() {
+                                                if let Some(sock) = sock {
+                                                    // we might be writing to other sockets
+                                                    // so errors here shouldn't close our connection
+                                                    _ = write_api_list(&sock, &apis);
                                                 }
-                                            } else {
-                                                no_error = write_api_list(&stream, &apis);
                                             }
-                                        },
-                                        Err(e) => {
-                                            println!("error getting api list. {e}");
-                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                message: format!("error getting api list: {e}")
-                                            });
+                                        } else {
+                                            no_error = write_api_list(&stream, &apis);
                                         }
+                                    },
+                                    Err(e) => {
+                                        println!("error getting api list. {e}");
+                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            message: format!("error getting api list: {e}")
+                                        });
                                     }
                                 }
                             },
