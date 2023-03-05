@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{objects::{setting, participant::Participant, sighting::Sighting, read}, network::api};
+use crate::{objects::{event::Event, setting, participant::Participant, sighting::Sighting, read}, network::api};
 
 use super::errors;
 
@@ -35,6 +35,12 @@ pub enum Responses {
     Sightings {
         sightings: Vec<Sighting>,
     },
+    Events {
+        events: Vec<Event>,
+    },
+    EventYears {
+        years: Vec<String>
+    }
     ConnectionSuccessful {
         name: String,
         kind: String,

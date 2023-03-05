@@ -15,17 +15,21 @@ pub enum Request {
     },
     ApiList,
     ApiRemoteAutoUpload {
-        name: String,
+        api_name: String,
     },
     ApiRemoteManualUpload {
-        name: String,
+        api_name: String,
     },
     ApiRemove {
         name: String,
     },
     ApiResultsEventsGet {
-        name: String,
+        api_name: String,
     },
+    ApiResultsEventYearsGet {
+        api_name: String,
+        event_slug: String,
+    }
     ApiResultsParticipantsGet {
         api_name: String,
         event_slug: String,
