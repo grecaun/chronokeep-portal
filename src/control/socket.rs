@@ -1,9 +1,9 @@
 use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}};
 
 use chrono::Utc;
-use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION, HeaderValue};
+use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read, event::Event}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results};
 
 use super::zero_conf::ZeroConf;
 
@@ -703,7 +703,21 @@ fn handle_stream(
                             Ok(apis) => {
                                 for api in apis {
                                     if api.nickname() == api_name {
-                                        get_events(&stream, &http_client, api);
+                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CKEEP_RESULTS_SELF {
+                                            no_error = match get_events(&http_client, api) {
+                                                Ok(events) => {
+                                                    write_event_list(&stream, events)
+                                                },
+                                                Err(e) => {
+                                                    println!("error getting events: {e}");
+                                                    write_error(&stream, errors::Errors::ServerError { message: format!("error getting events: {e}") })
+                                                }
+                                            };
+                                        } else {
+                                            let kind = api.kind();
+                                            println!("invalid api type specified: {kind}");
+                                            no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("expected Chronokeep results type") })
+                                        }
                                         break;
                                     }
                                 }
@@ -723,7 +737,21 @@ fn handle_stream(
                             Ok(apis) => {
                                 for api in apis {
                                     if api.nickname() == api_name {
-                                        get_event_years(&stream, &http_client, api, event_slug);
+                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CKEEP_RESULTS_SELF {
+                                            no_error = match get_event_years(&http_client, api, event_slug) {
+                                                Ok(years) => {
+                                                    write_event_years(&stream, years)
+                                                },
+                                                Err(e) => {
+                                                    println!("error getting event years: {e}");
+                                                    write_error(&stream, errors::Errors::ServerError { message: format!("error getting event years: {e}") })
+                                                }
+                                            };
+                                        } else {
+                                            let kind = api.kind();
+                                            println!("invalid api type specified: {kind}");
+                                            no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("expected Chronokeep results type") })
+                                        }
                                         break;
                                     }
                                 }
@@ -738,12 +766,53 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ApiResultsParticipantsGet { api_name, event_slug, event_year } => {
-                    if let Ok(sq) = sqlite.lock() {
+                    if let Ok(mut sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
                                 for api in apis {
                                     if api.nickname() == api_name {
-                                        get_participants(&stream, &http_client, api, event_slug, event_year);
+                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CKEEP_RESULTS_SELF {
+                                            match get_participants(&http_client, api, event_slug, event_year) {
+                                                Ok(new_parts) => {
+                                                    // delete old participants
+                                                    match sq.delete_participants() {
+                                                        Ok(_) => {
+                                                            // if participant deletion was successful, add new participants
+                                                            match sq.add_participants(&new_parts) {
+                                                                Ok(_) => {
+                                                                    // send participants out if adding participants was successful
+                                                                    match sq.get_participants() {
+                                                                        Ok(parts) => {
+                                                                            no_error = write_participants(&stream, &parts)
+                                                                        },
+                                                                        Err(e) => {
+                                                                            println!("error getting participants: {e}");
+                                                                            no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting participants: {e}") });
+                                                                        }
+                                                                    };
+                                                                },
+                                                                Err(e) => {
+                                                                    println!("error adding participants: {e}");
+                                                                    no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error adding participants: {e}") });
+                                                                },
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            println!("error deleting participants: {e}");
+                                                            no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error deleting participants: {e}") })
+                                                        }
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    println!("error getting participants from api: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error getting participants from api: {e}") })
+                                                }
+                                            }
+                                        } else {
+                                            let kind = api.kind();
+                                            println!("invalid api type specified: {kind}");
+                                            no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("expected Chronokeep results type") })
+                                        }
                                         break;
                                     }
                                 }
@@ -1229,6 +1298,30 @@ pub fn write_disconnect(stream: &TcpStream) -> bool {
     output
 }
 
+pub fn write_event_list(stream: &TcpStream, events: Vec<Event>) -> bool {
+    let output = match serde_json::to_writer(stream, &responses::Responses::Events {
+        events
+    }) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("12/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
+}
+
+pub fn write_event_years(stream: &TcpStream, years: Vec<String>) -> bool {
+    let output = match serde_json::to_writer(stream, &responses::Responses::EventYears { years }) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("13/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
+}
+
 fn construct_headers(key: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
@@ -1236,20 +1329,37 @@ fn construct_headers(key: &str) -> HeaderMap {
     headers
 }
 
-fn get_events(stream: &TcpStream, http_client: &reqwest::blocking::Client, api: Api) -> bool {
+fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<Event>, &'static str> {
     let url = api.uri();
     let response = match http_client.get(format!("{url}event/all"))
         .headers(construct_headers(api.token()))
         .send() {
             Ok(resp) => resp,
             Err(e) => {
-                return false
+                println!("error trying to talk to api: {e}");
+                return Err("error trying to talk to api")
             }
         };
-    true
+    let output = match response.status() {
+        reqwest::StatusCode::OK => {
+            let resp_body: results::responses::GetEventsResponse = match response.json() {
+                Ok(it) => it,
+                Err(e) => {
+                    println!("error trying to parse response from api: {e}");
+                    return Err("error trying to parse response from api")
+                }
+            };
+            resp_body.events
+        },
+        other => {
+            println!("invalid status code: {other}");
+            return Err("invalid status code")
+        }
+    };
+    Ok(output)
 }
 
-fn get_event_years(stream: &TcpStream, http_client: &reqwest::blocking::Client, api: Api, slug: String) -> bool {
+fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: String) -> Result<Vec<String>, &'static str> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}event"))
         .headers(construct_headers(api.token()))
@@ -1260,31 +1370,33 @@ fn get_event_years(stream: &TcpStream, http_client: &reqwest::blocking::Client, 
             Ok(resp) => resp,
             Err(e) => {
                 println!("error trying to talk to api: {e}");
-                write_error(stream, errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") });
-                return false
+                return Err("error trying to talk to api")
             }
         };
-    match response.status() {
+    let output = match response.status() {
         reqwest::StatusCode::OK => {
             let resp_body: results::responses::GetEventResponse = match response.json() {
                 Ok(it) => it,
                 Err(e) => {
                     println!("error trying to parse response from api: {e}");
-                    write_error(stream, errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") });
-                    return false
+                    return Err("error trying to parse response from api")
                 },
             };
+            let mut years: Vec<String> = Vec::new();
+            for y in resp_body.event_years {
+                years.push(y.year);
+            }
+            years
         },
         other => {
             println!("invalid status code: {other}");
-            write_error(stream, errors::Errors::ServerError { message: format!("invalid status code: {other}") });
-            return false
+            return Err("invalid status code")
         }
-    }
-    true
+    };
+    Ok(output)
 }
 
-fn get_participants(stream: &TcpStream, http_client: &reqwest::blocking::Client, api: Api, slug: String, year: String) -> bool {
+fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: String, year: String) -> Result<Vec<participant::Participant>, &'static str> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}event"))
         .headers(construct_headers(api.token()))
@@ -1294,9 +1406,26 @@ fn get_participants(stream: &TcpStream, http_client: &reqwest::blocking::Client,
         })
         .send() {
             Ok(resp) => resp,
-            Err(_) => {
-                return false
+            Err(e) => {
+                println!("error trying to talk to api: {e}");
+                return Err("error trying to talk to api")
             }
         };
-    true
+    let output = match response.status() {
+        reqwest::StatusCode::OK => {
+            let resp_body: results::responses::GetParticipantsResponse = match response.json() {
+                Ok(it) => it,
+                Err(e) => {
+                    println!("error trying to parse response from api: {e}");
+                    return Err("error trying to parse response from api")
+                }
+            };
+            resp_body.participants
+        },
+        other => {
+            println!("invalid status code: {other}");
+            return Err("invalid status code")
+        }
+    };
+    Ok(output)
 }

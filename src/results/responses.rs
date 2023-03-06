@@ -4,16 +4,16 @@ use crate::objects::{event_year, event, participant};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GetEventsResponse {
-    events: Vec<event::Event>
+    pub events: Vec<event::Event>
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GetEventResponse {
-    event: event::Event,
-    event_years: Vec<event_year::EventYear>
+    pub event: event::Event,
+    pub event_years: Vec<event_year::EventYear>
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GetParticipantsResponse {
-    participants: Vec<participant::Participant>
+    pub participants: Vec<participant::Participant>
 }
