@@ -1,6 +1,6 @@
 use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}};
 
-use chrono::Utc;
+use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 
 use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read, event::Event}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results};
@@ -939,12 +939,25 @@ fn handle_stream(
                 requests::Request::TimeGet => {
                     no_error = write_time(&stream);
                 },
-                /*
                 requests::Request::TimeSet { time } => {
-                    if on linux {
-                        std::process::Command::new("COMMAND").arg("ARG").arg("ARG").spawn()
+                    match std::env::consts::OS {
+                        "linux" => {
+                            match std::process::Command::new("date").arg("-s").arg("time").spawn() {
+                                Ok(_) => {
+                                    no_error = write_time(&stream);
+                                },
+                                Err(e) => {
+                                    println!("error setting time: {e}");
+                                    no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
+                                }
+                            }
+                        },
+                        other => {
+                            println!("not supported on this platform ({other})");
+                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
+                        }
                     }
-                }, */
+                },
                 requests::Request::Subscribe { reads, sightings } => {
                     let mut message:String = String::from("");
                     if let Ok(mut repeaters) = read_reapeaters.lock() {
@@ -1043,10 +1056,11 @@ fn write_error(stream: &TcpStream, error: errors::Errors) -> bool {
 fn write_time(stream: &TcpStream) -> bool {
     let time = Utc::now();
     let utc = time.naive_utc();
-    let local = time.naive_local();
+    let local = Local.from_utc_datetime(&utc).format("%Y-%m-%d %H:%M:%S").to_string();
+    let utc = utc.format("%Y-%m-%d %H:%M:%S").to_string();
     let output = match serde_json::to_writer(stream, &responses::Responses::Time{
-        local: local.format("%Y-%m-%d %H:%M:%S").to_string(),
-        utc: utc.format("%Y-%m-%d %H:%M:%S").to_string(),
+        local,
+        utc,
     }) {
         Ok(_) => true,
         Err(e) => {
