@@ -15,6 +15,7 @@ pub mod reader;
 pub mod types;
 pub mod util;
 pub mod llrp;
+pub mod results;
 
 const CONTROL_TYPE: &str = "socket";
 

@@ -1,8 +1,9 @@
 use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}};
 
 use chrono::Utc;
+use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION, HeaderValue};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read}, network::api, control::SETTING_PORTAL_NAME};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results};
 
 use super::zero_conf::ZeroConf;
 
@@ -199,6 +200,7 @@ fn handle_stream(
     let mut data = [0 as u8; 51200];
     let mut no_error = true;
     let mut last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let http_client = reqwest::blocking::Client::new();
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
@@ -689,19 +691,72 @@ fn handle_stream(
                         }
                     }
                 },
-                /*
-                requests::Request::ApiRemoteManualUpload { name } => {
+                requests::Request::ApiRemoteManualUpload { api_name } => {
                     // TODO
                 },
-                requests::Request::ApiRemoteAutoUpload { name } => {
+                requests::Request::ApiRemoteAutoUpload { api_name } => {
                     // TODO
                 },
-                requests::Request::ApiResultsEventsGet { name } => {
-                    // TODO
+                requests::Request::ApiResultsEventsGet { api_name } => {
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                for api in apis {
+                                    if api.nickname() == api_name {
+                                        get_events(&stream, &http_client, api);
+                                        break;
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("error getting apis from database: {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting participants from database: {e}")
+                                });
+                            }
+                        }
+                    }
+                },
+                requests::Request::ApiResultsEventYearsGet { api_name, event_slug } => {
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                for api in apis {
+                                    if api.nickname() == api_name {
+                                        get_event_years(&stream, &http_client, api, event_slug);
+                                        break;
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("error getting apis from database: {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting participants from database: {e}")
+                                })
+                            }
+                        }
+                    }
                 },
                 requests::Request::ApiResultsParticipantsGet { api_name, event_slug, event_year } => {
-                    // TODO
-                }, */
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                for api in apis {
+                                    if api.nickname() == api_name {
+                                        get_participants(&stream, &http_client, api, event_slug, event_year);
+                                        break;
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("error getting apis from database: {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting participants from database: {e}")
+                                })
+                            }
+                        }
+                    }
+                },
                 requests::Request::ParticipantsGet => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_participants() {
@@ -1172,4 +1227,76 @@ pub fn write_disconnect(stream: &TcpStream) -> bool {
         }
     };
     output
+}
+
+fn construct_headers(key: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
+    headers.insert(AUTHORIZATION, format!("Bearer {key}").parse().unwrap());
+    headers
+}
+
+fn get_events(stream: &TcpStream, http_client: &reqwest::blocking::Client, api: Api) -> bool {
+    let url = api.uri();
+    let response = match http_client.get(format!("{url}event/all"))
+        .headers(construct_headers(api.token()))
+        .send() {
+            Ok(resp) => resp,
+            Err(e) => {
+                return false
+            }
+        };
+    true
+}
+
+fn get_event_years(stream: &TcpStream, http_client: &reqwest::blocking::Client, api: Api, slug: String) -> bool {
+    let url = api.uri();
+    let response = match http_client.post(format!("{url}event"))
+        .headers(construct_headers(api.token()))
+        .json(&results::requests::GetEventRequest{
+            slug,
+        })
+        .send() {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("error trying to talk to api: {e}");
+                write_error(stream, errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") });
+                return false
+            }
+        };
+    match response.status() {
+        reqwest::StatusCode::OK => {
+            let resp_body: results::responses::GetEventResponse = match response.json() {
+                Ok(it) => it,
+                Err(e) => {
+                    println!("error trying to parse response from api: {e}");
+                    write_error(stream, errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") });
+                    return false
+                },
+            };
+        },
+        other => {
+            println!("invalid status code: {other}");
+            write_error(stream, errors::Errors::ServerError { message: format!("invalid status code: {other}") });
+            return false
+        }
+    }
+    true
+}
+
+fn get_participants(stream: &TcpStream, http_client: &reqwest::blocking::Client, api: Api, slug: String, year: String) -> bool {
+    let url = api.uri();
+    let response = match http_client.post(format!("{url}event"))
+        .headers(construct_headers(api.token()))
+        .json(&results::requests::GetParticipantsRequest{
+            slug,
+            year
+        })
+        .send() {
+            Ok(resp) => resp,
+            Err(_) => {
+                return false
+            }
+        };
+    true
 }

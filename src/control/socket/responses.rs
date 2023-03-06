@@ -40,7 +40,7 @@ pub enum Responses {
     },
     EventYears {
         years: Vec<String>
-    }
+    },
     ConnectionSuccessful {
         name: String,
         kind: String,

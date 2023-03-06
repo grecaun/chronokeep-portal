@@ -29,7 +29,7 @@ pub enum Request {
     ApiResultsEventYearsGet {
         api_name: String,
         event_slug: String,
-    }
+    },
     ApiResultsParticipantsGet {
         api_name: String,
         event_slug: String,
