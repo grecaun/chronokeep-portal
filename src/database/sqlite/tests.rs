@@ -852,6 +852,7 @@ fn test_add_participants() {
         for inner in parts.iter() {
             if outer.equals(&inner) {
                 found = true;
+                break;
             }
         }
         assert!(found)

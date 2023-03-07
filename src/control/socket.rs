@@ -692,10 +692,42 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ApiRemoteManualUpload { api_name } => {
-                    // TODO
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                for api in apis {
+                                    if api.nickname() == api_name {
+                                        println!("TODO manual upload")
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("error getting apis: {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting apis: {e}")
+                                });
+                            }
+                        }
+                    }
                 },
                 requests::Request::ApiRemoteAutoUpload { api_name } => {
-                    // TODO
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                for api in apis {
+                                    if api.nickname() == api_name {
+                                        println!("TODO auto upload")
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("error getting apis: {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting apis: {e}")
+                                });
+                            }
+                        }
+                    }
                 },
                 requests::Request::ApiResultsEventsGet { api_name } => {
                     if let Ok(sq) = sqlite.lock() {
@@ -709,8 +741,8 @@ fn handle_stream(
                                                     write_event_list(&stream, events)
                                                 },
                                                 Err(e) => {
-                                                    println!("error getting events: {e}");
-                                                    write_error(&stream, errors::Errors::ServerError { message: format!("error getting events: {e}") })
+                                                    println!("error getting events: {:?}", e);
+                                                    write_error(&stream, e)
                                                 }
                                             };
                                         } else {
@@ -743,8 +775,8 @@ fn handle_stream(
                                                     write_event_years(&stream, years)
                                                 },
                                                 Err(e) => {
-                                                    println!("error getting event years: {e}");
-                                                    write_error(&stream, errors::Errors::ServerError { message: format!("error getting event years: {e}") })
+                                                    println!("error getting event years: {:?}", e);
+                                                    write_error(&stream, e)
                                                 }
                                             };
                                         } else {
@@ -772,42 +804,51 @@ fn handle_stream(
                                 for api in apis {
                                     if api.nickname() == api_name {
                                         if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CKEEP_RESULTS_SELF {
-                                            match get_participants(&http_client, api, event_slug, event_year) {
+                                            // try to get the participants from the API
+                                            let new_parts = match get_participants(&http_client, api, event_slug, event_year) {
                                                 Ok(new_parts) => {
-                                                    // delete old participants
-                                                    match sq.delete_participants() {
-                                                        Ok(_) => {
-                                                            // if participant deletion was successful, add new participants
-                                                            match sq.add_participants(&new_parts) {
-                                                                Ok(_) => {
-                                                                    // send participants out if adding participants was successful
-                                                                    match sq.get_participants() {
-                                                                        Ok(parts) => {
-                                                                            no_error = write_participants(&stream, &parts)
-                                                                        },
-                                                                        Err(e) => {
-                                                                            println!("error getting participants: {e}");
-                                                                            no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting participants: {e}") });
-                                                                        }
-                                                                    };
-                                                                },
-                                                                Err(e) => {
-                                                                    println!("error adding participants: {e}");
-                                                                    no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error adding participants: {e}") });
-                                                                },
-                                                            }
-                                                        },
-                                                        Err(e) => {
-                                                            println!("error deleting participants: {e}");
-                                                            no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error deleting participants: {e}") })
-                                                        }
-                                                    }
+                                                    new_parts
                                                 },
                                                 Err(e) => {
-                                                    println!("error getting participants from api: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error getting participants from api: {e}") })
+                                                    println!("error getting participants from api: {:?}", e);
+                                                    no_error = write_error(&stream, e);
+                                                    break;
+                                                }
+                                            };
+                                            // delete old participants
+                                            match sq.delete_participants() {
+                                                Ok(_) => { },
+                                                Err(e) => {
+                                                    println!("error deleting participants: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                        message: format!("error deleting participants: {e}")
+                                                    });
+                                                    break;
                                                 }
                                             }
+                                            // if participant deletion was successful, add new participants
+                                            match sq.add_participants(&new_parts) {
+                                                Ok(_) => { },
+                                                Err(e) => {
+                                                    println!("error adding participants: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                        message: format!("error adding participants: {e}")
+                                                    });
+                                                    break;
+                                                },
+                                            }
+                                            // get participants and send them to the connection that had us update participants
+                                            match sq.get_participants() {
+                                                Ok(parts) => {
+                                                    no_error = write_participants(&stream, &parts)
+                                                },
+                                                Err(e) => {
+                                                    println!("error getting participants: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                        message: format!("error getting participants: {e}")
+                                                    });
+                                                }
+                                            };
                                         } else {
                                             let kind = api.kind();
                                             println!("invalid api type specified: {kind}");
@@ -942,7 +983,7 @@ fn handle_stream(
                 requests::Request::TimeSet { time } => {
                     match std::env::consts::OS {
                         "linux" => {
-                            match std::process::Command::new("date").arg("-s").arg("time").spawn() {
+                            match std::process::Command::new("date").arg("-s").arg(time).spawn() {
                                 Ok(_) => {
                                     no_error = write_time(&stream);
                                 },
@@ -1322,11 +1363,27 @@ pub fn write_event_list(stream: &TcpStream, events: Vec<Event>) -> bool {
             false
         }
     };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("12/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
     output
 }
 
 pub fn write_event_years(stream: &TcpStream, years: Vec<String>) -> bool {
     let output = match serde_json::to_writer(stream, &responses::Responses::EventYears { years }) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("13/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
         Ok(_) => true,
         Err(e) => {
             println!("13/ Something went wrong writing to the socket. {e}");
@@ -1343,7 +1400,7 @@ fn construct_headers(key: &str) -> HeaderMap {
     headers
 }
 
-fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<Event>, &'static str> {
+fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<Event>, errors::Errors> {
     let url = api.uri();
     let response = match http_client.get(format!("{url}event/all"))
         .headers(construct_headers(api.token()))
@@ -1351,7 +1408,7 @@ fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<E
             Ok(resp) => resp,
             Err(e) => {
                 println!("error trying to talk to api: {e}");
-                return Err("error trying to talk to api")
+                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
             }
         };
     let output = match response.status() {
@@ -1360,20 +1417,24 @@ fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<E
                 Ok(it) => it,
                 Err(e) => {
                     println!("error trying to parse response from api: {e}");
-                    return Err("error trying to parse response from api")
+                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
                 }
             };
             resp_body.events
         },
+        reqwest::StatusCode::NOT_FOUND => {
+            println!("event not found");
+            return Err(errors::Errors::NotFound);
+        }
         other => {
             println!("invalid status code: {other}");
-            return Err("invalid status code")
+            return Err(errors::Errors::ServerError { message: format!("invalid status code") })
         }
     };
     Ok(output)
 }
 
-fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: String) -> Result<Vec<String>, &'static str> {
+fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: String) -> Result<Vec<String>, errors::Errors> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}event"))
         .headers(construct_headers(api.token()))
@@ -1384,7 +1445,7 @@ fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: Stri
             Ok(resp) => resp,
             Err(e) => {
                 println!("error trying to talk to api: {e}");
-                return Err("error trying to talk to api")
+                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
             }
         };
     let output = match response.status() {
@@ -1393,7 +1454,7 @@ fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: Stri
                 Ok(it) => it,
                 Err(e) => {
                     println!("error trying to parse response from api: {e}");
-                    return Err("error trying to parse response from api")
+                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
                 },
             };
             let mut years: Vec<String> = Vec::new();
@@ -1402,17 +1463,21 @@ fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: Stri
             }
             years
         },
+        reqwest::StatusCode::NOT_FOUND => {
+            println!("event not found");
+            return Err(errors::Errors::NotFound);
+        }
         other => {
             println!("invalid status code: {other}");
-            return Err("invalid status code")
+            return Err(errors::Errors::ServerError { message: format!("invalid status code") })
         }
     };
     Ok(output)
 }
 
-fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: String, year: String) -> Result<Vec<participant::Participant>, &'static str> {
+fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: String, year: String) -> Result<Vec<participant::Participant>, errors::Errors> {
     let url = api.uri();
-    let response = match http_client.post(format!("{url}event"))
+    let response = match http_client.post(format!("{url}participants"))
         .headers(construct_headers(api.token()))
         .json(&results::requests::GetParticipantsRequest{
             slug,
@@ -1422,7 +1487,7 @@ fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: St
             Ok(resp) => resp,
             Err(e) => {
                 println!("error trying to talk to api: {e}");
-                return Err("error trying to talk to api")
+                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
             }
         };
     let output = match response.status() {
@@ -1431,14 +1496,18 @@ fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: St
                 Ok(it) => it,
                 Err(e) => {
                     println!("error trying to parse response from api: {e}");
-                    return Err("error trying to parse response from api")
+                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
                 }
             };
             resp_body.participants
         },
+        reqwest::StatusCode::NOT_FOUND => {
+            println!("event not found");
+            return Err(errors::Errors::NotFound);
+        }
         other => {
             println!("invalid status code: {other}");
-            return Err("invalid status code")
+            return Err(errors::Errors::ServerError { message: format!("invalid status code") })
         }
     };
     Ok(output)

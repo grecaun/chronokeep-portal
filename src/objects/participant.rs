@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Participant {
+    #[serde(skip)]
     id: u64,
     bib: String,
     first: String,
