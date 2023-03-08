@@ -33,7 +33,7 @@ pub enum Responses {
         participants: Vec<Participant>,
     },
     Sightings {
-        sightings: Vec<Sighting>,
+        list: Vec<Sighting>,
     },
     Events {
         events: Vec<Event>,

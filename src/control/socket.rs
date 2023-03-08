@@ -3,7 +3,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read, event::Event}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results};
 
 use super::zero_conf::ZeroConf;
 
@@ -947,6 +947,36 @@ fn handle_stream(
                         }
                     }
                 },
+                requests::Request::SightingsGet { start_seconds, end_seconds } => {
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_sightings(start_seconds, end_seconds) {
+                            Ok(sightings) => {
+                                no_error = write_sightings(&stream, &sightings)
+                            },
+                            Err(e) => {
+                                println!("Error getting sightings. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting sightings: {e}")
+                                })
+                            }
+                        }
+                    }
+                },
+                requests::Request::SightingsGetAll => {
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_all_sightings() {
+                            Ok(sightings) => {
+                                no_error = write_sightings(&stream, &sightings)
+                            },
+                            Err(e) => {
+                                println!("Error getting sightings. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting sightings: {e}")
+                                })
+                            }
+                        }
+                    }
+                }
                 requests::Request::ReadsDelete { start_seconds, end_seconds } => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_reads(start_seconds, end_seconds) {
@@ -1079,7 +1109,7 @@ fn write_error(stream: &TcpStream, error: errors::Errors) -> bool {
     }) {
         Ok(_) => true,
         Err(e) => {
-            println!("1/ Something went wrong writing to socket. {e}");
+            println!("1/ Something went wrong writing to the socket. {e}");
             false
         }
     };
@@ -1105,7 +1135,7 @@ fn write_time(stream: &TcpStream) -> bool {
     }) {
         Ok(_) => true,
         Err(e) => {
-            println!("2/ Something went wrong writing to socket. {e}");
+            println!("2/ Something went wrong writing to the socket. {e}");
             false
         }
     };
@@ -1145,7 +1175,7 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool 
     }) {
         Ok(_) => true,
         Err(e) => {
-            println!("3/ Something went wrong writing to socket. {e}");
+            println!("3/ Something went wrong writing to the socket. {e}");
             false
         }
     };
@@ -1178,7 +1208,7 @@ fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn read
     }) {
         Ok(_) => true,
         Err(e) => {
-            println!("4/ Something went wrong writing to socket. {e}");
+            println!("4/ Something went wrong writing to the socket. {e}");
             false
         }
     };
@@ -1199,7 +1229,7 @@ fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
     }) {
         Ok(_) => true,
         Err(e) => {
-            println!("5/ Something went wrong writing to socket. {e}");
+            println!("5/ Something went wrong writing to the socket. {e}");
             false
         }
     };
@@ -1220,7 +1250,7 @@ fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
     }) {
         Ok(_) => true,
         Err(e) => {
-            println!("6/ Something went wrong writing to socket. {e}");
+            println!("6/ Something went wrong writing to the socket. {e}");
             false
         }
     };
@@ -1235,13 +1265,34 @@ fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
     output
 }
 
+fn write_sightings(stream: &TcpStream, sightings: &Vec<sighting::Sighting>) -> bool {
+    let output = match serde_json::to_writer(stream, &responses::Responses::Sightings {
+        list: sightings.to_vec()
+    }) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("14/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("14/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
+}
+
 fn write_success(stream: &TcpStream, count: usize) -> bool {
     let output = match serde_json::to_writer(stream, &responses::Responses::Success {
         count
     }) {
         Ok(_) => true,
         Err(e) => {
-            println!("7/ Something went wrong writing to socket. {e}");
+            println!("7/ Something went wrong writing to the socket. {e}");
             false
         }
     };

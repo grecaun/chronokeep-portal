@@ -62,6 +62,7 @@ pub trait Database {
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError>;
     // Sighting information
     fn save_sightings(&mut self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError>;
-    fn get_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError>;
+    fn get_sightings(&self, start: u64, end: u64) -> Result<Vec<sighting::Sighting>, DBError>;
+    fn get_all_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError>;
     fn delete_sightings(&self) -> Result<usize, DBError>;
 }

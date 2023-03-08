@@ -80,6 +80,11 @@ pub enum Request {
         start_seconds: u64,
         end_seconds: u64,
     },
+    SightingsGetAll,
+    SightingsGet {
+        start_seconds: u64,
+        end_seconds: u64,
+    },
     // Settings related requests
     SettingsSet {
         settings: Vec<Setting>

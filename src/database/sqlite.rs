@@ -608,7 +608,77 @@ impl super::Database for SQLite {
         return Err(DBError::ConnectionError(String::from("error starting transaction")));
     }
 
-    fn get_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError> {
+    fn get_sightings(&self, start: u64, end: u64) -> Result<Vec<sighting::Sighting>, DBError> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT 
+                part_id,
+                bib,
+                first,
+                last,
+                age,
+                gender,
+                age_group,
+                distance,
+                part_chip,
+                anonymous,
+                chip_id,
+                seconds,
+                milliseconds,
+                antenna,
+                reader,
+                rssi,
+                status,
+                uploaded
+            FROM participants NATURAL JOIN sightings NATURAL JOIN chip_reads 
+            WHERE seconds >= ?1 AND seconds <= ?2;"
+        ) {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+        };
+        let results = match stmt.query_map(
+            [start, end],
+            |row| {
+                Ok(sighting::Sighting{
+                    participant: participant::Participant::new(
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                    ),
+                    read: read::Read::new(
+                        row.get(10)?,
+                        row.get(8)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                        row.get(13)?,
+                        row.get(14)?,
+                        row.get(15)?,
+                        row.get(16)?,
+                        row.get(17)?,
+                    )
+                })
+            }
+        ) {
+            Ok(r) => r,
+            Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+        };
+        let mut output: Vec<sighting::Sighting> = Vec::new();
+        for row in results {
+            match row {
+                Ok(r) => output.push(r),
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            }
+        }
+        return Ok(output);
+    }
+
+    fn get_all_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError> {
         let mut stmt = match self.conn.prepare(
             "SELECT 
                 part_id,

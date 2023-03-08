@@ -1053,7 +1053,37 @@ fn test_get_sightings() {
     let mut sqlite = setup_tests(unique_path);
     let sightings = make_sightings(&mut sqlite);
     _ = sqlite.save_sightings(&sightings);
-    let result = sqlite.get_sightings();
+    // sightings are at 1000, 2800, 4600, 6400, 8200, there are 5 participants as well, so 5 at each point
+    let result = sqlite.get_sightings(0, 20000);
+    assert!(result.is_ok());
+    let res_sights = result.unwrap();
+    assert_eq!(sightings.len(), res_sights.len());
+    // should be 10 in this
+    let result = sqlite.get_sightings(1000, 2800);
+    assert!(result.is_ok());
+    let res_sights = result.unwrap();
+    assert_eq!(10, res_sights.len());
+    //should be 0
+    let result = sqlite.get_sightings(1001, 2799);
+    assert!(result.is_ok());
+    let res_sights = result.unwrap();
+    assert_eq!(0, res_sights.len());
+    //should be 5
+    let result = sqlite.get_sightings(1001, 2999);
+    assert!(result.is_ok());
+    let res_sights = result.unwrap();
+    assert_eq!(5, res_sights.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_get_all_sightings() {
+    let unique_path = "./test_get_sightings.sqlite";
+    let mut sqlite = setup_tests(unique_path);
+    let sightings = make_sightings(&mut sqlite);
+    _ = sqlite.save_sightings(&sightings);
+    let result = sqlite.get_all_sightings();
     assert!(result.is_ok());
     let res_sights = result.unwrap();
     assert_eq!(sightings.len(), res_sights.len());
@@ -1067,12 +1097,12 @@ fn test_delete_sightings() {
     let mut sqlite = setup_tests(unique_path);
     let sightings = make_sightings(&mut sqlite);
     _ = sqlite.save_sightings(&sightings);
-    let sights = sqlite.get_sightings().unwrap();
+    let sights = sqlite.get_all_sightings().unwrap();
     assert_eq!(sightings.len(), sights.len());
     let result = sqlite.delete_sightings();
     assert!(result.is_ok());
     assert_eq!(sightings.len(), result.unwrap());
-    let sights = sqlite.get_sightings().unwrap();
+    let sights = sqlite.get_all_sightings().unwrap();
     assert_eq!(0, sights.len());
     drop(sqlite);
     finalize_tests(unique_path);
