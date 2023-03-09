@@ -77,7 +77,7 @@ impl ZeroConf {
                 Ok(rcvd) => { 
                     match rcvd {
                         ZERO_CONF_REQUEST => {
-                            let mut response = format!("[{}|{}|{}]\n", "Unknown", self.server_id, self.control_port);
+                            let mut response = format!("[{}|{}|{}]", "Unknown", self.server_id, self.control_port);
                             if let Ok(sq) = self.sqlite.lock() {
                                 match sq.get_setting(SETTING_PORTAL_NAME) {
                                     Ok(name) => {
@@ -90,7 +90,7 @@ impl ZeroConf {
                             }
                             match self.socket.send_to(response.as_bytes(), src) {
                                 Ok(num) => {
-                                    println!("Sent {response} -- {num} bytes.");
+                                    println!("Sent {response} -- {src} -- {num} bytes.");
                                 },
                                 Err(e) => {
                                     println!("Error sending response: {e}");

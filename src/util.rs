@@ -1,3 +1,5 @@
+use chrono::{Utc, LocalResult, TimeZone, Local};
+
 #[cfg(test)]
 pub mod test;
 
@@ -18,6 +20,20 @@ pub fn pretty_time(seconds: &u64) -> String {
         return format!("{}:{:02}:{:02}", seconds / 3600, (seconds % 3600) / 60, seconds % 60);
     }
     format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+pub fn utc_seconds_to_local_string(seconds: i64) -> Result<String, &'static str> {
+    match Utc.timestamp_millis_opt(seconds * 1000) {
+        LocalResult::Single(time) => Ok(Local.from_utc_datetime(&time.naive_utc()).format("%Y-%m-%d %H:%M:%S").to_string()),
+        _ => Err("seconds not a valid timestamp")
+    }
+}
+
+pub fn utc_seconds_to_string(seconds: i64) -> Result<String, &'static str> {
+    match Utc.timestamp_millis_opt(seconds * 1000) {
+        LocalResult::Single(time) => Ok(Utc.from_utc_datetime(&time.naive_utc()).format("%Y-%m-%d %H:%M:%S").to_string()),
+        _ => Err("seconds not a valid timestamp")
+    }
 }
 
 impl Time {

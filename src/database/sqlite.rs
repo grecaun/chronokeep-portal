@@ -399,7 +399,7 @@ impl super::Database for SQLite {
         return Err(DBError::ConnectionError(String::from("error starting transaction")));
     }
 
-    fn get_reads(&self, start: u64, end: u64) -> Result<Vec<read::Read>, DBError> {
+    fn get_reads(&self, start: i64, end: i64) -> Result<Vec<read::Read>, DBError> {
         let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
@@ -469,7 +469,7 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn delete_reads(&self, start: u64, end: u64) -> Result<usize, DBError> {
+    fn delete_reads(&self, start: i64, end: i64) -> Result<usize, DBError> {
         match self.conn.execute(
             "DELETE FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;",
             [start, end]
@@ -608,7 +608,7 @@ impl super::Database for SQLite {
         return Err(DBError::ConnectionError(String::from("error starting transaction")));
     }
 
-    fn get_sightings(&self, start: u64, end: u64) -> Result<Vec<sighting::Sighting>, DBError> {
+    fn get_sightings(&self, start: i64, end: i64) -> Result<Vec<sighting::Sighting>, DBError> {
         let mut stmt = match self.conn.prepare(
             "SELECT 
                 part_id,
@@ -746,10 +746,22 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn delete_sightings(&self) -> Result<usize, DBError> {
+    fn delete_sightings(&self, start: i64, end: i64) -> Result<usize, DBError> {
+        match self.conn.execute("DELETE FROM sightings AS s WHERE EXISTS 
+            (SELECT * FROM chip_reads AS r WHERE r.chip_id = s.chip_id AND r.seconds >= ?1 AND r.seconds <= ?2);",
+            [start, end]) {
+            Ok(num) => Ok(num),
+            Err(e) => {
+                println!("{e}");
+                Err(DBError::DataDeletionError(e.to_string()))
+            }
+        }
+    }
+
+    fn delete_all_sightings(&self) -> Result<usize, DBError> {
         match self.conn.execute("DELETE FROM sightings;", []) {
-            Ok(num) => return Ok(num),
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+            Ok(num) => Ok(num),
+            Err(e) => Err(DBError::DataDeletionError(e.to_string()))
         }
     }
 }

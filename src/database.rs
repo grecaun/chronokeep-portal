@@ -51,9 +51,9 @@ pub trait Database {
     fn delete_api(&self, name: &str) -> Result<usize, DBError>;
     // Information gathered from readers
     fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
-    fn get_reads(&self, start: u64, end: u64) -> Result<Vec<read::Read>, DBError>;
+    fn get_reads(&self, start: i64, end: i64) -> Result<Vec<read::Read>, DBError>;
     fn get_all_reads(&self) -> Result<Vec<read::Read>, DBError>;
-    fn delete_reads(&self, start: u64, end: u64) -> Result<usize, DBError>;
+    fn delete_reads(&self, start: i64, end: i64) -> Result<usize, DBError>;
     fn delete_all_reads(&self) -> Result<usize, DBError>;
     // Participant information
     fn add_participants(&mut self, participants: &Vec<participant::Participant>) -> Result<usize, DBError>;
@@ -62,7 +62,8 @@ pub trait Database {
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError>;
     // Sighting information
     fn save_sightings(&mut self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError>;
-    fn get_sightings(&self, start: u64, end: u64) -> Result<Vec<sighting::Sighting>, DBError>;
+    fn get_sightings(&self, start: i64, end: i64) -> Result<Vec<sighting::Sighting>, DBError>;
     fn get_all_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError>;
-    fn delete_sightings(&self) -> Result<usize, DBError>;
+    fn delete_sightings(&self, start: i64, end: i64) -> Result<usize, DBError>;
+    fn delete_all_sightings(&self) -> Result<usize, DBError>;
 }

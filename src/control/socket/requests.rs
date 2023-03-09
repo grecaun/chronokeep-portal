@@ -72,18 +72,23 @@ pub enum Request {
     // Reads related requests
     ReadsDeleteAll,
     ReadsDelete {
-        start_seconds: u64,
-        end_seconds: u64,
+        start_seconds: i64,
+        end_seconds: i64,
     },
     ReadsGetAll,
     ReadsGet {
-        start_seconds: u64,
-        end_seconds: u64,
+        start_seconds: i64,
+        end_seconds: i64,
     },
     SightingsGetAll,
     SightingsGet {
-        start_seconds: u64,
-        end_seconds: u64,
+        start_seconds: i64,
+        end_seconds: i64,
+    },
+    SightingsDeleteAll,
+    SightingsDelete {
+        start_seconds: i64,
+        end_seconds: i64
     },
     // Settings related requests
     SettingsSet {
