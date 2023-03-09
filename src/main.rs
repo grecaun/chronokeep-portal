@@ -16,6 +16,8 @@ pub mod types;
 pub mod util;
 pub mod llrp;
 pub mod results;
+pub mod remote;
+pub mod processor;
 
 const CONTROL_TYPE: &str = "socket";
 

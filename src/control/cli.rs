@@ -298,12 +298,12 @@ fn connect_reader(
     drop(sqlite);
     match reader.kind() {
         reader::READER_KIND_ZEBRA => {
-            let mut r = reader::zebra::Zebra::new(
+            let mut r = reader::zebra::Zebra::new_no_repeaters(
                 reader.id(),
                 String::from(reader.nickname()),
                 String::from(reader.ip_address()),
                 reader.port(),
-                reader::AUTO_CONNECT_FALSE
+                reader::AUTO_CONNECT_FALSE,
             );
             match r.connect(mtx, &controls) {
                 Ok(j) => {
@@ -417,7 +417,7 @@ fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQL
             let port: u16 = u16::from_str(port).unwrap_or_else(|_err| {
                 zebra::DEFAULT_ZEBRA_PORT
             });
-            match sqlite.save_reader(&zebra::Zebra::new(
+            match sqlite.save_reader(&zebra::Zebra::new_no_repeaters(
                 0,
                 String::from(name),
                 String::from(ip),

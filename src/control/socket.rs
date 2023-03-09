@@ -3,7 +3,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results, processor};
 
 use super::zero_conf::ZeroConf;
 
@@ -69,6 +69,24 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
         println!("Unable to get joiners lock.");
     }
 
+    // create our sightings processing thread
+    let sight_processor = Arc::new(processor::SightingsProcessor::new(
+        control_sockets.clone(),
+        sighting_repeaters.clone(),
+        sqlite.clone(),
+        keepalive.clone()
+    ));
+    let t_sight_processor = sight_processor.clone();
+    let s_joiner = thread::spawn(move|| {
+        t_sight_processor.start();
+    });
+
+    if let Ok(mut j) = joiners.lock() {
+        j.push(s_joiner);
+    } else {
+        println!("Unable to get joiners lock.");
+    }
+
     // Get all known readers so we can work on them later.
     match sqlite.lock() {
         Ok(sq) => {
@@ -129,6 +147,8 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_sighting_repeaters = sighting_repeaters.clone();
                 let t_sqlite = sqlite.clone();
                 let t_control_sockets = control_sockets.clone();
+                let t_sight_processor = sight_processor.clone();
+
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
                     if let Ok(mut c_sockets) = control_sockets.lock() {
@@ -159,6 +179,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                                 t_read_repeaters,
                                 t_sighting_repeaters,
                                 t_control_sockets,
+                                t_sight_processor,
                                 t_sqlite
                             );
                         });
@@ -181,6 +202,21 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
             }
         }
     }
+    println!("Shutting down control thread.");
+    println!("Stopping sightings processor.");
+    sight_processor.stop();
+    sight_processor.notify();
+    println!("Joining all threads.");
+    if let Ok(mut joiners) = joiners.lock() {
+        while joiners.len() > 0 {
+            let cur_thread = joiners.remove(0);
+            match cur_thread.join() {
+                Ok(_) => (),
+                Err(e) => println!("Join failed. {:?}", e),
+            }
+        }
+    };
+    println!("Finished control thread shutdown.");
 }
 
 fn handle_stream(
@@ -191,9 +227,10 @@ fn handle_stream(
     control_port: &u16,
     readers: Arc<Mutex<Vec<Box<dyn reader::Reader>>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
-    read_reapeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+    read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     sighting_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    sight_processor: Arc<processor::SightingsProcessor>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
 ) {
     println!("Starting control loop for index {index}");
@@ -258,7 +295,7 @@ fn handle_stream(
                             name = String::from(set.value())
                         }
                     }
-                    if let Ok(mut repeaters) = read_reapeaters.lock() {
+                    if let Ok(mut repeaters) = read_repeaters.lock() {
                         repeaters[index] = reads;
                     }
                     if let Ok(mut repeaters) = sighting_repeaters.lock() {
@@ -270,9 +307,7 @@ fn handle_stream(
                         no_error = write_error(&mut stream, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
                     }
                 },
-                requests::Request::KeepaliveAck => {
-
-                },
+                requests::Request::KeepaliveAck => { },
                 requests::Request::ReaderList => {
                     if let Ok(u_readers) = readers.lock() {
                         no_error = write_reader_list(&mut stream, &u_readers);
@@ -283,12 +318,12 @@ fn handle_stream(
                         match kind.as_str() {
                             reader::READER_KIND_ZEBRA => {
                                 let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
-                                let mut tmp = zebra::Zebra::new(
+                                let mut tmp = zebra::Zebra::new_no_repeaters(
                                     0,
                                     name,
                                     ip_address,
                                     port,
-                                    reader::AUTO_CONNECT_FALSE
+                                    reader::AUTO_CONNECT_FALSE,
                                 );
                                 match sq.save_reader(&tmp) {
                                     Ok(val) => {
@@ -383,7 +418,10 @@ fn handle_stream(
                                             String::from(reader.nickname()),
                                             String::from(reader.ip_address()),
                                             reader.port(),
-                                            reader::AUTO_CONNECT_FALSE
+                                            reader::AUTO_CONNECT_FALSE,
+                                            control_sockets.clone(),
+                                            read_repeaters.clone(),
+                                            sight_processor.clone(),
                                         );
                                         match reader.connect(&sqlite, &controls) {
                                             Ok(j) => {
@@ -571,6 +609,7 @@ fn handle_stream(
                 },
                 requests::Request::Quit => {
                     if let Ok(mut ka) = keepalive.lock() {
+                        println!("Starting shutdown sequence.");
                         *ka = false;
                     }
                     // connect to ensure the spawning thread will exit the accept call
@@ -1046,7 +1085,7 @@ fn handle_stream(
                 },
                 requests::Request::Subscribe { reads, sightings } => {
                     let mut message:String = String::from("");
-                    if let Ok(mut repeaters) = read_reapeaters.lock() {
+                    if let Ok(mut repeaters) = read_repeaters.lock() {
                         if (repeaters[index] == true && reads == true)
                         || (repeaters[index] == false && reads == false) {
                             message = format!("reads already set to {reads}")
@@ -1094,12 +1133,13 @@ fn handle_stream(
     // if we've exited the loop we should ensure the program knows we can close this stream
     println!("Closing socket for index {index}.");
     // unsubscribe to notifications
-    if let Ok(mut repeaters) = read_reapeaters.lock() {
+    if let Ok(mut repeaters) = read_repeaters.lock() {
         repeaters[index] = false;
     }
     if let Ok(mut repeaters) = sighting_repeaters.lock() {
         repeaters[index] = false;
     }
+    write_disconnect(&stream);
     stream.shutdown(Shutdown::Both).unwrap();
     if let Ok(mut c_socks) = control_sockets.lock() {
         c_socks[index] = None;
@@ -1259,7 +1299,7 @@ fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
     output
 }
 
-fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
+pub fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
     let output = match serde_json::to_writer(stream, &responses::Responses::Reads{
         list: reads.to_vec(),
     }) {
@@ -1280,7 +1320,7 @@ fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
     output
 }
 
-fn write_sightings(stream: &TcpStream, sightings: &Vec<sighting::Sighting>) -> bool {
+pub fn write_sightings(stream: &TcpStream, sightings: &Vec<sighting::Sighting>) -> bool {
     let output = match serde_json::to_writer(stream, &responses::Responses::Sightings {
         list: sightings.to_vec()
     }) {
@@ -1445,7 +1485,7 @@ pub fn write_event_years(stream: &TcpStream, years: Vec<String>) -> bool {
         Ok(_) => true,
         Err(e) => {
             println!("13/ Something went wrong writing to the socket. {e}");
-            false
+            return false
         }
     };
     let mut writer = stream;

@@ -222,7 +222,7 @@ impl super::Database for SQLite {
                 match &r.kind[..] {
                     reader::READER_KIND_ZEBRA => {
                         return Ok(Box::new(
-                            zebra::Zebra::new(
+                            zebra::Zebra::new_no_repeaters(
                                 r.id,
                                 r.nickname,
                                 r.ip_address,
@@ -267,7 +267,7 @@ impl super::Database for SQLite {
                     match &r.kind[..] {
                         reader::READER_KIND_ZEBRA => {
                             output.push(Box::new(
-                                zebra::Zebra::new(
+                                zebra::Zebra::new_no_repeaters(
                                     r.id,
                                     r.nickname,
                                     r.ip_address,

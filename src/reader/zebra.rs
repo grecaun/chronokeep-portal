@@ -1,7 +1,7 @@
 use std::{str, net::TcpStream, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control};
+use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control::{self, socket::{MAX_CONNECTED, self}}, processor};
 
 pub mod requests;
 
@@ -21,10 +21,14 @@ pub struct Zebra {
 
     pub reading: Arc<sync::Mutex<bool>>,
     pub connected: Arc<sync::Mutex<bool>>,
+    
+    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+    sight_processor: Option<Arc<processor::SightingsProcessor>>,
 }
 
 impl Zebra {
-    pub fn new(
+    pub fn new_no_repeaters(
         id: i64,
         nickname: String,
         ip_address: String,
@@ -37,12 +41,42 @@ impl Zebra {
             nickname,
             ip_address,
             port,
+            socket: Mutex::new(None),
+            keepalive: Arc::new(Mutex::new(true)),
+            msg_id: Arc::new(Mutex::new(0)),
+            reading: Arc::new(Mutex::new(false)),
+            connected: Arc::new(Mutex::new(false)),
+            auto_connect,
+            control_sockets: Arc::new(Mutex::new(Default::default())),
+            read_repeaters: Arc::new(Mutex::new(Default::default())),
+            sight_processor: None,
+        }
+    }
+    pub fn new(
+        id: i64,
+        nickname: String,
+        ip_address: String,
+        port: u16,
+        auto_connect: u8,
+        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+        sight_processor: Arc<processor::SightingsProcessor>,
+    ) -> Zebra {
+        Zebra {
+            id,
+            kind: String::from(super::READER_KIND_ZEBRA),
+            nickname,
+            ip_address,
+            port,
             socket: sync::Mutex::new(None),
             keepalive: Arc::new(sync::Mutex::new(true)),
             msg_id: Arc::new(sync::Mutex::new(0)),
             reading: Arc::new(sync::Mutex::new(false)),
             connected: Arc::new(sync::Mutex::new(false)),
-            auto_connect
+            auto_connect,
+            control_sockets,
+            read_repeaters,
+            sight_processor: Some(sight_processor),
         }
     }
 }
@@ -129,6 +163,9 @@ impl super::Reader for Zebra {
                 let t_window = controls.read_window.clone();
                 let t_chip_type = controls.chip_type.clone();
                 let t_connected = self.connected.clone();
+                let t_control_sockets = self.control_sockets.clone();
+                let t_read_repeaters = self.read_repeaters.clone();
+                let mut t_sight_processor = self.sight_processor.clone();
 
                 let output = thread::spawn(move|| {
                     let buf: &mut [u8; 51200] = &mut [0;51200];
@@ -152,8 +189,20 @@ impl super::Reader for Zebra {
                         match read(&mut t_stream, buf) {
                             Ok(mut tags) => {
                                 match process_tags(&mut read_map, &mut tags, t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
-                                    Ok(_) => {
-                                        //println!("Tags processed.");
+                                    Ok(new_reads) => {
+                                        println!("Tags processed.");
+                                        if new_reads.len() > 0 {
+                                            match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("error sending new reads to repeaters: {e}")
+                                                }
+                                            }
+                                            if let Some(processor) = t_sight_processor {
+                                                processor.notify();
+                                                t_sight_processor = Some(processor);
+                                            }
+                                        }
                                     },
                                     Err(e) => println!("Error processing tags. {e}"),
                                 };
@@ -165,8 +214,19 @@ impl super::Reader for Zebra {
                                     }
                                     ErrorKind::TimedOut => {
                                         match process_tags(&mut read_map, &mut Vec::new(), t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
-                                            Ok(_) => {
-                                                //println!("Timeout tags processed.");
+                                            Ok(new_reads) => {
+                                                if new_reads.len() > 0 {
+                                                    match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
+                                                        Ok(_) => {},
+                                                        Err(e) => {
+                                                            println!("error sending new reads to repeaters: {e}")
+                                                        }
+                                                    }
+                                                    if let Some(processor) = t_sight_processor {
+                                                        processor.notify();
+                                                        t_sight_processor = Some(processor);
+                                                    }
+                                                }
                                             },
                                             Err(e) => println!("Error processing tags. {e}"),
                                         }
@@ -377,6 +437,36 @@ fn save_reads(
     }
 }
 
+fn send_new(
+    reads: Vec<read::Read>,
+    control_sockets: &Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED+1]>>,
+    read_repeaters: &Arc<Mutex<[bool;MAX_CONNECTED]>>,
+) -> Result<(), &'static str> {
+    let mut no_error = true;
+    if let Ok(sockets) = control_sockets.lock() {
+        if let Ok(repeaters) = read_repeaters.lock() {
+            for ix in 0..MAX_CONNECTED {
+                match &sockets[ix] {
+                    Some(sock) => {
+                        if repeaters[ix] == true {
+                            no_error = socket::write_reads(&sock, &reads);
+                        }
+                    },
+                    None => {}
+                }
+            }
+        } else {
+            return Err("error getting repeaters mutex")
+        }
+    } else {
+        return Err("error getting sockets mutex")
+    }
+    if no_error == false {
+        return Err("error occurred writing to one or more sockets")
+    }
+    Ok(())
+}
+
 fn process_tags(
     map: &mut HashMap<u128, (u64, TagData)>,
     tags: &mut Vec<TagData>,
@@ -384,7 +474,7 @@ fn process_tags(
     chip_type: &str,
     sqlite: &Arc<Mutex<sqlite::SQLite>>,
     r_name: &str
-) -> Result<(), &'static str> {
+) -> Result<Vec<read::Read>, &'static str> {
     let since_epoch = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(v) => v.as_micros() as u64,
         Err(_) => return Err("something went wrong trying to get current time")
@@ -483,7 +573,7 @@ fn process_tags(
             return Err("unable to get database lock")
         }
     }
-    Ok(())
+    Ok(reads)
 }
 
 fn stop_reading(t_stream: &mut TcpStream, msg_id: u32) -> Result<(), &'static str> {

@@ -32,7 +32,7 @@ impl ZeroConf {
                 return Err("unable to establish udp socket");
             }
         };
-        match socket.set_read_timeout(Some(Duration::new(5,0))) {
+        match socket.set_read_timeout(Some(Duration::new(2,0))) {
             Ok(_) => {},
             Err(e) => {
                 println!("Unable to set read timeout on socket: {e}");
@@ -107,5 +107,6 @@ impl ZeroConf {
                 }
             };
         }
+        println!("Zero Conf Server has shut down.");
     }
 }

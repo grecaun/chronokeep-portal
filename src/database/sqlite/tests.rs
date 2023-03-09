@@ -239,7 +239,7 @@ fn test_get_setting() {
 #[test]
 fn test_save_reader() {
     let unique_path = "./test_save_reader.sqlite";
-    let original = zebra::Zebra::new(
+    let original = zebra::Zebra::new_no_repeaters(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.100"),
@@ -262,7 +262,7 @@ fn test_save_reader() {
     // Test auto update feature of the 
     let updated_ip = "random_ip";
     let updated_port = 12345;
-    let result = sqlite.save_reader(&zebra::Zebra::new(
+    let result = sqlite.save_reader(&zebra::Zebra::new_no_repeaters(
             0,
             String::from(original.nickname()),
             String::from(updated_ip),
@@ -303,7 +303,7 @@ fn test_save_reader() {
 #[test]
 fn test_get_reader() {
     let unique_path = "./test_get_reader.sqlite";
-    let original = zebra::Zebra::new(
+    let original = zebra::Zebra::new_no_repeaters(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
@@ -336,7 +336,7 @@ fn test_get_reader() {
 #[test]
 fn test_get_readers() {
     let unique_path = "./test_get_readers.sqlite";
-    let original = zebra::Zebra::new(
+    let original = zebra::Zebra::new_no_repeaters(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
@@ -353,7 +353,7 @@ fn test_get_readers() {
     assert!(first.equal(&original));
     // add a bunch of readers to test that we can get them all
     for i in 2..8 {
-        _ = sqlite.save_reader(&zebra::Zebra::new(
+        _ = sqlite.save_reader(&zebra::Zebra::new_no_repeaters(
             0,
             format!("zebra-{i}"),
             format!("192.168.1.10{i}"),
@@ -378,7 +378,7 @@ fn test_get_readers() {
 #[test]
 fn test_delete_reader() {
     let unique_path = "./test_delete_reader.sqlite";
-    let mut original = zebra::Zebra::new(
+    let mut original = zebra::Zebra::new_no_repeaters(
         0,
         String::from("zebra-1"),
         String::from("192.168.1.101"),
@@ -403,7 +403,7 @@ fn test_delete_reader() {
     let middle = 4;
     let mut middle_ix: i64 = -1;
     for i in 0..(middle * 2) {
-        let ix = sqlite.save_reader(&zebra::Zebra::new(
+        let ix = sqlite.save_reader(&zebra::Zebra::new_no_repeaters(
             0,
             format!("zebra-{i}"),
             format!("192.168.1.10{i}"),
