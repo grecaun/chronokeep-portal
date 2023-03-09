@@ -2,9 +2,10 @@ use serde::Serialize;
 
 pub const READ_STATUS_UNUSED: u8 = 0;
 pub const READ_STATUS_USED: u8 = 1;
-pub const READ_STATUS_TOO_SOON: u8 = 3;
+pub const READ_STATUS_TOO_SOON: u8 = 2;
 
 pub const READ_UPLOADED_FALSE: u8 = 0;
+pub const READ_UPLOADED_TRUE: u8 = 1;
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all="snake_case")]
@@ -57,7 +58,8 @@ impl Read {
         self.milliseconds == other.milliseconds &&
         self.antenna == other.antenna &&
         self.reader == other.reader &&
-        self.status == other.status
+        self.status == other.status &&
+        self.uploaded == other.uploaded
     }
 
     pub fn id(&self) -> u64 {

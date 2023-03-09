@@ -85,11 +85,7 @@ pub enum Request {
         start_seconds: i64,
         end_seconds: i64,
     },
-    SightingsDeleteAll,
-    SightingsDelete {
-        start_seconds: i64,
-        end_seconds: i64
-    },
+    SightingsDelete,
     // Settings related requests
     SettingsSet {
         settings: Vec<Setting>

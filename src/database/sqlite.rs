@@ -489,6 +489,127 @@ impl super::Database for SQLite {
         }
     }
 
+    fn get_useful_reads(&self) -> Result<Vec<read::Read>, DBError> {
+        let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads WHERE status <> ?1;") {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
+        };
+        let results = match stmt.query_map(
+            [read::READ_STATUS_TOO_SOON],
+            |row| {
+                Ok(read::Read::new(
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))
+            }) {
+                Ok(r) => r,
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            };
+        let mut output: Vec<read::Read> = Vec::new();
+        for row in results {
+            match row {
+                Ok(r) => {
+                    output.push(r);
+                },
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            }
+        }
+        return Ok(output);
+    }
+    
+    fn get_not_uploaded_reads(&self) -> Result<Vec<read::Read>, DBError> {       
+        let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads WHERE uploaded=?1;") {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
+        };
+        let results = match stmt.query_map(
+            [read::READ_UPLOADED_FALSE],
+            |row| {
+                Ok(read::Read::new(
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))
+            }) {
+                Ok(r) => r,
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            };
+        let mut output: Vec<read::Read> = Vec::new();
+        for row in results {
+            match row {
+                Ok(r) => {
+                    output.push(r);
+                },
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            }
+        }
+        return Ok(output);
+    }
+
+    fn reset_reads_status(&self) -> Result<usize, DBError> {
+        match self.conn.execute("DELETE FROM sightings;", []) {
+            Ok(_) => (),
+            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+        };
+        match self.conn.execute(
+            "UPDATE chip_reads SET status=?1;",
+            [read::READ_STATUS_UNUSED]
+        ) {
+            Ok(num) => Ok(num),
+            Err(e) => Err(DBError::DataInsertionError(e.to_string()))
+        }
+    }
+
+    fn reset_reads_upload(&self) -> Result<usize, DBError> {
+        match self.conn.execute(
+            "UPDATE chip_reads SET uploaded=?1;",
+            [read::READ_UPLOADED_FALSE]
+        ) {
+            Ok(num) => Ok(num),
+            Err(e) => Err(DBError::DataInsertionError(e.to_string()))
+        }
+    }
+
+    fn update_reads_status(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError> {
+        if let Ok(tx) = self.conn.transaction() {
+            let mut count = 0;
+            for r in reads {
+                match r.status() {
+                    read::READ_STATUS_TOO_SOON | read::READ_STATUS_UNUSED | read::READ_STATUS_USED => {},
+                    _ => return Err(DBError::DataInsertionError(String::from("invalid chip read status")))
+                }
+                match tx.execute(
+                    "UPDATE chip_reads SET
+                            status=?1,
+                            uploaded=?2
+                            WHERE chip_id=?3;",
+                    (r.status(), r.uploaded(), r.id())
+                ) {
+                    Ok(val) => count = count + val,
+                    Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
+                }
+            }
+            if let Err(e) = tx.commit() {
+                return Err(DBError::DataInsertionError(e.to_string()));
+            }
+            return Ok(count);
+        }
+        return Err(DBError::ConnectionError(String::from("error starting transaction")));
+    }
+
     // Participants
     fn add_participants(&mut self, participants: &Vec<participant::Participant>) -> Result<usize, DBError> {
         let mut count = 0;
@@ -530,6 +651,10 @@ impl super::Database for SQLite {
     }
 
     fn delete_participants(&self) -> Result<usize, DBError> {
+        match self.delete_sightings() {
+            Ok(_) => (),
+            Err(e) => return Err(e)
+        }
         match self.conn.execute(
             "DELETE FROM participants;",
             []
@@ -746,22 +871,18 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn delete_sightings(&self, start: i64, end: i64) -> Result<usize, DBError> {
-        match self.conn.execute("DELETE FROM sightings AS s WHERE EXISTS 
-            (SELECT * FROM chip_reads AS r WHERE r.chip_id = s.chip_id AND r.seconds >= ?1 AND r.seconds <= ?2);",
-            [start, end]) {
-            Ok(num) => Ok(num),
-            Err(e) => {
-                println!("{e}");
-                Err(DBError::DataDeletionError(e.to_string()))
-            }
+    fn delete_sightings(&self) -> Result<usize, DBError> {
+        let output = match self.conn.execute("DELETE FROM sightings;", []) {
+            Ok(num) => num,
+            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+        };
+        match self.conn.execute(
+            "UPDATE chip_reads SET status=?1;",
+            [read::READ_STATUS_UNUSED]
+        ) {
+            Ok(_) => (),
+            Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
         }
-    }
-
-    fn delete_all_sightings(&self) -> Result<usize, DBError> {
-        match self.conn.execute("DELETE FROM sightings;", []) {
-            Ok(num) => Ok(num),
-            Err(e) => Err(DBError::DataDeletionError(e.to_string()))
-        }
+        Ok(output)
     }
 }

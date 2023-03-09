@@ -593,7 +593,7 @@ fn make_reads() -> Vec<read::Read> {
             String::from("reader-1"),
             String::from("-25dba"),
             read::READ_STATUS_USED,
-            read::READ_UPLOADED_FALSE
+            read::READ_UPLOADED_TRUE
     ));
     output.push(read::Read::new(
             0,
@@ -615,8 +615,8 @@ fn make_reads() -> Vec<read::Read> {
             3,
             String::from("reader-1"),
             String::from("-5dba"),
-            read::READ_STATUS_UNUSED,
-            read::READ_UPLOADED_FALSE
+            read::READ_STATUS_TOO_SOON,
+            read::READ_UPLOADED_TRUE
     ));
     for i in 1006..1100 {
         output.push(read::Read::new(
@@ -773,6 +773,155 @@ fn test_delete_all_reads() {
     finalize_tests(unique_path);
 }
 
+#[test]
+fn test_reset_reads_status() {
+    let unique_path = "./test_reset_reads_status.sqlite";
+    let new_reads = make_reads();
+    let mut sqlite = setup_tests(unique_path);
+    let count = sqlite.save_reads(&new_reads).unwrap();
+    let unused = sqlite.get_useful_reads().unwrap();
+    assert_ne!(count, unused.len());
+    assert_ne!(0, unused.len());
+    let result = sqlite.reset_reads_status();
+    assert!(result.is_ok());
+    let res_count = result.unwrap();
+    assert_eq!(count, res_count);
+    let unused = sqlite.get_useful_reads().unwrap();
+    assert_eq!(count, unused.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_reset_reads_upload() {
+    let unique_path = "./test_reset_reads_upload.sqlite";
+    let new_reads = make_reads();
+    let mut sqlite = setup_tests(unique_path);
+    let count = sqlite.save_reads(&new_reads).unwrap();
+    let not_uploaded = sqlite.get_not_uploaded_reads().unwrap();
+    assert_ne!(count, not_uploaded.len());
+    assert_ne!(0, not_uploaded.len());
+    let result = sqlite.reset_reads_upload();
+    assert!(result.is_ok());
+    let res_count = result.unwrap();
+    assert_eq!(count, res_count);
+    let not_uploaded = sqlite.get_not_uploaded_reads().unwrap();
+    assert_eq!(count, not_uploaded.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_get_unused_reads() {
+    let unique_path = "./test_get_unused_reads.sqlite";
+    let new_reads = make_reads();
+    let mut sqlite = setup_tests(unique_path);
+    sqlite.save_reads(&new_reads).unwrap();
+    let new_reads = sqlite.get_all_reads().unwrap();
+    let mut useful = 0;
+    for read in new_reads.iter() {
+        if read.status() == read::READ_STATUS_UNUSED || read.status() == read::READ_STATUS_USED {
+            useful = useful + 1;
+        }
+    }
+    let result = sqlite.get_useful_reads();
+    assert!(result.is_ok());
+    let result = result.unwrap();
+    assert_eq!(useful, result.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_get_not_uploaded_reads() {
+    let unique_path = "./test_get_not_uploaded_reads.sqlite";
+    let new_reads = make_reads();
+    let mut sqlite = setup_tests(unique_path);
+    sqlite.save_reads(&new_reads).unwrap();
+    let new_reads = sqlite.get_all_reads().unwrap();
+    let mut not_uploaded = 0;
+    for read in new_reads.iter() {
+        if read.uploaded() == read::READ_UPLOADED_FALSE {
+            not_uploaded = not_uploaded + 1;
+        }
+    }
+    let result = sqlite.get_not_uploaded_reads();
+    assert!(result.is_ok());
+    let result = result.unwrap();
+    assert_eq!(not_uploaded, result.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_update_reads_status() {
+    let unique_path = "./test_update_reads_status.sqlite";
+    let new_reads = make_reads();
+    let mut sqlite = setup_tests(unique_path);
+    sqlite.save_reads(&new_reads).unwrap();
+    let new_reads = sqlite.get_all_reads().unwrap();
+    let mut updated_reads: Vec<read::Read> = Vec::new();
+    for read in new_reads.iter() {
+        updated_reads.push(read::Read::new(
+            read.id(),
+            String::from(read.chip()),
+            read.seconds(),
+            read.milliseconds(),
+            read.antenna(),
+            String::from(read.reader()),
+            String::from(read.rssi()),
+            read::READ_STATUS_TOO_SOON,
+            read::READ_UPLOADED_FALSE
+        ))
+    }
+    let updated = sqlite.update_reads_status(&updated_reads);
+    assert!(updated.is_ok());
+    let updated = updated.unwrap();
+    assert_eq!(updated_reads.len(), updated);
+    let updated = sqlite.get_all_reads().unwrap();
+    for outer in updated_reads.iter() {
+        let mut found = false;
+        for inner in updated.iter() {
+            if inner.equals(&outer) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found)
+    }
+    let mut updated_reads: Vec<read::Read> = Vec::new();
+    for read in new_reads.iter() {
+        updated_reads.push(read::Read::new(
+            read.id(),
+            String::from(read.chip()),
+            read.seconds(),
+            read.milliseconds(),
+            read.antenna(),
+            String::from(read.reader()),
+            String::from(read.rssi()),
+            read::READ_STATUS_UNUSED,
+            read::READ_UPLOADED_TRUE
+        ))
+    }
+    let updated = sqlite.update_reads_status(&updated_reads);
+    assert!(updated.is_ok());
+    let updated = updated.unwrap();
+    assert_eq!(updated_reads.len(), updated);
+    let updated = sqlite.get_all_reads().unwrap();
+    for outer in updated_reads.iter() {
+        let mut found = false;
+        for inner in updated.iter() {
+            if inner.equals(&outer) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found)
+    }
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
 fn make_participants() -> Vec<participant::Participant> {
     let mut output: Vec<participant::Participant> = Vec::new();
     output.push(participant::Participant::new(
@@ -902,6 +1051,7 @@ fn test_delete_participants() {
     assert_eq!(participants.len(), result.unwrap());
     let parts = sqlite.get_participants().unwrap();
     assert_eq!(0, parts.len());
+    // test adding participants and sightings then deleting participants
     drop(sqlite);
     finalize_tests(unique_path);
 }
@@ -1098,49 +1248,13 @@ fn test_get_all_sightings() {
 
 #[test]
 fn test_delete_sightings() {
-    let unique_path = "./test_delete_sightings.sqlite";
-    let mut sqlite = setup_tests(unique_path);
-    let sightings = make_sightings(&mut sqlite);
-    _ = sqlite.save_sightings(&sightings);
-    let sights = sqlite.get_all_sightings().unwrap();
-    assert_eq!(sightings.len(), sights.len());
-    // sightings are at 1000, 2800, 4600, 6400, 8200, there are 5 participants as well, so 5 at each point, 25 total
-    let result = sqlite.delete_sightings(1000, 2799);
-    assert!(result.is_ok());
-    assert_eq!(5, result.unwrap());
-    let sights = sqlite.get_all_sightings().unwrap();
-    assert_eq!(20, sights.len());
-    // delete already deleted range
-    let result = sqlite.delete_sightings(0, 2799);
-    assert!(result.is_ok());
-    assert_eq!(0, result.unwrap());
-    let sights = sqlite.get_all_sightings().unwrap();
-    assert_eq!(20, sights.len());
-    // bad range, should still delete nothing
-    let result = sqlite.delete_sightings(2800, 2799);
-    assert!(result.is_ok());
-    assert_eq!(0, result.unwrap());
-    let sights = sqlite.get_all_sightings().unwrap();
-    assert_eq!(20, sights.len());
-    // delete  the rest
-    let result = sqlite.delete_sightings(0, 20000);
-    assert!(result.is_ok());
-    assert_eq!(20, result.unwrap());
-    let sights = sqlite.get_all_sightings().unwrap();
-    assert_eq!(0, sights.len());
-    drop(sqlite);
-    finalize_tests(unique_path);
-}
-
-#[test]
-fn test_delete_all_sightings() {
     let unique_path = "./test_delete_all_sightings.sqlite";
     let mut sqlite = setup_tests(unique_path);
     let sightings = make_sightings(&mut sqlite);
     _ = sqlite.save_sightings(&sightings);
     let sights = sqlite.get_all_sightings().unwrap();
     assert_eq!(sightings.len(), sights.len());
-    let result = sqlite.delete_all_sightings();
+    let result = sqlite.delete_sightings();
     assert!(result.is_ok());
     assert_eq!(sightings.len(), result.unwrap());
     let sights = sqlite.get_all_sightings().unwrap();

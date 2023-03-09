@@ -1007,24 +1007,9 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::SightingsDelete { start_seconds, end_seconds } => {
+                requests::Request::SightingsDelete => {
                     if let Ok(sq) = sqlite.lock() {
-                        match sq.delete_sightings(start_seconds, end_seconds) {
-                            Ok(count) => {
-                                no_error = write_success(&stream, count);
-                            }
-                            Err(e) => {
-                                println!("Error deleting sightings. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error deleting reads: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::SightingsDeleteAll => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.delete_all_sightings() {
+                        match sq.delete_sightings() {
                             Ok(count) => {
                                 no_error = write_success(&stream, count);
                             }
