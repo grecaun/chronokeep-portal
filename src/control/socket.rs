@@ -203,6 +203,12 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
         }
     }
     println!("Shutting down control thread.");
+    println!("Stopping readers.");
+    if let Ok(mut r) = readers.lock() {
+        for reader in r.iter_mut() {
+            _ = reader.disconnect();
+        }
+    }
     println!("Stopping sightings processor.");
     sight_processor.stop();
     sight_processor.notify();

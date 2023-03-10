@@ -32,7 +32,6 @@ impl SightingsProcessor {
     }
 
     pub fn notify(&self) {
-        println!("Sightings processor notified of information.");
         let (lock, cvar) = &*self.semaphore;
         let mut notify = lock.lock().unwrap();
         *notify = true;
@@ -115,8 +114,9 @@ impl SightingsProcessor {
                                 let chip = String::from(read.chip());
                                 if used.contains_key(&chip) {
                                     let last = &used[&chip];
-                                    if last.seconds() <= read.seconds() &&
-                                        last.milliseconds() < read.milliseconds() {
+                                    if last.seconds() < read.seconds() ||
+                                        (last.seconds() == read.seconds() && last.milliseconds() < read.milliseconds())
+                                    {
                                         used.insert(chip, read);
                                     }
                                 } else {

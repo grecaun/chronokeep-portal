@@ -812,7 +812,7 @@ fn test_reset_reads_upload() {
 }
 
 #[test]
-fn test_get_unused_reads() {
+fn test_get_useful_reads() {
     let unique_path = "./test_get_unused_reads.sqlite";
     let new_reads = make_reads();
     let mut sqlite = setup_tests(unique_path);
@@ -824,6 +824,7 @@ fn test_get_unused_reads() {
             useful = useful + 1;
         }
     }
+    assert_ne!(useful, new_reads.len());
     let result = sqlite.get_useful_reads();
     assert!(result.is_ok());
     let result = result.unwrap();

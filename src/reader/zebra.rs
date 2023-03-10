@@ -166,6 +166,7 @@ impl super::Reader for Zebra {
                 let t_control_sockets = self.control_sockets.clone();
                 let t_read_repeaters = self.read_repeaters.clone();
                 let mut t_sight_processor = self.sight_processor.clone();
+                let t_nickname = String::from(self.nickname());
 
                 let output = thread::spawn(move|| {
                     let buf: &mut [u8; 51200] = &mut [0;51200];
@@ -236,6 +237,7 @@ impl super::Reader for Zebra {
                             }
                         }
                     }
+                    stop(&mut t_stream, &reading, t_nickname, &msg_id);
                     finalize(&mut t_stream, &msg_id, &reading);
                     save_reads(&mut read_map, &t_chip_type, &t_sqlite, t_reader_name.as_str());
                     if let Ok(mut con) = t_connected.lock() {
@@ -249,9 +251,13 @@ impl super::Reader for Zebra {
     }
 
     fn disconnect(&mut self) -> Result<(), &'static str> {
+        _ = self.stop();
         if let Ok(mut keepalive) = self.keepalive.lock() {
             *keepalive = false;
         };
+        if let Ok(mut con) = self.connected.lock() {
+            *con = false;
+        }
         Ok(())
     }
 
@@ -401,6 +407,27 @@ impl super::Reader for Zebra {
     }
 }
 
+fn stop(
+    socket: &mut TcpStream,
+    reading: &Arc<Mutex<bool>>,
+    nickname: String,
+    msg_mtx: &Arc<sync::Mutex<u32>>
+) {
+    if let Ok(r) = reading.lock() {
+        if !*r {
+            return
+        }
+    }
+    let mut msg_id = 0;
+    if let Ok(id) = msg_mtx.lock() {
+        msg_id = *id+1;
+    }
+    match stop_reading(socket, msg_id) {
+        Ok(_) => println!("No longer reading from reader {}", nickname),
+        Err(_) => (),
+    }
+}
+
 fn save_reads(
     map: &mut HashMap<u128, (u64, TagData)>,
     chip_type: &str,
@@ -481,6 +508,7 @@ fn process_tags(
     };
     // get the read window from 1/10 of a second to milliseconds
     let window = (read_window as u64) * 100000;
+    let one_second = 1000000;
     // sort tags so the earliest seen are first
     tags.sort_by(|a, b| a.first_seen.cmp(&b.first_seen));
     let mut reads: Vec<read::Read> = Vec::new();
@@ -501,7 +529,7 @@ fn process_tags(
                         tag: tag.tag,
                         rssi: tag.rssi,
                         antenna: tag.antenna,
-                        first_seen: tag.first_seen,
+                        first_seen: fs,
                         last_seen: tag.last_seen,
                     }));
                 } else {
@@ -518,8 +546,8 @@ fn process_tags(
                     old_data.antenna as u32,
                     String::from(r_name),
                     format!("{}", old_data.rssi),
-                    0,
-                    0
+                    read::READ_STATUS_UNUSED,
+                    read::READ_UPLOADED_FALSE
                 ));
                 map.insert(tag.tag, (tag.first_seen, TagData{
                     tag: tag.tag,
@@ -542,8 +570,8 @@ fn process_tags(
     }
     let mut removed: Vec<u128> = Vec::new();
     for (fs, old_tag) in map.values() {
-        // if we're double the window we can upload those
-        if fs + window + window < since_epoch {
+        // if we're 1 second past the window
+        if fs + window + one_second < since_epoch {
             let chip = if chip_type == types::TYPE_CHIP_DEC {format!("{}", old_tag.tag)} else {format!("{:x}", old_tag.tag)};
             reads.push(read::Read::new(
                 0,
@@ -553,8 +581,8 @@ fn process_tags(
                 old_tag.antenna as u32,
                 String::from(r_name),
                 format!("{}", old_tag.rssi),
-                0,
-                0
+                read::READ_STATUS_UNUSED,
+                read::READ_UPLOADED_FALSE
             ));
             removed.push(old_tag.tag);
         }
