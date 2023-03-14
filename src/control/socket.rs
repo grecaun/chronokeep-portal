@@ -3,7 +3,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, Reader}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results, processor};
+use crate::{database::{sqlite, Database}, reader::{self, zebra}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results, processor};
 
 use super::zero_conf::ZeroConf;
 
@@ -25,7 +25,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     // Joiners are join handles for threads we spin up.
     let joiners: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
     // Readers are chip readers that are saved.  They may be connected or reading as well.
-    let readers: Arc<Mutex<Vec<Box<dyn reader::Reader>>>> = Arc::new(Mutex::new(Vec::new()));
+    let readers: Arc<Mutex<Vec<reader::Reader>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Control sockets are sockets that are connected and should be relayed any changes in settings / readers / apis
     // when another socket changes/deletes/adds something. -- Last spot is reserved for localhost to send shutdown command
@@ -231,7 +231,7 @@ fn handle_stream(
     keepalive: Arc<Mutex<bool>>,
     mut controls: super::Control,
     control_port: &u16,
-    readers: Arc<Mutex<Vec<Box<dyn reader::Reader>>>>,
+    readers: Arc<Mutex<Vec<reader::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     sighting_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
@@ -321,16 +321,17 @@ fn handle_stream(
                 },
                 requests::Request::ReaderAdd { name, kind, ip_address, port } => {
                     if let Ok(sq) = sqlite.lock() {
-                        match kind.as_str() {
-                            reader::READER_KIND_ZEBRA => {
+                        match reader::Reader::new_no_repeaters(
+                            0,
+                            kind,
+                            name,
+                            ip_address,
+                            port,
+                            reader::AUTO_CONNECT_FALSE,
+                        ) {
+                            Ok(reader) => {
                                 let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
-                                let mut tmp = zebra::Zebra::new_no_repeaters(
-                                    0,
-                                    name,
-                                    ip_address,
-                                    port,
-                                    reader::AUTO_CONNECT_FALSE,
-                                );
+                                let mut tmp = reader;
                                 match sq.save_reader(&tmp) {
                                     Ok(val) => {
                                         if let Ok(mut u_readers) = readers.lock() {
@@ -344,7 +345,7 @@ fn handle_stream(
                                                 },
                                                 None => {
                                                     tmp.set_id(val);
-                                                    u_readers.push(Box::new(tmp));
+                                                    u_readers.push(tmp);
                                                 }
                                             }
                                             if let Ok(c_socks) = control_sockets.lock() {
@@ -368,9 +369,9 @@ fn handle_stream(
                                     },
                                 };
                             },
-                            other => {
+                            Err(e) => {
                                 no_error = write_error(&stream, errors::Errors::InvalidReaderType {
-                                    message: format!("'{}' is not a valid reader type. Valid Types: '{}'", other, reader::READER_KIND_ZEBRA)
+                                    message: e.to_string()
                                  });
                             },
                         }
@@ -416,19 +417,19 @@ fn handle_stream(
                     if let Ok(mut u_readers) = readers.lock() {
                         match u_readers.iter().position(|x| x.id() == id) {
                             Some(ix) => {
-                                let reader = u_readers.remove(ix);
-                                match reader.kind() {
-                                    reader::READER_KIND_ZEBRA => {
-                                        let mut reader = reader::zebra::Zebra::new(
-                                            reader.id(),
-                                            String::from(reader.nickname()),
-                                            String::from(reader.ip_address()),
-                                            reader.port(),
-                                            reader::AUTO_CONNECT_FALSE,
-                                            control_sockets.clone(),
-                                            read_repeaters.clone(),
-                                            sight_processor.clone(),
-                                        );
+                                let old_reader = u_readers.remove(ix);
+                                match reader::Reader::new(
+                                    old_reader.id(),
+                                    String::from(old_reader.kind()),
+                                    String::from(old_reader.nickname()),
+                                    String::from(old_reader.ip_address()),
+                                    old_reader.port(),
+                                    old_reader.auto_connect(),
+                                    control_sockets.clone(),
+                                    read_repeaters.clone(),
+                                    sight_processor.clone(),
+                                ) {
+                                    Ok(mut reader) => {
                                         match reader.connect(&sqlite, &controls) {
                                             Ok(j) => {
                                                 if let Ok(mut join) = joiners.lock() {
@@ -442,15 +443,12 @@ fn handle_stream(
                                                 });
                                             }
                                         }
-                                        u_readers.push(Box::new(reader));
-                                    },
-                                    other => {
-                                        no_error = write_error(&stream, errors::Errors::InvalidReaderType {
-                                            message: format!("'{other}' reader type not yet implemented or invalid")
-                                        });
                                         u_readers.push(reader);
+                                    },
+                                    Err(e) => {
+                                        no_error = write_error(&stream, errors::Errors::InvalidReaderType { message: e.to_string() });
                                     }
-                                }
+                                };
                             },
                             None => {
                                 no_error = write_error(&stream, errors::Errors::NotFound);
@@ -1251,7 +1249,7 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool 
     output
 }
 
-fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<Box<dyn reader::Reader>>>) -> bool {
+fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         list.push(responses::Reader{
@@ -1389,7 +1387,7 @@ fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>)
     output
 }
 
-fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, sightings: bool, u_readers: &MutexGuard<Vec<Box<dyn reader::Reader>>>) -> bool {
+fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, sightings: bool, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         list.push(responses::Reader{

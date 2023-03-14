@@ -1,416 +1,226 @@
 use std::{str, net::TcpStream, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control::{self, socket::{MAX_CONNECTED, self}}, processor};
+use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control::{self, socket::{MAX_CONNECTED, self}}};
 
 pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 
-pub struct Zebra {
-    id: i64,
-    nickname: String,
-    kind: String,
-    ip_address: String,
-    port: u16,
-    auto_connect: u8,
-
-    pub socket: sync::Mutex<Option<TcpStream>>,
-    pub keepalive: Arc<sync::Mutex<bool>>,
-    pub msg_id: Arc<sync::Mutex<u32>>,
-
-    pub reading: Arc<sync::Mutex<bool>>,
-    pub connected: Arc<sync::Mutex<bool>>,
-    
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
-    read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-    sight_processor: Option<Arc<processor::SightingsProcessor>>,
-}
-
-impl Zebra {
-    pub fn new_no_repeaters(
-        id: i64,
-        nickname: String,
-        ip_address: String,
-        port: u16,
-        auto_connect: u8,
-    ) -> Zebra {
-        Zebra {
-            id,
-            kind: String::from(super::READER_KIND_ZEBRA),
-            nickname,
-            ip_address,
-            port,
-            socket: Mutex::new(None),
-            keepalive: Arc::new(Mutex::new(true)),
-            msg_id: Arc::new(Mutex::new(0)),
-            reading: Arc::new(Mutex::new(false)),
-            connected: Arc::new(Mutex::new(false)),
-            auto_connect,
-            control_sockets: Arc::new(Mutex::new(Default::default())),
-            read_repeaters: Arc::new(Mutex::new(Default::default())),
-            sight_processor: None,
-        }
-    }
-    pub fn new(
-        id: i64,
-        nickname: String,
-        ip_address: String,
-        port: u16,
-        auto_connect: u8,
-        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
-        read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-        sight_processor: Arc<processor::SightingsProcessor>,
-    ) -> Zebra {
-        Zebra {
-            id,
-            kind: String::from(super::READER_KIND_ZEBRA),
-            nickname,
-            ip_address,
-            port,
-            socket: sync::Mutex::new(None),
-            keepalive: Arc::new(sync::Mutex::new(true)),
-            msg_id: Arc::new(sync::Mutex::new(0)),
-            reading: Arc::new(sync::Mutex::new(false)),
-            connected: Arc::new(sync::Mutex::new(false)),
-            auto_connect,
-            control_sockets,
-            read_repeaters,
-            sight_processor: Some(sight_processor),
-        }
-    }
-}
-
-impl super::Reader for Zebra {
-    fn set_id(&mut self, id: i64) {
-        self.id = id;
-    }
-
-    fn id(&self) -> i64 {
-        self.id
-    }
-
-    fn nickname(&self) -> &str {
-        self.nickname.as_str()
-    }
-
-    fn kind(&self) -> &str {
-        self.kind.as_str()
-    }
-
-    fn ip_address(&self) -> &str {
-        self.ip_address.as_str()
-    }
-
-    fn port(&self) -> u16 {
-        self.port
-    }
-
-    fn auto_connect(&self) -> u8 {
-        self.auto_connect
-    }
-
-    fn equal(&self, other: &dyn super::Reader) -> bool {
-        self.nickname == other.nickname() &&
-            self.kind == other.kind() &&
-            self.ip_address == other.ip_address() &&
-            self.port == other.port()
-    }
-
-    fn is_connected(&self) -> Option<bool> {
-        let mut output: Option<bool> = None;
-        if let Ok(con) = self.connected.lock() {
-            output = Some(*con);
-        }
-        output
-    }
-
-    fn is_reading(&self) -> Option<bool> {
-        let mut output: Option<bool> = None;
-        if let Ok(con) = self.reading.lock() {
-            output = Some(*con);
-        }
-        output
-    }
-
-    fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str> {
-        let res = TcpStream::connect(format!("{}:{}", self.ip_address, self.port));
-        match res {
-            Err(_) => return Err("unable to connect"),
-            Ok(mut tcp_stream) => {
-                // try to send connection messages
-                match send_connect_messages(&mut tcp_stream, &self.msg_id) {
-                    Ok(_) => println!("Successfully connected to reader {}.", self.nickname()),
-                    Err(e) => return Err(e),
-                };
-                // copy tcp stream into the mutex
-                self.socket = match tcp_stream.try_clone() {
-                    Ok(stream) => sync::Mutex::new(Some(stream)),
-                    Err(_) => {
-                        return Err("error copying stream to thread")
-                    }
-                };
-                if let Ok(mut con) = self.connected.lock() {
-                    *con = true;
+pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str> {
+    let res = TcpStream::connect(format!("{}:{}", reader.ip_address, reader.port));
+    match res {
+        Err(_) => return Err("unable to connect"),
+        Ok(mut tcp_stream) => {
+            // try to send connection messages
+            match send_connect_messages(&mut tcp_stream, &reader.msg_id) {
+                Ok(_) => println!("Successfully connected to reader {}.", reader.nickname()),
+                Err(e) => return Err(e),
+            };
+            // copy tcp stream into the mutex
+            reader.socket = match tcp_stream.try_clone() {
+                Ok(stream) => sync::Mutex::new(Some(stream)),
+                Err(_) => {
+                    return Err("error copying stream to thread")
                 }
-                // copy values for out thread
-                let mut t_stream = tcp_stream;
-                let t_mutex = self.keepalive.clone();
-                let msg_id = self.msg_id.clone();
-                let reading = self.reading.clone();
-                let t_reader_name = self.nickname.clone();
-                let t_sqlite = sqlite.clone();
-                let t_window = controls.read_window.clone();
-                let t_chip_type = controls.chip_type.clone();
-                let t_connected = self.connected.clone();
-                let t_control_sockets = self.control_sockets.clone();
-                let t_read_repeaters = self.read_repeaters.clone();
-                let mut t_sight_processor = self.sight_processor.clone();
-                let t_nickname = String::from(self.nickname());
+            };
+            if let Ok(mut con) = reader.connected.lock() {
+                *con = true;
+            }
+            // copy values for out thread
+            let mut t_stream = tcp_stream;
+            let t_mutex = reader.keepalive.clone();
+            let msg_id = reader.msg_id.clone();
+            let reading = reader.reading.clone();
+            let t_reader_name = reader.nickname.clone();
+            let t_sqlite = sqlite.clone();
+            let t_window = controls.read_window.clone();
+            let t_chip_type = controls.chip_type.clone();
+            let t_connected = reader.connected.clone();
+            let t_control_sockets = reader.control_sockets.clone();
+            let t_read_repeaters = reader.read_repeaters.clone();
+            let mut t_sight_processor = reader.sight_processor.clone();
 
-                let output = thread::spawn(move|| {
-                    let buf: &mut [u8; 51200] = &mut [0;51200];
-                    match t_stream.set_read_timeout(Some(Duration::from_secs(1))) {
-                        Ok(_) => (),
-                        Err(e) => {
-                            println!("Error setting read timeout. {e}")
-                        }
+            let output = thread::spawn(move|| {
+                let buf: &mut [u8; 51200] = &mut [0;51200];
+                match t_stream.set_read_timeout(Some(Duration::from_secs(1))) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        println!("Error setting read timeout. {e}")
                     }
-                    let mut read_map: HashMap<u128, (u64, TagData)> = HashMap::new();
-                    loop {
-                        if let Ok(keepalive) = t_mutex.lock() {
-                            // check if we've been told to quit
-                            if *keepalive == false {
-                                break;
-                            };
-                        } else {
-                            // unable to grab mutex...
+                }
+                let mut read_map: HashMap<u128, (u64, TagData)> = HashMap::new();
+                loop {
+                    if let Ok(keepalive) = t_mutex.lock() {
+                        // check if we've been told to quit
+                        if *keepalive == false {
                             break;
-                        }
-                        match read(&mut t_stream, buf) {
-                            Ok(mut tags) => {
-                                match process_tags(&mut read_map, &mut tags, t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
-                                    Ok(new_reads) => {
-                                        println!("Tags processed.");
-                                        if new_reads.len() > 0 {
-                                            match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
-                                                Ok(_) => {},
-                                                Err(e) => {
-                                                    println!("error sending new reads to repeaters: {e}")
-                                                }
-                                            }
-                                            if let Some(processor) = t_sight_processor {
-                                                processor.notify();
-                                                t_sight_processor = Some(processor);
+                        };
+                    } else {
+                        // unable to grab mutex...
+                        break;
+                    }
+                    match read(&mut t_stream, buf) {
+                        Ok(mut tags) => {
+                            match process_tags(&mut read_map, &mut tags, t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
+                                Ok(new_reads) => {
+                                    println!("Tags processed.");
+                                    if new_reads.len() > 0 {
+                                        match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
+                                            Ok(_) => {},
+                                            Err(e) => {
+                                                println!("error sending new reads to repeaters: {e}")
                                             }
                                         }
-                                    },
-                                    Err(e) => println!("Error processing tags. {e}"),
-                                };
-                            },
-                            Err(e) => {
-                                match e.kind() {
-                                    ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
-                                        break;
+                                        if let Some(processor) = t_sight_processor {
+                                            processor.notify();
+                                            t_sight_processor = Some(processor);
+                                        }
                                     }
-                                    ErrorKind::TimedOut => {
-                                        match process_tags(&mut read_map, &mut Vec::new(), t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
-                                            Ok(new_reads) => {
-                                                if new_reads.len() > 0 {
-                                                    match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
-                                                        Ok(_) => {},
-                                                        Err(e) => {
-                                                            println!("error sending new reads to repeaters: {e}")
-                                                        }
-                                                    }
-                                                    if let Some(processor) = t_sight_processor {
-                                                        processor.notify();
-                                                        t_sight_processor = Some(processor);
+                                },
+                                Err(e) => println!("Error processing tags. {e}"),
+                            };
+                        },
+                        Err(e) => {
+                            match e.kind() {
+                                ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
+                                    break;
+                                }
+                                ErrorKind::TimedOut => {
+                                    match process_tags(&mut read_map, &mut Vec::new(), t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
+                                        Ok(new_reads) => {
+                                            if new_reads.len() > 0 {
+                                                match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
+                                                    Ok(_) => {},
+                                                    Err(e) => {
+                                                        println!("error sending new reads to repeaters: {e}")
                                                     }
                                                 }
-                                            },
-                                            Err(e) => println!("Error processing tags. {e}"),
-                                        }
-                                    },
-                                    _ => println!("Error reading from reader. {e}"),
-                                }
+                                                if let Some(processor) = t_sight_processor {
+                                                    processor.notify();
+                                                    t_sight_processor = Some(processor);
+                                                }
+                                            }
+                                        },
+                                        Err(e) => println!("Error processing tags. {e}"),
+                                    }
+                                },
+                                _ => println!("Error reading from reader. {e}"),
                             }
                         }
                     }
-                    stop(&mut t_stream, &reading, t_nickname, &msg_id);
-                    finalize(&mut t_stream, &msg_id, &reading);
-                    save_reads(&mut read_map, &t_chip_type, &t_sqlite, t_reader_name.as_str());
-                    if let Ok(mut con) = t_connected.lock() {
-                        *con = false;
-                    }
-                    println!("Thread reading from this reader has now closed.")
-                });
-                Ok(output)
-            },
-        }
+                }
+                stop(&mut t_stream, &reading, &t_reader_name, &msg_id);
+                finalize(&mut t_stream, &msg_id, &reading);
+                save_reads(&mut read_map, &t_chip_type, &t_sqlite, t_reader_name.as_str());
+                if let Ok(mut con) = t_connected.lock() {
+                    *con = false;
+                }
+                println!("Thread reading from this reader has now closed.")
+            });
+            Ok(output)
+        },
     }
+}
 
-    fn disconnect(&mut self) -> Result<(), &'static str> {
-        _ = self.stop();
-        if let Ok(mut keepalive) = self.keepalive.lock() {
-            *keepalive = false;
-        };
-        if let Ok(mut con) = self.connected.lock() {
-            *con = false;
+pub fn initialize(reader: &mut super::Reader) -> Result<(), &'static str> {
+    if let Ok(mut r) = reader.reading.lock() {
+        if *r {
+            return Err("already reading")
+        }
+        *r = true;
+    } else {
+        return Err("unable to check if we're actually reading")
+    }
+    let del_acs_id = reader.get_next_id();
+    let del_ros_id = reader.get_next_id();
+    let add_ros_id = reader.get_next_id();
+    let ena_ros_id = reader.get_next_id();
+    let sta_ros_id = reader.get_next_id();
+    if let Ok(stream) = reader.socket.lock() {
+        match &*stream {
+            Some(s) => {
+                let mut w_stream = match s.try_clone() {
+                    Ok(v) => v,
+                    Err(_) => return Err("unable to copy stream"),
+                };
+                // delete all access spec
+                let msg = requests::delete_access_spec(&del_acs_id, &0);
+                match w_stream.write_all(&msg) {
+                    Ok(_) => (),
+                    Err(_) => return Err("error writing data")
+                }
+                // delete all rospec
+                let msg = requests::delete_rospec(&del_ros_id, &0);
+                match w_stream.write_all(&msg) {
+                    Ok(_) => (),
+                    Err(_) => return Err("error writing data")
+                }
+                // add rospec
+                let msg = requests::add_rospec(&add_ros_id, &100);
+                match w_stream.write_all(&msg) {
+                    Ok(_) => (),
+                    Err(_) => return Err("error writing data")
+                }
+                // enable rospec
+                let msg = requests::enable_rospec(&ena_ros_id, &100);
+                match w_stream.write_all(&msg) {
+                    Ok(_) => (),
+                    Err(_) => return Err("error writing data")
+                }
+                // start rospec
+                let msg = requests::start_rospec(&sta_ros_id, &100);
+                match w_stream.write_all(&msg) {
+                    Ok(_) => (),
+                    Err(_) => return Err("error writing data")
+                }
+            },
+            None => {
+                return Err("not connected")
+            }
         }
         Ok(())
+    } else {
+        return Err("unable to get stream mutex")
     }
+}
 
-    fn initialize(&mut self) -> Result<(), &'static str> {
-        if let Ok(mut r) = self.reading.lock() {
-            if *r {
-                return Err("already reading")
-            }
-            *r = true;
-        } else {
-            return Err("unable to check if we're actually reading")
+
+pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
+    if let Ok(r) = reader.reading.lock() {
+        if !*r {
+            return Err("not reading")
         }
-        let del_acs_id = self.get_next_id();
-        let del_ros_id = self.get_next_id();
-        let add_ros_id = self.get_next_id();
-        let ena_ros_id = self.get_next_id();
-        let sta_ros_id = self.get_next_id();
-        if let Ok(stream) = self.socket.lock() {
-            match &*stream {
-                Some(s) => {
-                    let mut w_stream = match s.try_clone() {
-                        Ok(v) => v,
-                        Err(_) => return Err("unable to copy stream"),
-                    };
-                    // delete all access spec
-                    let msg = requests::delete_access_spec(&del_acs_id, &0);
-                    match w_stream.write_all(&msg) {
-                        Ok(_) => (),
-                        Err(_) => return Err("error writing data")
-                    }
-                    // delete all rospec
-                    let msg = requests::delete_rospec(&del_ros_id, &0);
-                    match w_stream.write_all(&msg) {
-                        Ok(_) => (),
-                        Err(_) => return Err("error writing data")
-                    }
-                    // add rospec
-                    let msg = requests::add_rospec(&add_ros_id, &100);
-                    match w_stream.write_all(&msg) {
-                        Ok(_) => (),
-                        Err(_) => return Err("error writing data")
-                    }
-                    // enable rospec
-                    let msg = requests::enable_rospec(&ena_ros_id, &100);
-                    match w_stream.write_all(&msg) {
-                        Ok(_) => (),
-                        Err(_) => return Err("error writing data")
-                    }
-                    // start rospec
-                    let msg = requests::start_rospec(&sta_ros_id, &100);
-                    match w_stream.write_all(&msg) {
-                        Ok(_) => (),
-                        Err(_) => return Err("error writing data")
-                    }
-                },
-                None => {
-                    return Err("not connected")
+    } else {
+        return Err("unable to check if we're actually reading")
+    }
+    let msg_id = reader.get_next_id();
+    if let Ok(stream) = reader.socket.lock() {
+        match &*stream {
+            Some(s) => {
+                let mut w_stream = match s.try_clone() {
+                    Ok(v) => v,
+                    Err(_) => return Err("unable to copy stream"),
+                };
+                match stop_reading(&mut w_stream, msg_id) {
+                    Ok(_) => println!("No longer reading from reader {}", reader.nickname()),
+                    Err(e) => return Err(e),
                 }
+            },
+            None => {
+                return Err("not connected")
             }
-            Ok(())
-        } else {
-            return Err("unable to get stream mutex")
         }
-    }
-
-    fn stop(&mut self) -> Result<(), &'static str> {
-        if let Ok(r) = self.reading.lock() {
-            if !*r {
-                return Err("not reading")
-            }
-        } else {
-            return Err("unable to check if we're actually reading")
-        }
-        let msg_id = self.get_next_id();
-        if let Ok(stream) = self.socket.lock() {
-            match &*stream {
-                Some(s) => {
-                    let mut w_stream = match s.try_clone() {
-                        Ok(v) => v,
-                        Err(_) => return Err("unable to copy stream"),
-                    };
-                    match stop_reading(&mut w_stream, msg_id) {
-                        Ok(_) => println!("No longer reading from reader {}", self.nickname()),
-                        Err(e) => return Err(e),
-                    }
-                },
-                None => {
-                    return Err("not connected")
-                }
-            }
-            Ok(())
-        } else {
-            Err("unable to get stream mutex")
-        }
-    }
-
-    fn send(&mut self, buf: &[u8]) -> Result<(), &'static str> {
-        if let Ok(stream) = self.socket.lock() {
-            match &*stream {
-                Some(s) => {
-                    let mut w_stream = match s.try_clone() {
-                        Ok(v) => v,
-                        Err(_) => return Err("unable to copy stream")
-                    };
-                    match w_stream.write_all(buf) {
-                        Ok(_) => (),
-                        Err(_) => return Err("error writing data")
-                    }
-                    Ok(())
-                },
-                None => {
-                    Err("not connected")
-                },
-            }
-        } else {
-            Err("unable to get mutex")
-        }
-    }
-
-    fn get_next_id(&mut self) -> u32 {
-        let mut output: u32 = 0;
-        if let Ok(mut v) = self.msg_id.lock() {
-            output = *v + 1;
-            *v = output;
-        }
-        output
-    }
-
-    fn set_nickname(&mut self, name: String) {
-        self.nickname = name;
-    }
-
-    fn set_kind(&mut self, kind: String) {
-        self.kind = kind;
-    }
-
-    fn set_ip_address(&mut self, ip_address: String) {
-        self.ip_address = ip_address;
-    }
-
-    fn set_port(&mut self, port: u16) {
-        self.port = port;
-    }
-
-    fn set_auto_connect(&mut self, auto_connect: u8) {
-        self.auto_connect = auto_connect
+        Ok(())
+    } else {
+        Err("unable to get stream mutex")
     }
 }
 
 fn stop(
     socket: &mut TcpStream,
     reading: &Arc<Mutex<bool>>,
-    nickname: String,
+    nickname: &String,
     msg_mtx: &Arc<sync::Mutex<u32>>
 ) {
     if let Ok(r) = reading.lock() {

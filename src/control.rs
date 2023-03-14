@@ -11,10 +11,10 @@ pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
 pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
 
 pub struct Control {
-    pub sighting_period: u32,
     pub name: String,
-    pub chip_type: String,
+    pub sighting_period: u32,
     pub read_window: u8,
+    pub chip_type: String,
 }
 
 impl Control {

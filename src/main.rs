@@ -5,6 +5,9 @@ use std::sync::Mutex;
 
 use crate::database::sqlite;
 use crate::database::Database;
+use crate::objects::backup;
+use crate::objects::backup::Backup;
+use crate::objects::setting;
 
 pub mod control;
 pub mod defaults;
@@ -23,6 +26,7 @@ const CONTROL_TYPE: &str = "socket";
 
 fn main() {
     println!("Chronokeep Portal starting up...");
+    let restore = sqlite::SQLite::already_exists() == false;
     let mut sqlite = sqlite::SQLite::new().unwrap();
     match sqlite.setup() {
         Ok(_) => println!("Database successfully setup."),
@@ -30,6 +34,57 @@ fn main() {
             println!("Error setting up database: {e}");
             panic!()
         }
+    }
+    if restore {
+        match backup::restore_backup() {
+            Ok(val) => {
+                for reader in val.readers {
+                    match sqlite.save_reader(&reader) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("error saving reader {e}");
+                        }
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_PORTAL_NAME),
+                    val.name
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving portal name {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_SIGHTING_PERIOD),
+                    val.sighting_period.to_string()
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving sighting period {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_READ_WINDOW),
+                    val.read_window.to_string()
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving read window {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_CHIP_TYPE),
+                    val.chip_type
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving chip type {e}");
+                    }
+                }
+            },
+            Err(_) => (),
+        };
     }
     let control = control::Control::new(&sqlite).unwrap();
     let sqlite = Arc::new(Mutex::new(sqlite));
@@ -51,6 +106,18 @@ fn main() {
                 println!("'{other}' is not a valid control type.");
             }
         }
+    }
+    if let Ok(sq) = sqlite.lock() {
+        let control = control::Control::new(&sq).unwrap();
+        let readers = sq.get_readers().unwrap();
+        let backup = Backup{
+            name: control.name,
+            sighting_period: control.sighting_period,
+            read_window: control.read_window,
+            chip_type: control.chip_type,
+            readers
+        };
+        backup::save_backup(&backup);
     }
     println!("Goodbye!")
 }

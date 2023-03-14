@@ -41,9 +41,9 @@ pub trait Database {
     fn set_setting(&self, setting: &setting::Setting) -> Result<setting::Setting, DBError>;
     fn get_setting(&self, name: &str) -> Result<setting::Setting, DBError>;
     // Reader information
-    fn save_reader(&self, reader: &dyn reader::Reader) -> Result<i64, DBError>;
-    fn get_reader(&self, id: &i64) -> Result<Box<dyn reader::Reader>, DBError>;
-    fn get_readers(&self) -> Result<Vec<Box<dyn reader::Reader>>, DBError>;
+    fn save_reader(&self, reader: &reader::Reader) -> Result<i64, DBError>;
+    fn get_reader(&self, id: &i64) -> Result<reader::Reader, DBError>;
+    fn get_readers(&self) -> Result<Vec<reader::Reader>, DBError>;
     fn delete_reader(&self, id: &i64) -> Result<usize, DBError>;
     // API information
     fn save_api(&self, api: &api::Api) -> Result<usize, DBError>;

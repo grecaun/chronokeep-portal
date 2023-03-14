@@ -1,8 +1,9 @@
 use crate::objects::{setting, participant, read, sighting};
 use crate::network::api;
 use crate::database::DBError;
-use crate::reader::{self, zebra};
+use crate::reader;
 
+use std::path::Path;
 use std::str::FromStr;
 
 #[cfg(test)]
@@ -35,6 +36,13 @@ impl SQLite {
                     conn: c,
                 }),
             Err(e) => Err(DBError::ConnectionError(e.to_string()))
+        }
+    }
+
+    pub fn already_exists() -> bool {
+        match Path::try_exists(Path::new(DATABASE_URI)) {
+            Ok(val) => val,
+            Err(_) => false,
         }
     }
 
@@ -156,7 +164,9 @@ impl super::Database for SQLite {
                 }
                 return Err(DBError::DataRetrievalError(String::from("error parsing version value")))
             },
-            Err(rusqlite::Error::QueryReturnedNoRows) => return self.make_tables(),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return self.make_tables()
+            },
             Err(err) => return Err(DBError::DataRetrievalError(format!("{}",err)))
         };
     }
@@ -189,7 +199,7 @@ impl super::Database for SQLite {
     }
 
     // Readers
-    fn save_reader(&self, reader: &dyn reader::Reader) -> Result<i64, DBError> {
+    fn save_reader(&self, reader: &reader::Reader) -> Result<i64, DBError> {
         match reader.kind() {
             reader::READER_KIND_ZEBRA => {},
             reader::READER_KIND_IMPINJ => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
@@ -205,7 +215,7 @@ impl super::Database for SQLite {
         }
     }
 
-    fn get_reader(&self, id: &i64) -> Result<Box<dyn reader::Reader>, DBError> {
+    fn get_reader(&self, id: &i64) -> Result<reader::Reader, DBError> {
         match self.conn.query_row("SELECT * FROM readers WHERE reader_id=?1;",
             [id],
             |row| {
@@ -219,21 +229,16 @@ impl super::Database for SQLite {
                 })
         }) {
             Ok(r) => {
-                match &r.kind[..] {
-                    reader::READER_KIND_ZEBRA => {
-                        return Ok(Box::new(
-                            zebra::Zebra::new_no_repeaters(
-                                r.id,
-                                r.nickname,
-                                r.ip_address,
-                                r.port,
-                                r.auto_connect
-                            )
-                        ))
-                    },
-                    reader::READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
-                    reader::READER_KIND_RFID => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
-                    _ => return Err(DBError::DataRetrievalError(String::from("unknown reader kind specified")))
+                match reader::Reader::new_no_repeaters(
+                    r.id,
+                    r.kind,
+                    r.nickname,
+                    r.ip_address,
+                    r.port,
+                    r.auto_connect
+                ) {
+                    Ok(output) => return Ok(output),
+                    Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
                 }
             },
             Err(rusqlite::Error::QueryReturnedNoRows) => return Err(DBError::NotFound),
@@ -241,7 +246,7 @@ impl super::Database for SQLite {
         };
     }
 
-    fn get_readers(&self) -> Result<Vec<Box<dyn reader::Reader>>, DBError> {
+    fn get_readers(&self) -> Result<Vec<reader::Reader>, DBError> {
         let mut stmt = match self.conn.prepare("SELECT * FROM readers;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
@@ -260,25 +265,22 @@ impl super::Database for SQLite {
                 Ok(r) => r,
                 Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
             };
-        let mut output: Vec<Box<dyn reader::Reader>> = Vec::new();
+        let mut output: Vec<reader::Reader> = Vec::new();
         for row in results {
             match row {
                 Ok(r) => {
-                    match &r.kind[..] {
-                        reader::READER_KIND_ZEBRA => {
-                            output.push(Box::new(
-                                zebra::Zebra::new_no_repeaters(
-                                    r.id,
-                                    r.nickname,
-                                    r.ip_address,
-                                    r.port,
-                                    r.auto_connect
-                                )
-                            ))
-                        },
-                        reader::READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
-                        reader::READER_KIND_RFID => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
-                        _ => return Err(DBError::DataRetrievalError(String::from("unknown reader kind specified")))
+                    match reader::Reader::new_no_repeaters(
+                        r.id,
+                        r.kind,
+                        r.nickname,
+                        r.ip_address,
+                        r.port,
+                        r.auto_connect
+                    ) {
+                        Ok(reader) => {
+                            output.push(reader);
+                        }
+                        Err(e) => return Err(e)
                     }
                 },
                 Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))

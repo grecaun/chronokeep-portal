@@ -16,7 +16,7 @@ use crate::util;
 pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
     let mut keepalive: bool = true;
     let mut input: String = String::new();
-    let mut connected: Vec<Box<dyn reader::Reader>> = Vec::new();
+    let mut connected: Vec<reader::Reader> = Vec::new();
     let mut joiners: Vec<JoinHandle<()>> = Vec::new();
 
     while keepalive {
@@ -238,7 +238,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     }
 }
 
-fn disconnect_reader(id: i64, connected: &mut Vec<Box<dyn Reader>>){
+fn disconnect_reader(id: i64, connected: &mut Vec<Reader>){
     match connected.iter().position(|x| x.id() == id) {
         Some(ix) => {
             let mut reader = connected.remove(ix);
@@ -256,7 +256,7 @@ fn disconnect_reader(id: i64, connected: &mut Vec<Box<dyn Reader>>){
 fn remove_reader(
     id: i64,
     sqlite: &sqlite::SQLite,
-    connected: &mut Vec<Box<dyn reader::Reader>>,
+    connected: &mut Vec<reader::Reader>,
 ) {
     match connected.iter().position(|x| x.id() == id) {
         Some(ix) => {
@@ -277,7 +277,7 @@ fn remove_reader(
 fn connect_reader(
     id: i64,
     mtx: &Arc<Mutex<sqlite::SQLite>>,
-    connected: &mut Vec<Box<dyn reader::Reader>>,
+    connected: &mut Vec<reader::Reader>,
     joiners: &mut Vec<JoinHandle<()>>,
     controls: &super::Control
 ) {
@@ -298,16 +298,23 @@ fn connect_reader(
     drop(sqlite);
     match reader.kind() {
         reader::READER_KIND_ZEBRA => {
-            let mut r = reader::zebra::Zebra::new_no_repeaters(
+            let mut r = match reader::Reader::new_no_repeaters(
                 reader.id(),
+                String::from(reader.kind()),
                 String::from(reader.nickname()),
                 String::from(reader.ip_address()),
                 reader.port(),
-                reader::AUTO_CONNECT_FALSE,
-            );
+                reader.auto_connect(),
+            ) {
+                Ok(it) => it,
+                Err(e) => {
+                    println!("error creating reader {e}");
+                    return;
+                }
+            };
             match r.connect(mtx, &controls) {
                 Ok(j) => {
-                    connected.push(Box::new(r));
+                    connected.push(r);
                     joiners.push(j);
                 },
                 Err(e) => {
@@ -417,13 +424,21 @@ fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQL
             let port: u16 = u16::from_str(port).unwrap_or_else(|_err| {
                 zebra::DEFAULT_ZEBRA_PORT
             });
-            match sqlite.save_reader(&zebra::Zebra::new_no_repeaters(
+            let tmp = match reader::Reader::new_no_repeaters(
                 0,
+                String::from(reader::READER_KIND_ZEBRA),
                 String::from(name),
                 String::from(ip),
                 port,
                 reader::AUTO_CONNECT_FALSE
-            )) {
+            ) {
+                Ok(it) => it,
+                Err(e) => {
+                    println!("error making reader object {e}");
+                    return -1;
+                }
+            };
+            match sqlite.save_reader(&tmp) {
                 Ok(val) => {
                     println!("Reader saved.");
                     return val
