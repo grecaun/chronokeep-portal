@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 pub const API_TYPE_CHRONOKEEP_RESULTS: &str = "CHRONOKEEP_RESULTS";
 pub const API_TYPE_CKEEP_RESULTS_SELF: &str = "CHRONOKEEP_RESULTS_SELF";
@@ -8,7 +8,7 @@ pub const API_TYPE_CKEEP_REMOTE_SELF: &str = "CHRONOKEEP_REMOTE_SELF";
 pub const API_URI_CHRONOKEEP_RESULTS: &str = "https://api.chronokeep.com/";
 pub const API_URI_CHRONOKEEP_REMOTE: &str = "https://remote.chronokeep.com/";
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all="camelCase")]
 pub struct Api {
     id: usize,

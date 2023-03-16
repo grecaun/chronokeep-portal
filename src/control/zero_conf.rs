@@ -1,12 +1,14 @@
-use std::{net::UdpSocket, sync::{Arc, Mutex}, time::Duration, io::ErrorKind};
+use std::{net::{UdpSocket, Ipv4Addr}, sync::{Arc, Mutex}, time::Duration, io::ErrorKind, str::FromStr};
 
 use rand::{thread_rng, Rng};
 
-use crate::{database::{Database, sqlite}, defaults};
+use crate::{database::{Database, sqlite}};
 
 use super::SETTING_PORTAL_NAME;
 
 pub const ZERO_CONF_REQUEST: &str = "[DISCOVER_CHRONO_SERVER_REQUEST]";
+pub const ZERO_CONF_MULTICAST_ADDR: &str = "224.0.44.88";
+pub const ZERO_CONF_PORT: u16 = 4488;
 
 pub struct ZeroConf {
     sqlite: Arc<Mutex<sqlite::SQLite>>,
@@ -24,8 +26,8 @@ impl ZeroConf {
         for _ in 0..10 {
             server_id.push(chars[rng.gen_range(0..chars.len())])
         }
-        println!("Zero Conf Server id is {}, port is {}", server_id, defaults::DEFAULT_ZERO_CONF_PORT);
-        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", defaults::DEFAULT_ZERO_CONF_PORT)) {
+        println!("Zero Conf Server id is {}, port is {}", server_id, ZERO_CONF_PORT);
+        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", ZERO_CONF_PORT)) {
             Ok(sock) => sock,
             Err(e) => {
                 println!("Something went wrong trying to connect to zero conf port: {e}");
@@ -38,6 +40,18 @@ impl ZeroConf {
                 println!("Unable to set read timeout on socket: {e}");
                 return Err("unable to set read timeout")
             }
+        }
+        match socket.join_multicast_v4(
+            &Ipv4Addr::from_str(ZERO_CONF_MULTICAST_ADDR).unwrap(),
+            &Ipv4Addr::UNSPECIFIED
+        ) {
+            Ok(_) => {
+                println!("Successfully joined multicast group.");
+            },
+            Err(e) => {
+                println!("Unable to join multicast group. {e}");
+                return Err("unable to join multicast group")
+            },
         }
         let control_port = *control_port;
         return Ok(ZeroConf {

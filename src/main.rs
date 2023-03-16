@@ -46,6 +46,14 @@ fn main() {
                         }
                     }
                 }
+                for a in val.api {
+                    match sqlite.save_api(&a) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("error saving api {e}");
+                        }
+                    }
+                }
                 match sqlite.set_setting(&setting::Setting::new(
                     String::from(control::SETTING_PORTAL_NAME),
                     val.name
@@ -110,12 +118,14 @@ fn main() {
     if let Ok(sq) = sqlite.lock() {
         let control = control::Control::new(&sq).unwrap();
         let readers = sq.get_readers().unwrap();
+        let api = sq.get_apis().unwrap();
         let backup = Backup{
             name: control.name,
             sighting_period: control.sighting_period,
             read_window: control.read_window,
             chip_type: control.chip_type,
-            readers
+            readers,
+            api
         };
         backup::save_backup(&backup);
     }

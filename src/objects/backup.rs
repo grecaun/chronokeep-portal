@@ -2,7 +2,7 @@ use std::{path::Path, fs::File, io::Read};
 
 use serde::{Serialize, Deserialize};
 
-use crate::reader;
+use crate::{reader, network::api};
 
 pub const BACKUP_FILE_PATH: &str = "./portal_backup.json";
 
@@ -15,6 +15,7 @@ pub struct Backup {
     pub chip_type: String,
 
     pub readers: Vec<reader::Reader>,
+    pub api: Vec<api::Api>,
 }
 
 pub fn restore_backup() -> Result<Backup, &'static str> {
@@ -55,7 +56,7 @@ pub fn save_backup(backup: &Backup) {
             return
         }
     };
-    match serde_json::to_writer(&file, backup) {
+    match serde_json::to_writer_pretty(&file, backup) {
         Ok(_) => (),
         Err(e) => {
             println!("error writing backup {e}")
