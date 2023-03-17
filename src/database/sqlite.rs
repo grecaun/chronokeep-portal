@@ -300,9 +300,9 @@ impl super::Database for SQLite {
     fn save_api(&self, api: &api::Api) -> Result<usize, DBError> {
         match api.kind() {
             api::API_TYPE_CHRONOKEEP_RESULTS |
-            api::API_TYPE_CKEEP_RESULTS_SELF |
+            api::API_TYPE_CHRONOKEEP_RESULTS_SELF |
             api::API_TYPE_CHRONOKEEP_REMOTE |
-            api::API_TYPE_CKEEP_REMOTE_SELF =>
+            api::API_TYPE_CHRONOKEEP_REMOTE_SELF =>
             {},
             _ => return Err(DBError::DataInsertionError(String::from("invalid kind specified")))
         }
@@ -345,9 +345,9 @@ impl super::Database for SQLite {
                 Ok(r) => {
                     match r.kind() {
                         api::API_TYPE_CHRONOKEEP_RESULTS |
-                        api::API_TYPE_CKEEP_RESULTS_SELF |
+                        api::API_TYPE_CHRONOKEEP_RESULTS_SELF |
                         api::API_TYPE_CHRONOKEEP_REMOTE |
-                        api::API_TYPE_CKEEP_REMOTE_SELF =>
+                        api::API_TYPE_CHRONOKEEP_REMOTE_SELF =>
                         {
                             output.push(r)
                         },

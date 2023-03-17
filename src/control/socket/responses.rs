@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{objects::{event::Event, setting, participant::Participant, sighting::Sighting, read}, network::api};
+use crate::{objects::{event::Event, setting, participant::Participant, sighting::Sighting, read}, network::api, remote::uploader};
 
 use super::errors;
 
@@ -40,6 +40,9 @@ pub enum Responses {
     },
     EventYears {
         years: Vec<String>
+    },
+    ReadAutoUpload {
+        status: uploader::Status,
     },
     ConnectionSuccessful {
         name: String,

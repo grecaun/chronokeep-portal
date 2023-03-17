@@ -468,7 +468,7 @@ fn test_save_api() {
         &api::Api::new(
             0,
             String::from(original.nickname()),
-            String::from(api::API_TYPE_CKEEP_RESULTS_SELF),
+            String::from(api::API_TYPE_CHRONOKEEP_RESULTS_SELF),
             String::from("a-different-random-token"),
             String::from("https:://random.com/")
         ));
@@ -492,7 +492,7 @@ fn test_save_api() {
     let results = sqlite.save_api(&api::Api::new(
         0,
         String::from("new-nickname"),
-        String::from(api::API_TYPE_CKEEP_RESULTS_SELF),
+        String::from(api::API_TYPE_CHRONOKEEP_RESULTS_SELF),
         String::from(original.token()),
         String::from(original.uri())
     ));

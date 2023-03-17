@@ -379,7 +379,7 @@ fn add_api(name: &str, kind: &str, token: &str, uri: &str, sqlite: &sqlite::SQLi
             l_uri = api::API_URI_CHRONOKEEP_RESULTS;
         },
         "chronokeep_results_self" => {
-            l_kind = api::API_TYPE_CKEEP_RESULTS_SELF;
+            l_kind = api::API_TYPE_CHRONOKEEP_RESULTS_SELF;
             l_uri = uri;
         },
         "chronokeep_remote" => {
@@ -387,7 +387,7 @@ fn add_api(name: &str, kind: &str, token: &str, uri: &str, sqlite: &sqlite::SQLi
             l_uri = api::API_URI_CHRONOKEEP_REMOTE;
         },
         "chronokeep_remote_self" => {
-            l_kind = api::API_TYPE_CKEEP_REMOTE_SELF;
+            l_kind = api::API_TYPE_CHRONOKEEP_REMOTE_SELF;
             l_uri = uri;
         },
         kind => {

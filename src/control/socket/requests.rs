@@ -15,11 +15,9 @@ pub enum Request {
     },
     ApiList,
     ApiRemoteAutoUpload {
-        api_name: String,
+        query: AutoUploadQuery,
     },
-    ApiRemoteManualUpload {
-        api_name: String,
-    },
+    ApiRemoteManualUpload,
     ApiRemove {
         name: String,
     },
@@ -101,4 +99,12 @@ pub enum Request {
     TimeSet {
         time: String,
     },
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all="snake_case")]
+pub enum AutoUploadQuery {
+    Stop,
+    Start,
+    Status,
 }

@@ -5,6 +5,7 @@ use serde::Serialize;
 pub enum Errors {
     UnknownCommand,
     TooManyConnections,
+    TooManyRemoteApi,
     ServerError{
         message: String,
     },
@@ -27,4 +28,7 @@ pub enum Errors {
     AlreadySubscribed {
         message: String,
     },
+    AlreadyRunning,
+    NotRunning,
+    NoRemoteApi,
 }

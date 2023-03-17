@@ -3,7 +3,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::SETTING_PORTAL_NAME, results, processor};
+use crate::{database::{sqlite, Database}, reader::{self, zebra}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery}, results, processor, remote::{self, uploader}};
 
 use super::zero_conf::ZeroConf;
 
@@ -108,6 +108,9 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
         },
     }
 
+    // create our reads uploader struct for auto uploading if the user wants to
+    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone()));
+
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
@@ -148,6 +151,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_sqlite = sqlite.clone();
                 let t_control_sockets = control_sockets.clone();
                 let t_sight_processor = sight_processor.clone();
+                let t_uploader = uploader.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -180,7 +184,8 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                                 t_sighting_repeaters,
                                 t_control_sockets,
                                 t_sight_processor,
-                                t_sqlite
+                                t_sqlite,
+                                t_uploader
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
@@ -238,6 +243,7 @@ fn handle_stream(
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     sight_processor: Arc<processor::SightingsProcessor>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
+    uploader: Arc<uploader::Uploader>,
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -637,14 +643,81 @@ fn handle_stream(
                 requests::Request::ApiAdd { name, kind, uri, token } => {
                     match kind.as_str() {
                         api::API_TYPE_CHRONOKEEP_REMOTE |
-                        api::API_TYPE_CKEEP_REMOTE_SELF |
-                        api::API_TYPE_CHRONOKEEP_RESULTS |
-                        api::API_TYPE_CKEEP_RESULTS_SELF => {
+                        api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
                             if let Ok(sq) = sqlite.lock() {
                                 let t_uri = match kind.as_str() {
                                     api::API_TYPE_CHRONOKEEP_REMOTE => {
                                         String::from(api::API_URI_CHRONOKEEP_REMOTE)
                                     },
+                                    _ => {
+                                        uri
+                                    }
+                                };
+                                match sq.get_apis() {
+                                    Ok(apis) => {
+                                        let mut remote_exists = false;
+                                        for api in apis {
+                                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                                remote_exists = true;
+                                                break;
+                                            }
+                                        }
+                                        if remote_exists {
+                                            println!("Remote api already exists.");
+                                            no_error = write_error(&stream, errors::Errors::TooManyRemoteApi)
+                                        } else {
+                                            match sq.save_api(&api::Api::new(
+                                                0,
+                                                name,
+                                                kind,
+                                                token,
+                                                t_uri
+                                            )) {
+                                                Ok(_) => {
+                                                    match sq.get_apis() {
+                                                        Ok(apis) => {
+                                                            if let Ok(c_socks) = control_sockets.lock() {
+                                                                for sock in c_socks.iter() {
+                                                                    if let Some(sock) = sock {
+                                                                        // we might be writing to other sockets
+                                                                        // so errors here shouldn't close our connection
+                                                                        _ = write_api_list(&sock, &apis);
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                no_error = write_api_list(&stream, &apis);
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            println!("error getting api list. {e}");
+                                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                                message: format!("error getting api list: {e}")
+                                                            });
+                                                        }
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    println!("Error saving api {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                        message: format!("error saving api: {e}")
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        println!("error getting api list. {e}");
+                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            message: format!("error getting apis: {e}")
+                                        })
+                                    }
+                                }
+                            }
+                        },
+                        api::API_TYPE_CHRONOKEEP_RESULTS |
+                        api::API_TYPE_CHRONOKEEP_RESULTS_SELF => {
+                            if let Ok(sq) = sqlite.lock() {
+                                let t_uri = match kind.as_str() {
                                     api::API_TYPE_CHRONOKEEP_RESULTS => {
                                         String::from(api::API_URI_CHRONOKEEP_RESULTS)
                                     },
@@ -734,14 +807,40 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiRemoteManualUpload { api_name } => {
+                requests::Request::ApiRemoteManualUpload => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
+                                let mut found = false;
                                 for api in apis {
-                                    if api.nickname() == api_name {
-                                        println!("TODO manual upload")
+                                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                        found = true;
+                                        if let Ok(sq) = sqlite.lock() {
+                                            let reads = match sq.get_not_uploaded_reads() {
+                                                Ok(it) => it,
+                                                Err(e) => {
+                                                    println!("Error geting reads to upload. {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
+                                                    break;
+                                                }
+                                            };
+                                            no_error = match upload_reads(&http_client, &api, &reads) {
+                                                Ok(count) => {
+                                                    write_success(&stream, count)
+                                                },
+                                                Err(e) => {
+                                                    println!("Error uploading reads: {:?}", e);
+                                                    write_error(&stream, e)
+                                                }
+                                            }
+                                        } else {
+                                            no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error getting database mutex") })
+                                        }
+                                        break;
                                     }
+                                }
+                                if found == false {
+                                    no_error = write_error(&stream, errors::Errors::NoRemoteApi);
                                 }
                             },
                             Err(e) => {
@@ -753,22 +852,32 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiRemoteAutoUpload { api_name } => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.get_apis() {
-                            Ok(apis) => {
-                                for api in apis {
-                                    if api.nickname() == api_name {
-                                        println!("TODO auto upload")
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("error getting apis: {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting apis: {e}")
+                requests::Request::ApiRemoteAutoUpload { query } => {
+                    match query {
+                        AutoUploadQuery::Start => {
+                            if uploader.running() {
+                                no_error = write_error(&stream, errors::Errors::AlreadyRunning);
+                            } else {
+                                let t_uploader = uploader.clone();
+                                let t_joiner = thread::spawn(move|| {
+                                    t_uploader.run();
                                 });
+                                if let Ok(mut j) = joiners.lock() {
+                                    j.push(t_joiner);
+                                }
+                                no_error = write_uploader_status(&stream, uploader.status());
                             }
+                        }
+                        AutoUploadQuery::Stop => {
+                            if uploader.running() {
+                                uploader.stop();
+                                no_error = write_uploader_status(&stream, uploader.status());
+                            } else {
+                                no_error = write_error(&stream, errors::Errors::NotRunning);
+                            }
+                        }
+                        AutoUploadQuery::Status => {
+                            no_error = write_uploader_status(&stream, uploader.status());
                         }
                     }
                 },
@@ -778,7 +887,7 @@ fn handle_stream(
                             Ok(apis) => {
                                 for api in apis {
                                     if api.nickname() == api_name {
-                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CKEEP_RESULTS_SELF {
+                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
                                             no_error = match get_events(&http_client, api) {
                                                 Ok(events) => {
                                                     write_event_list(&stream, events)
@@ -812,7 +921,7 @@ fn handle_stream(
                             Ok(apis) => {
                                 for api in apis {
                                     if api.nickname() == api_name {
-                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CKEEP_RESULTS_SELF {
+                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
                                             no_error = match get_event_years(&http_client, api, event_slug) {
                                                 Ok(years) => {
                                                     write_event_years(&stream, years)
@@ -846,7 +955,7 @@ fn handle_stream(
                             Ok(apis) => {
                                 for api in apis {
                                     if api.nickname() == api_name {
-                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CKEEP_RESULTS_SELF {
+                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
                                             // try to get the participants from the API
                                             let new_parts = match get_participants(&http_client, api, event_slug, event_year) {
                                                 Ok(new_parts) => {
@@ -1503,11 +1612,65 @@ pub fn write_event_years(stream: &TcpStream, years: Vec<String>) -> bool {
     output
 }
 
+pub fn write_uploader_status(stream: &TcpStream, status: uploader::Status) -> bool {
+    let output = match serde_json::to_writer(stream, &responses::Responses::ReadAutoUpload {
+        status
+    }) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("15/ Something went wrong writing to the socket. {e}");
+            return false
+        }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("15/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
+}
+
 fn construct_headers(key: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
     headers.insert(AUTHORIZATION, format!("Bearer {key}").parse().unwrap());
     headers
+}
+
+pub fn upload_reads(http_client: &reqwest::blocking::Client, api: &Api, reads: &[read::Read]) -> Result<usize, errors::Errors> {
+    let url = api.uri();
+    let response = match http_client.post(format!("{url}reads/add"))
+        .headers(construct_headers(api.token()))
+        .json(&remote::requests::UploadReadsRequest {
+            reads: reads.to_vec()
+        })
+        .send() {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("error trying to talk to api: {e}");
+                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
+            }
+        };
+    let output = match response.status() {
+        reqwest::StatusCode::OK => {
+            let resp_body: remote::responses::UploadReadsResponse = match response.json() {
+                Ok(it) => it,
+                Err(e) => {
+                    println!("error trying to parse response from api: {e}");
+                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
+                }
+            };
+            resp_body.count
+        },
+        other => {
+            println!("invalid status code: {other}");
+            return Err(errors::Errors::ServerError { message: format!("invalid status code: {other}") })
+        }
+    };
+    Ok(output)
 }
 
 fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<Event>, errors::Errors> {
@@ -1538,7 +1701,7 @@ fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<E
         }
         other => {
             println!("invalid status code: {other}");
-            return Err(errors::Errors::ServerError { message: format!("invalid status code") })
+            return Err(errors::Errors::ServerError { message: format!("invalid status code: {other}") })
         }
     };
     Ok(output)

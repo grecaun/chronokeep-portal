@@ -7,10 +7,14 @@ pub const READ_STATUS_TOO_SOON: u8 = 2;
 pub const READ_UPLOADED_FALSE: u8 = 0;
 pub const READ_UPLOADED_TRUE: u8 = 1;
 
+pub const READ_KIND: &str = "reader";
+pub const READ_IDENT_TYPE: &str = "chip";
+
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all="snake_case")]
 pub struct Read {
     // ID should be implemented database side.
+    #[serde(skip)]
     id: u64,
     // These fields should be received from the reader.
     chip: String,
@@ -19,11 +23,16 @@ pub struct Read {
     antenna: u32,
     reader: String,
     rssi: String,
+    // These fields are used for the remote API.
+    // Should always be set to the same values.
+    ident_type: String,
+    #[serde(rename="type")]
+    kind: String,
     // Status will be used for when the system processes reads.
     // do not serialize these fields
-    #[serde(skip_serializing)]
+    #[serde(skip)]
     status: u8,
-    #[serde(skip_serializing)]
+    #[serde(skip)]
     uploaded: u8,
 }
 
@@ -48,7 +57,9 @@ impl Read {
                 reader,
                 rssi,
                 status,
-                uploaded
+                uploaded,
+                ident_type: String::from(READ_IDENT_TYPE),
+                kind: String::from(READ_KIND)
             }
     }
 
@@ -100,5 +111,9 @@ impl Read {
 
     pub fn set_status(&mut self, status: u8) {
         self.status = status;
+    }
+
+    pub fn set_uploaded(&mut self, uploaded: u8) {
+        self.uploaded = uploaded;
     }
 }
