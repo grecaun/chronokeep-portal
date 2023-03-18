@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{database::{sqlite, DBError}, control::{self, socket::MAX_CONNECTED}, processor};
 
 pub mod zebra;
+pub mod auto_connect;
 
 pub const READER_KIND_ZEBRA: &str = "ZEBRA";
 pub const READER_KIND_RFID: &str = "RFID";

@@ -3,7 +3,7 @@ use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpL
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery}, results, processor, remote::{self, uploader}};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery}, results, processor, remote::{self, uploader}};
 
 use super::zero_conf::ZeroConf;
 
@@ -111,6 +111,21 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     // create our reads uploader struct for auto uploading if the user wants to
     let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone()));
 
+    // create the auto connector for automatically connecting to readers
+    let ac_state = Arc::new(Mutex::new(auto_connect::State::Unknown));
+    let mut auto_connector = auto_connect::AutoConnector::new(
+        ac_state.clone(),
+        readers.clone(),
+        joiners.clone(),
+        control_sockets.clone(),
+        controls.clone(),
+        sqlite.clone()
+    );
+    // start a thread to automatically connect to readers
+    thread::spawn(move|| {
+        auto_connector.run();
+    });
+
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
@@ -152,6 +167,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_control_sockets = control_sockets.clone();
                 let t_sight_processor = sight_processor.clone();
                 let t_uploader = uploader.clone();
+                let t_ac_state = ac_state.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -185,7 +201,8 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                                 t_control_sockets,
                                 t_sight_processor,
                                 t_sqlite,
-                                t_uploader
+                                t_uploader,
+                                t_ac_state,
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
@@ -244,6 +261,7 @@ fn handle_stream(
     sight_processor: Arc<processor::SightingsProcessor>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     uploader: Arc<uploader::Uploader>,
+    ac_state: Arc<Mutex<auto_connect::State>>,
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -313,7 +331,7 @@ fn handle_stream(
                     if let Ok(mut repeaters) = sighting_repeaters.lock() {
                         repeaters[index] = sightings;
                     }
-                    if let Ok(u_readers) = readers.lock() {
+                    if let Ok(u_readers) = readers.try_lock() {
                         no_error = write_connection_successful(&mut stream, name, reads, sightings, &u_readers);
                     } else {
                         no_error = write_error(&mut stream, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
@@ -321,247 +339,345 @@ fn handle_stream(
                 },
                 requests::Request::KeepaliveAck => { },
                 requests::Request::ReaderList => {
-                    if let Ok(u_readers) = readers.lock() {
-                        no_error = write_reader_list(&mut stream, &u_readers);
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(u_readers) = readers.lock() {
+                                    no_error = write_reader_list(&mut stream, &u_readers);
+                                }
+                            }
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                            }
+                        }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderAdd { name, kind, ip_address, port } => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match reader::Reader::new_no_repeaters(
-                            0,
-                            kind,
-                            name,
-                            ip_address,
-                            port,
-                            reader::AUTO_CONNECT_FALSE,
-                        ) {
-                            Ok(reader) => {
-                                let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
-                                let mut tmp = reader;
-                                match sq.save_reader(&tmp) {
-                                    Ok(val) => {
-                                        if let Ok(mut u_readers) = readers.lock() {
-                                            match u_readers.iter().position(|x| x.nickname() == tmp.nickname()) {
-                                                Some(ix) => {
-                                                    let mut itmp = u_readers.remove(ix);
-                                                    itmp.set_nickname(String::from(tmp.nickname()));
-                                                    itmp.set_ip_address(String::from(tmp.ip_address()));
-                                                    itmp.set_port(port);
-                                                    u_readers.push(itmp);
-                                                },
-                                                None => {
-                                                    tmp.set_id(val);
-                                                    u_readers.push(tmp);
-                                                }
-                                            }
-                                            if let Ok(c_socks) = control_sockets.lock() {
-                                                for sock in c_socks.iter() {
-                                                    if let Some(sock) = sock {
-                                                        // we might be writing to other sockets
-                                                        // so errors here shouldn't close our connection
-                                                        _ = write_reader_list(&sock, &u_readers);
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(sq) = sqlite.lock() {
+                                    match reader::Reader::new_no_repeaters(
+                                        0,
+                                        kind,
+                                        name,
+                                        ip_address,
+                                        port,
+                                        reader::AUTO_CONNECT_FALSE,
+                                    ) {
+                                        Ok(reader) => {
+                                            let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
+                                            let mut tmp = reader;
+                                            match sq.save_reader(&tmp) {
+                                                Ok(val) => {
+                                                    if let Ok(mut u_readers) = readers.lock() {
+                                                        match u_readers.iter().position(|x| x.nickname() == tmp.nickname()) {
+                                                            Some(ix) => {
+                                                                let mut itmp = u_readers.remove(ix);
+                                                                itmp.set_nickname(String::from(tmp.nickname()));
+                                                                itmp.set_ip_address(String::from(tmp.ip_address()));
+                                                                itmp.set_port(port);
+                                                                u_readers.push(itmp);
+                                                            },
+                                                            None => {
+                                                                tmp.set_id(val);
+                                                                u_readers.push(tmp);
+                                                            }
+                                                        }
+                                                        if let Ok(c_socks) = control_sockets.lock() {
+                                                            for sock in c_socks.iter() {
+                                                                if let Some(sock) = sock {
+                                                                    // we might be writing to other sockets
+                                                                    // so errors here shouldn't close our connection
+                                                                    _ = write_reader_list(&sock, &u_readers);
+                                                                }
+                                                            }
+                                                        } else {
+                                                            no_error = write_reader_list(&stream, &u_readers);
+                                                        }
                                                     }
-                                                }
-                                            } else {
-                                                no_error = write_reader_list(&stream, &u_readers);
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        println!("Error saving reader to database: {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("unexpected error saving reader to database: {e}"),
-                                        });
-                                    },
-                                };
-                            },
-                            Err(e) => {
-                                no_error = write_error(&stream, errors::Errors::InvalidReaderType {
-                                    message: e.to_string()
-                                 });
-                            },
+                                                },
+                                                Err(e) => {
+                                                    println!("Error saving reader to database: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                        message: format!("unexpected error saving reader to database: {e}"),
+                                                    });
+                                                },
+                                            };
+                                        },
+                                        Err(e) => {
+                                            no_error = write_error(&stream, errors::Errors::InvalidReaderType {
+                                                message: e.to_string()
+                                             });
+                                        },
+                                    }
+                                }
+                            }
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                            }
                         }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderRemove { id } => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.delete_reader(&id) {
-                            Ok(_) => {
-                                if let Ok(mut u_readers) = readers.lock() {
-                                    match u_readers.iter().position(|x| x.id() == id) {
-                                        Some(ix) => {
-                                            u_readers.remove(ix);
-                                            ()
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(sq) = sqlite.lock() {
+                                    match sq.delete_reader(&id) {
+                                        Ok(_) => {
+                                            if let Ok(mut u_readers) = readers.lock() {
+                                                match u_readers.iter().position(|x| x.id() == id) {
+                                                    Some(ix) => {
+                                                        u_readers.remove(ix);
+                                                        ()
+                                                    },
+                                                    None => {},
+                                                }
+                                            }
                                         },
-                                        None => {},
+                                        Err(e) => {
+                                            println!("Error removing database from reader: {e}");
+                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                message: format!("unexpected error removing reader from database: {e}")
+                                            });
+                                        },
                                     }
                                 }
-                            },
-                            Err(e) => {
-                                println!("Error removing database from reader: {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("unexpected error removing reader from database: {e}")
-                                });
-                            },
-                        }
-                    }
-                    if let Ok(u_readers) = readers.lock() {
-                        if let Ok(c_socks) = control_sockets.lock() {
-                            for sock in c_socks.iter() {
-                                if let Some(sock) = sock {
-                                    // we might be writing to other sockets
-                                    // so errors here shouldn't close our connection
-                                    _ = write_reader_list(&sock, &u_readers);
+                                if let Ok(u_readers) = readers.lock() {
+                                    if let Ok(c_socks) = control_sockets.lock() {
+                                        for sock in c_socks.iter() {
+                                            if let Some(sock) = sock {
+                                                // we might be writing to other sockets
+                                                // so errors here shouldn't close our connection
+                                                _ = write_reader_list(&sock, &u_readers);
+                                            }
+                                        }
+                                    } else {
+                                        no_error = write_reader_list(&stream, &u_readers);
+                                    }
                                 }
                             }
-                        } else {
-                            no_error = write_reader_list(&stream, &u_readers);
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                            }
                         }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderConnect { id } => {
-                    if let Ok(mut u_readers) = readers.lock() {
-                        match u_readers.iter().position(|x| x.id() == id) {
-                            Some(ix) => {
-                                let old_reader = u_readers.remove(ix);
-                                match reader::Reader::new(
-                                    old_reader.id(),
-                                    String::from(old_reader.kind()),
-                                    String::from(old_reader.nickname()),
-                                    String::from(old_reader.ip_address()),
-                                    old_reader.port(),
-                                    old_reader.auto_connect(),
-                                    control_sockets.clone(),
-                                    read_repeaters.clone(),
-                                    sight_processor.clone(),
-                                ) {
-                                    Ok(mut reader) => {
-                                        match reader.connect(&sqlite, &controls) {
-                                            Ok(j) => {
-                                                if let Ok(mut join) = joiners.lock() {
-                                                    join.push(j);
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(mut u_readers) = readers.lock() {
+                                    match u_readers.iter().position(|x| x.id() == id) {
+                                        Some(ix) => {
+                                            let old_reader = u_readers.remove(ix);
+                                            match reader::Reader::new(
+                                                old_reader.id(),
+                                                String::from(old_reader.kind()),
+                                                String::from(old_reader.nickname()),
+                                                String::from(old_reader.ip_address()),
+                                                old_reader.port(),
+                                                old_reader.auto_connect(),
+                                                control_sockets.clone(),
+                                                read_repeaters.clone(),
+                                                sight_processor.clone(),
+                                            ) {
+                                                Ok(mut reader) => {
+                                                    match reader.connect(&sqlite, &controls) {
+                                                        Ok(j) => {
+                                                            if let Ok(mut join) = joiners.lock() {
+                                                                join.push(j);
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            println!("Error connecting to reader: {e}");
+                                                            no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                                message: format!("error connecting to reader: {e}")
+                                                            });
+                                                        }
+                                                    }
+                                                    u_readers.push(reader);
+                                                },
+                                                Err(e) => {
+                                                    no_error = write_error(&stream, errors::Errors::InvalidReaderType { message: e.to_string() });
                                                 }
-                                            },
-                                            Err(e) => {
-                                                println!("Error connecting to reader: {e}");
-                                                no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                                    message: format!("error connecting to reader: {e}")
-                                                });
+                                            };
+                                        },
+                                        None => {
+                                            no_error = write_error(&stream, errors::Errors::NotFound);
+                                        }
+                                    };
+                                    if let Ok(c_socks) = control_sockets.lock() {
+                                        for sock in c_socks.iter() {
+                                            if let Some(sock) = sock {
+                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
                                             }
                                         }
-                                        u_readers.push(reader);
-                                    },
-                                    Err(e) => {
-                                        no_error = write_error(&stream, errors::Errors::InvalidReaderType { message: e.to_string() });
+                                    } else {
+                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
                                     }
-                                };
-                            },
-                            None => {
-                                no_error = write_error(&stream, errors::Errors::NotFound);
-                            }
-                        };
-                        if let Ok(c_socks) = control_sockets.lock() {
-                            for sock in c_socks.iter() {
-                                if let Some(sock) = sock {
-                                    no_error = write_reader_list(&sock, &u_readers) && no_error;
                                 }
                             }
-                        } else {
-                            no_error = write_reader_list(&stream, &u_readers) && no_error;
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                            }
                         }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderDisconnect { id } => {
-                    if let Ok(mut u_readers) = readers.lock() {
-                        match u_readers.iter().position(|x| x.id() == id) {
-                            Some(ix) => {
-                                let mut reader = u_readers.remove(ix);
-                                match reader.disconnect() {
-                                    Ok(_) => {},
-                                    Err(e) => {
-                                        println!("Error connecting to reader: {e}");
-                                        no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                            message: format!("error discconnecting reader: {e}")
-                                        });
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(mut u_readers) = readers.lock() {
+                                    match u_readers.iter().position(|x| x.id() == id) {
+                                        Some(ix) => {
+                                            let mut reader = u_readers.remove(ix);
+                                            match reader.disconnect() {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("Error connecting to reader: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                        message: format!("error discconnecting reader: {e}")
+                                                    });
+                                                }
+                                            }
+                                            u_readers.push(reader);
+                                        },
+                                        None => {
+                                            no_error = write_error(&stream, errors::Errors::NotFound);
+                                        }
+                                    };
+                                    if let Ok(c_socks) = control_sockets.lock() {
+                                        for sock in c_socks.iter() {
+                                            if let Some(sock) = sock {
+                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                            }
+                                        }
+                                    } else {
+                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
                                     }
                                 }
-                                u_readers.push(reader);
-                            },
-                            None => {
-                                no_error = write_error(&stream, errors::Errors::NotFound);
                             }
-                        };
-                        if let Ok(c_socks) = control_sockets.lock() {
-                            for sock in c_socks.iter() {
-                                if let Some(sock) = sock {
-                                    no_error = write_reader_list(&sock, &u_readers) && no_error;
-                                }
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
-                        } else {
-                            no_error = write_reader_list(&stream, &u_readers) && no_error;
                         }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderStart { id } => {
-                    if let Ok(mut u_readers) = readers.lock() {
-                        match u_readers.iter().position(|x| x.id() == id) {
-                            Some(ix) => {
-                                let mut reader = u_readers.remove(ix);
-                                match reader.initialize() {
-                                    Ok(_) => {},
-                                    Err(e) => {
-                                        println!("Error connecting to reader: {e}");
-                                        no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                            message: format!("error connecting to reader: {e}")
-                                        });
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(mut u_readers) = readers.lock() {
+                                    match u_readers.iter().position(|x| x.id() == id) {
+                                        Some(ix) => {
+                                            let mut reader = u_readers.remove(ix);
+                                            match reader.initialize() {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("Error connecting to reader: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                        message: format!("error connecting to reader: {e}")
+                                                    });
+                                                }
+                                            }
+                                            u_readers.push(reader);
+                                        },
+                                        None => {
+                                            no_error = write_error(&stream, errors::Errors::NotFound);
+                                        }
+                                    };
+                                    if let Ok(c_socks) = control_sockets.lock() {
+                                        for sock in c_socks.iter() {
+                                            if let Some(sock) = sock {
+                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                            }
+                                        }
+                                    } else {
+                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
                                     }
                                 }
-                                u_readers.push(reader);
-                            },
-                            None => {
-                                no_error = write_error(&stream, errors::Errors::NotFound);
                             }
-                        };
-                        if let Ok(c_socks) = control_sockets.lock() {
-                            for sock in c_socks.iter() {
-                                if let Some(sock) = sock {
-                                    no_error = write_reader_list(&sock, &u_readers) && no_error;
-                                }
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
-                        } else {
-                            no_error = write_reader_list(&stream, &u_readers) && no_error;
                         }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderStop { id } => {
-                    if let Ok(mut u_readers) = readers.lock() {
-                        match u_readers.iter().position(|x| x.id() == id) {
-                            Some(ix) => {
-                                let mut reader = u_readers.remove(ix);
-                                match reader.stop() {
-                                    Ok(_) => {},
-                                    Err(e) => {
-                                        println!("Error connecting to reader: {e}");
-                                        no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                            message: format!("error connecting to reader: {e}")
-                                        });
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(mut u_readers) = readers.lock() {
+                                    match u_readers.iter().position(|x| x.id() == id) {
+                                        Some(ix) => {
+                                            let mut reader = u_readers.remove(ix);
+                                            match reader.stop() {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("Error connecting to reader: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                        message: format!("error connecting to reader: {e}")
+                                                    });
+                                                }
+                                            }
+                                            u_readers.push(reader);
+                                        },
+                                        None => {
+                                            no_error = write_error(&stream, errors::Errors::NotFound);
+                                        }
+                                    };
+                                    if let Ok(c_socks) = control_sockets.lock() {
+                                        for sock in c_socks.iter() {
+                                            if let Some(sock) = sock {
+                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                            }
+                                        }
+                                    } else {
+                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
                                     }
                                 }
-                                u_readers.push(reader);
-                            },
-                            None => {
-                                no_error = write_error(&stream, errors::Errors::NotFound);
                             }
-                        };
-                        if let Ok(c_socks) = control_sockets.lock() {
-                            for sock in c_socks.iter() {
-                                if let Some(sock) = sock {
-                                    no_error = write_reader_list(&sock, &u_readers) && no_error;
-                                }
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
-                        } else {
-                            no_error = write_reader_list(&stream, &u_readers) && no_error;
                         }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::SettingsGet => {
@@ -1358,7 +1474,7 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool 
     output
 }
 
-fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
+pub fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         list.push(responses::Reader{

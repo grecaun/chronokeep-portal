@@ -1,4 +1,4 @@
-use std::{str, net::TcpStream, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
+use std::{str::{self, FromStr}, net::{TcpStream, SocketAddr, IpAddr}, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
 use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control::{self, socket::{MAX_CONNECTED, self}}};
@@ -8,7 +8,14 @@ pub mod requests;
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 
 pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str> {
-    let res = TcpStream::connect(format!("{}:{}", reader.ip_address, reader.port));
+    let ip_addr = match IpAddr::from_str(&reader.ip_address) {
+        Ok(addr) => addr,
+        Err(e) => {
+            println!("Error parsing ip address. {e}");
+            return Err("error parsing reader ip address")
+        }
+    };
+    let res = TcpStream::connect_timeout(&SocketAddr::new(ip_addr, reader.port), Duration::from_secs(1));
     match res {
         Err(_) => return Err("unable to connect"),
         Ok(mut tcp_stream) => {

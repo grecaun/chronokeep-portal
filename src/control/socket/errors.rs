@@ -31,4 +31,5 @@ pub enum Errors {
     AlreadyRunning,
     NotRunning,
     NoRemoteApi,
+    StartingUp,
 }

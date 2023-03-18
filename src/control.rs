@@ -10,6 +10,7 @@ pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";
 pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
 pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
 
+#[derive(Clone)]
 pub struct Control {
     pub name: String,
     pub sighting_period: u32,
