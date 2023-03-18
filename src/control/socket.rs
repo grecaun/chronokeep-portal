@@ -342,7 +342,10 @@ fn handle_stream(
                     if let Ok(ac) = ac_state.lock() {
                         match *ac {
                             auto_connect::State::Finished |
-                            auto_connect::State::Unknown => {
+                            auto_connect::State::Unknown |
+                            // the control app is only allowed to get a list of readers while the auto connect
+                            // for readers is not finished (or before it's started)
+                            auto_connect::State::Waiting => {
                                 if let Ok(u_readers) = readers.lock() {
                                     no_error = write_reader_list(&mut stream, &u_readers);
                                 }
