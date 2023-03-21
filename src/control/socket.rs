@@ -1189,31 +1189,36 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ReadsAdd { read } => {
-                    if let Ok(mut sq) = sqlite.lock() {
-                        let mut reads: Vec<read::Read> = Vec::new();
-                        reads.push(read);
-                        match sq.save_reads(&reads) {
-                            Ok(_) => {
-                                if let Ok(sockets) = control_sockets.lock() {
-                                    if let Ok(repeaters) = read_repeaters.lock() {
-                                        for ix in 0..MAX_CONNECTED {
-                                            match &sockets[ix] {
-                                                Some(sock) => {
-                                                    if repeaters[ix] == true {
-                                                        no_error = no_error && write_reads(&sock, &reads);
-                                                    }
-                                                },
-                                                None => {}
+                    if read.is_valid() == false {
+                        no_error = write_error(&stream, errors::Errors::InvalidRead)
+                    } else {
+                        if let Ok(mut sq) = sqlite.lock() {
+                            let mut reads: Vec<read::Read> = Vec::new();
+                            reads.push(read);
+                            match sq.save_reads(&reads) {
+                                Ok(_) => {
+                                    if let Ok(sockets) = control_sockets.lock() {
+                                        if let Ok(repeaters) = read_repeaters.lock() {
+                                            for ix in 0..MAX_CONNECTED {
+                                                match &sockets[ix] {
+                                                    Some(sock) => {
+                                                        if repeaters[ix] == true {
+                                                            no_error = no_error && write_reads(&sock, &reads);
+                                                        }
+                                                    },
+                                                    None => {}
+                                                }
                                             }
                                         }
                                     }
+                                    sight_processor.notify();
+                                },
+                                Err(e) => {
+                                    println!("Error saving manual read: {e}");
+                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                        message: format!("error saving manual read: {e}")
+                                    });
                                 }
-                            },
-                            Err(e) => {
-                                println!("Error saving manual read: {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error saving manual read: {e}")
-                                });
                             }
                         }
                     }

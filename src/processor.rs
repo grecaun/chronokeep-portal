@@ -107,11 +107,34 @@ impl SightingsProcessor {
                         // sort values into unused reads and the last read we've seen from a person
                         let mut unused: Vec<read::Read> = Vec::new();
                         let mut used: HashMap<String, read::Read> = HashMap::new();
+                        // create a hashmap for changing bibs to chips
+                        let mut bibChipMap: HashMap<String, String> = HashMap::new();
+                        // make a map of participants based upon their chip
+                        let mut part_map: HashMap<String, participant::Participant> = HashMap::new();
+                        for part in parts {
+                            bibChipMap.insert(String::from(part.bib()), String::from(part.chip()));
+                            let chip = String::from(part.chip());
+                            part_map.insert(chip, part);
+                        }
                         for read in reads {
                             if read.status() == read::READ_STATUS_UNUSED {
                                 unused.push(read);
                             } else if read.status() == read::READ_STATUS_USED {
-                                let chip = String::from(read.chip());
+                                // if the identifier type is a bib we need to get the chip from our bibChipMap by
+                                // the bib stored in the chip() value of read
+                                let mut chip = String::from(read.chip());
+                                match read.ident_type() {
+                                    read::READ_IDENT_TYPE_BIB => {
+                                        let bib = String::from(read.chip());
+                                        if bibChipMap.contains_key(&bib) {
+                                            chip = bibChipMap[&bib].clone();
+                                        }
+                                    }
+                                    read::READ_IDENT_TYPE_CHIP => {}
+                                    e => {
+                                        println!("Error occurred during sightings processing. Unknown read identifier type. {e}");
+                                    }
+                                }
                                 if used.contains_key(&chip) {
                                     let last = &used[&chip];
                                     if last.seconds() < read.seconds() ||
@@ -136,12 +159,6 @@ impl SightingsProcessor {
                                 a.seconds().cmp(&b.seconds())
                             }
                         );
-                        // make a map of participants based upon their chip
-                        let mut part_map: HashMap<String, participant::Participant> = HashMap::new();
-                        for part in parts {
-                            let chip = String::from(part.chip());
-                            part_map.insert(chip, part);
-                        }
                         let mut period = DEFAULT_SIGHTING_PERIOD as u64;
                         if let Ok(sq) = self.sqlite.lock() {
                             match sq.get_setting(SETTING_SIGHTING_PERIOD) {
@@ -158,7 +175,21 @@ impl SightingsProcessor {
                         let mut upd_parts: Vec<participant::Participant> = Vec::new();
                         let mut sightings: Vec<sighting::Sighting> = Vec::new();
                         for mut read in unused {
-                            let chip = String::from(read.chip());
+                            // if the identifier type is a bib we need to get the chip from our bibChipMap by
+                            // the bib stored in the chip() value of read
+                            let mut chip = String::from(read.chip());
+                            match read.ident_type() {
+                                read::READ_IDENT_TYPE_BIB => {
+                                    let bib = String::from(read.chip());
+                                    if bibChipMap.contains_key(&bib) {
+                                        chip = bibChipMap[&bib].clone();
+                                    }
+                                }
+                                read::READ_IDENT_TYPE_CHIP => {}
+                                e => {
+                                    println!("Error occurred during sightings processing. Unknown read identifier type. {e}");
+                                }
+                            }
                             if part_map.contains_key(&chip) == false {
                                 let new_part = participant::Participant::new(
                                     0,

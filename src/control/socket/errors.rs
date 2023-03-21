@@ -32,4 +32,5 @@ pub enum Errors {
     NotRunning,
     NoRemoteApi,
     StartingUp,
+    InvalidRead,
 }

@@ -7,8 +7,10 @@ pub const READ_STATUS_TOO_SOON: u8 = 2;
 pub const READ_UPLOADED_FALSE: u8 = 0;
 pub const READ_UPLOADED_TRUE: u8 = 1;
 
-pub const READ_KIND: &str = "reader";
-pub const READ_IDENT_TYPE: &str = "chip";
+pub const READ_KIND_CHIP: &str = "reader";
+pub const READ_KIND_MANUAL: &str = "manual";
+pub const READ_IDENT_TYPE_CHIP: &str = "chip";
+pub const READ_IDENT_TYPE_BIB: &str = "bib";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all="snake_case")]
@@ -58,8 +60,8 @@ impl Read {
                 rssi,
                 status,
                 uploaded,
-                ident_type: String::from(READ_IDENT_TYPE),
-                kind: String::from(READ_KIND)
+                ident_type: String::from(READ_IDENT_TYPE_CHIP),
+                kind: String::from(READ_KIND_CHIP)
             }
     }
 
@@ -115,5 +117,22 @@ impl Read {
 
     pub fn set_uploaded(&mut self, uploaded: u8) {
         self.uploaded = uploaded;
+    }
+
+    pub fn ident_type(&self) -> &str {
+        &self.ident_type
+    }
+
+    pub fn is_valid(&self) -> bool {
+        let mut output = true;
+        match self.ident_type.as_str() {
+            READ_IDENT_TYPE_CHIP | READ_IDENT_TYPE_BIB => {},
+            _ => output = false,
+        }
+        match self.kind.as_str() {
+            READ_KIND_MANUAL | READ_KIND_CHIP => {}
+            _ => output = false,
+        }
+        output
     }
 }
