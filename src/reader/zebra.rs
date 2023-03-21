@@ -293,7 +293,7 @@ fn send_new(
                 match &sockets[ix] {
                     Some(sock) => {
                         if repeaters[ix] == true {
-                            no_error = socket::write_reads(&sock, &reads);
+                            no_error = no_error && socket::write_reads(&sock, &reads);
                         }
                     },
                     None => {}

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 pub const READ_STATUS_UNUSED: u8 = 0;
 pub const READ_STATUS_USED: u8 = 1;
@@ -10,7 +10,7 @@ pub const READ_UPLOADED_TRUE: u8 = 1;
 pub const READ_KIND: &str = "reader";
 pub const READ_IDENT_TYPE: &str = "chip";
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all="snake_case")]
 pub struct Read {
     // ID should be implemented database side.

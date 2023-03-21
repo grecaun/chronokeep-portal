@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::objects::setting::Setting;
+use crate::objects::{setting::Setting, read};
 
 #[derive(Deserialize, Debug)]
 #[serde(tag="command", rename_all="snake_case")]
@@ -68,6 +68,9 @@ pub enum Request {
         id: i64,
     },
     // Reads related requests
+    ReadsAdd {
+        read: read::Read
+    },
     ReadsDeleteAll,
     ReadsDelete {
         start_seconds: i64,
