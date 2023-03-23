@@ -41,6 +41,7 @@ pub enum Request {
     Disconnect,
     KeepaliveAck,
     Quit,
+    Shutdown,
     // Participants related requests
     ParticipantsGet,
     ParticipantsRemove,

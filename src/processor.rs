@@ -108,11 +108,11 @@ impl SightingsProcessor {
                         let mut unused: Vec<read::Read> = Vec::new();
                         let mut used: HashMap<String, read::Read> = HashMap::new();
                         // create a hashmap for changing bibs to chips
-                        let mut bibChipMap: HashMap<String, String> = HashMap::new();
+                        let mut bib_chip_map: HashMap<String, String> = HashMap::new();
                         // make a map of participants based upon their chip
                         let mut part_map: HashMap<String, participant::Participant> = HashMap::new();
                         for part in parts {
-                            bibChipMap.insert(String::from(part.bib()), String::from(part.chip()));
+                            bib_chip_map.insert(String::from(part.bib()), String::from(part.chip()));
                             let chip = String::from(part.chip());
                             part_map.insert(chip, part);
                         }
@@ -126,8 +126,8 @@ impl SightingsProcessor {
                                 match read.ident_type() {
                                     read::READ_IDENT_TYPE_BIB => {
                                         let bib = String::from(read.chip());
-                                        if bibChipMap.contains_key(&bib) {
-                                            chip = bibChipMap[&bib].clone();
+                                        if bib_chip_map.contains_key(&bib) {
+                                            chip = bib_chip_map[&bib].clone();
                                         }
                                     }
                                     read::READ_IDENT_TYPE_CHIP => {}
@@ -181,8 +181,8 @@ impl SightingsProcessor {
                             match read.ident_type() {
                                 read::READ_IDENT_TYPE_BIB => {
                                     let bib = String::from(read.chip());
-                                    if bibChipMap.contains_key(&bib) {
-                                        chip = bibChipMap[&bib].clone();
+                                    if bib_chip_map.contains_key(&bib) {
+                                        chip = bib_chip_map[&bib].clone();
                                     }
                                 }
                                 read::READ_IDENT_TYPE_CHIP => {}

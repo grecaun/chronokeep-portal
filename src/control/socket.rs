@@ -738,11 +738,36 @@ fn handle_stream(
                 },
                 requests::Request::Quit => {
                     if let Ok(mut ka) = keepalive.lock() {
-                        println!("Starting shutdown sequence.");
+                        println!("Starting program stop sequence.");
                         *ka = false;
                     }
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                },
+                requests::Request::Shutdown => {
+                    if let Ok(mut ka) = keepalive.lock() {
+                        println!("Starting program stop sequence.");
+                        *ka = false;
+                    }
+                    // connect to ensure the spawning thread will exit the accept call
+                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                    // send shutdown command to the OS
+                    println!("Sending OS shutdown command if on Linux.");
+                    match std::env::consts::OS {
+                        "linux" => {
+                            match std::process::Command::new("shutdown").arg("now").spawn() {
+                                Ok(_) => {
+                                    println!("Shutdown command sent to OS successfully.");
+                                },
+                                Err(e) => {
+                                    println!("Error sending shutdown command: {e}");
+                                }
+                            }
+                        },
+                        other => {
+                            println!("Shutdown not supported on this platform ({other})");
+                        }
+                    }
                 },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
