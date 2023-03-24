@@ -64,6 +64,7 @@ pub struct Reader {
     pub kind: String,
     pub ip_address: String,
     pub port: u16,
+    pub auto_connect: bool,
     pub reading: Option<bool>,
     pub connected: Option<bool>,
 }

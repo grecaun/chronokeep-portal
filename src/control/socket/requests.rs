@@ -51,6 +51,7 @@ pub enum Request {
         kind: String,
         ip_address: String,
         port: u16,
+        auto_connect: bool,
     },
     ReaderConnect {
         id: i64,

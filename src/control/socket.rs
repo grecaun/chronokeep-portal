@@ -361,19 +361,23 @@ fn handle_stream(
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
-                requests::Request::ReaderAdd { name, kind, ip_address, port } => {
+                requests::Request::ReaderAdd { name, kind, ip_address, port, auto_connect } => {
                     if let Ok(ac) = ac_state.lock() {
                         match *ac {
                             auto_connect::State::Finished |
                             auto_connect::State::Unknown => {
                                 if let Ok(sq) = sqlite.lock() {
+                                    let mut ac = reader::AUTO_CONNECT_FALSE;
+                                    if auto_connect {
+                                        ac = reader::AUTO_CONNECT_TRUE
+                                    }
                                     match reader::Reader::new_no_repeaters(
                                         0,
                                         kind,
                                         name,
                                         ip_address,
                                         port,
-                                        reader::AUTO_CONNECT_FALSE,
+                                        ac,
                                     ) {
                                         Ok(reader) => {
                                             let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
@@ -1549,6 +1553,7 @@ pub fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::
             port: r.port(),
             reading: r.is_reading(),
             connected: r.is_connected(),
+            auto_connect: r.auto_connect() == reader::AUTO_CONNECT_TRUE,
         })
     };
     let output = match serde_json::to_writer(stream, &responses::Responses::Readers{
@@ -1687,6 +1692,7 @@ fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, si
             port: r.port(),
             reading: r.is_reading(),
             connected: r.is_connected(),
+            auto_connect: r.auto_connect() == reader::AUTO_CONNECT_TRUE,
         })
     };
     let output = match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
