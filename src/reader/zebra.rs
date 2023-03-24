@@ -459,7 +459,7 @@ fn finalize(t_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>, reading: &
                 Ok(_) => (),
                 Err(e) => {
                     match e.kind() {
-                        ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset | ErrorKind::TimedOut => (),
+                        ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset | ErrorKind::TimedOut | ErrorKind::WouldBlock => (),
                         _ => println!("Error reading from reader. {e}"),
                     }
                 }
