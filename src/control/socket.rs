@@ -368,7 +368,7 @@ fn handle_stream(
                             auto_connect::State::Unknown => {
                                 if let Ok(sq) = sqlite.lock() {
                                     let mut ac = reader::AUTO_CONNECT_FALSE;
-                                    if auto_connect {
+                                    if auto_connect == true {
                                         ac = reader::AUTO_CONNECT_TRUE
                                     }
                                     match reader::Reader::new_no_repeaters(
@@ -391,6 +391,7 @@ fn handle_stream(
                                                                 itmp.set_nickname(String::from(tmp.nickname()));
                                                                 itmp.set_ip_address(String::from(tmp.ip_address()));
                                                                 itmp.set_port(port);
+                                                                itmp.set_auto_connect(tmp.auto_connect());
                                                                 u_readers.push(itmp);
                                                             },
                                                             None => {

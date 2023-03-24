@@ -164,6 +164,10 @@ impl Reader {
         self.port
     }
 
+    pub fn set_auto_connect(&mut self, ac: u8) {
+        self.auto_connect = ac
+    }
+
     pub fn auto_connect(&self) -> u8 {
         self.auto_connect
     }
