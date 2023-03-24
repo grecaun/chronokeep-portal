@@ -281,7 +281,8 @@ fn handle_stream(
             Ok(size) => size,
             Err(e) => {
                 match e.kind() {
-                    ErrorKind::TimedOut => {
+                    ErrorKind::TimedOut |
+                    ErrorKind::WouldBlock => {
                         0
                     },
                     _ => {
@@ -1432,7 +1433,7 @@ fn handle_stream(
         repeaters[index] = false;
     }
     write_disconnect(&stream);
-    stream.shutdown(Shutdown::Both).unwrap();
+    _ = stream.shutdown(Shutdown::Both);
     if let Ok(mut c_socks) = control_sockets.lock() {
         c_socks[index] = None;
     }

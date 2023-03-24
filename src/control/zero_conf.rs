@@ -79,7 +79,8 @@ impl ZeroConf {
                 },
                 Err(e) => {
                     match e.kind() {
-                        ErrorKind::TimedOut => {},
+                        ErrorKind::TimedOut |
+                        ErrorKind::WouldBlock => {},
                         _ => {
                             println!("Zero Conf - Error receiving: {e}");
                         }
