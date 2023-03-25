@@ -71,7 +71,6 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         Ok(mut tags) => {
                             match process_tags(&mut read_map, &mut tags, t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
                                 Ok(new_reads) => {
-                                    println!("Tags processed.");
                                     if new_reads.len() > 0 {
                                         match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
                                             Ok(_) => {},
@@ -93,7 +92,8 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                                 ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
                                     break;
                                 }
-                                ErrorKind::TimedOut => {
+                                // TimedOut == Windows, WouldBlock == Linux
+                                ErrorKind::TimedOut | ErrorKind::WouldBlock => {
                                     match process_tags(&mut read_map, &mut Vec::new(), t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
                                         Ok(new_reads) => {
                                             if new_reads.len() > 0 {
@@ -293,6 +293,7 @@ fn send_new(
                 match &sockets[ix] {
                     Some(sock) => {
                         if repeaters[ix] == true {
+                            println!("Sending reads to subscribed socket {ix}.");
                             no_error = no_error && socket::write_reads(&sock, &reads);
                         }
                     },

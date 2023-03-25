@@ -302,6 +302,7 @@ impl SightingsProcessor {
                                         match &sockets[ix] {
                                             Some(sock) => {
                                                 if repeaters[ix] == true {
+                                                    println!("Sending sightings to subscribed socket {ix}.");
                                                     socket::write_sightings(&sock, &sightings);
                                                 }
                                             },
