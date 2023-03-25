@@ -118,6 +118,8 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
         readers.clone(),
         joiners.clone(),
         control_sockets.clone(),
+        read_repeaters.clone(),
+        sight_processor.clone(),
         controls.clone(),
         sqlite.clone()
     );

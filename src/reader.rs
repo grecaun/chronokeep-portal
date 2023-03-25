@@ -172,6 +172,18 @@ impl Reader {
         self.auto_connect
     }
 
+    pub fn set_control_sockets(&mut self, c_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>) {
+        self.control_sockets = c_sockets
+    }
+
+    pub fn set_read_repeaters(&mut self, r_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>) {
+        self.read_repeaters = r_repeaters
+    }
+
+    pub fn set_sight_processor(&mut self, s_processor: Arc<processor::SightingsProcessor>) {
+        self.sight_processor = Some(s_processor)
+    }
+
     pub fn equal(&self, other: &Reader) -> bool {
         self.nickname == other.nickname() &&
             self.kind == other.kind() &&

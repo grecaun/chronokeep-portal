@@ -2,7 +2,7 @@ use std::{sync::{Arc, Mutex}, thread::{JoinHandle, self}, net::TcpStream, time::
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{socket::{MAX_CONNECTED, self}, self}, database::sqlite, reader::AUTO_CONNECT_TRUE};
+use crate::{control::{socket::{MAX_CONNECTED, self}, self}, database::sqlite, reader::AUTO_CONNECT_TRUE, processor};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 30;
 
@@ -19,6 +19,8 @@ pub struct AutoConnector {
     readers: Arc<Mutex<Vec<super::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+    sight_processor: Arc<processor::SightingsProcessor>,
     controls: control::Control,
     sqlite: Arc<Mutex<sqlite::SQLite>>
 }
@@ -29,6 +31,8 @@ impl AutoConnector {
         readers: Arc<Mutex<Vec<super::Reader>>>,
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+        sight_processor: Arc<processor::SightingsProcessor>,
         controls: control::Control,
         sqlite: Arc<Mutex<sqlite::SQLite>>
     ) -> AutoConnector {
@@ -37,6 +41,8 @@ impl AutoConnector {
             readers,
             joiners,
             control_sockets,
+            read_repeaters,
+            sight_processor,
             controls,
             sqlite
         }
@@ -70,6 +76,9 @@ impl AutoConnector {
             for reader in readers.iter_mut() {
                 if reader.auto_connect() == AUTO_CONNECT_TRUE {
                     println!("Connecting to reader {}.", reader.nickname());
+                    reader.set_control_sockets(self.control_sockets.clone());
+                    reader.set_read_repeaters(self.read_repeaters.clone());
+                    reader.set_sight_processor(self.sight_processor.clone());
                     match reader.connect(&self.sqlite, &self.controls) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
