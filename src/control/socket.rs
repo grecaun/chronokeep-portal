@@ -56,6 +56,8 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     };
 
     let address = address.into();
+    // on windows specifically, SO_REUSEADDR must be set before bind or
+    // it does not work
     match socket.set_reuse_address(true) {
         Ok(_) => {}
         Err(e) => {

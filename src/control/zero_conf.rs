@@ -69,20 +69,34 @@ impl ZeroConf {
                 return Err("unable to set read timeout")
             }
         }
-        match socket.join_multicast_v4(
-            &Ipv4Addr::from_str(ZERO_CONF_MULTICAST_ADDR).unwrap(),
-            &Ipv4Addr::UNSPECIFIED
-        ) {
-            Ok(_) => {
-                println!("Successfully joined multicast group.");
-            },
+        // With multiple interfaces, we should join the multicast on all
+        let addresses = match if_addrs::get_if_addrs() {
+            Ok(addrs) => addrs,
             Err(e) => {
-                println!("Unable to join multicast group. {e}");
-                return Err("unable to join multicast group")
-            },
+                println!("Error getting network interfaces: {e}");
+                return Err("error getting network interfaces")
+            }
+        };
+        for iface in addresses {
+            if let if_addrs::IfAddr::V4(addr) = iface.addr {
+                if addr.is_loopback() == false {
+                    match socket.join_multicast_v4(
+                        &Ipv4Addr::from_str(ZERO_CONF_MULTICAST_ADDR).unwrap(),
+                        &addr.ip
+                    ) {
+                        Ok(_) => {
+                            println!("Successfully joined multicast group on ip {}.", addr.ip);
+                        },
+                        Err(e) => {
+                            println!("Unable to join multicast group. {e}");
+                            return Err("unable to join multicast group")
+                        },
+                    }
+                }
+            }
         }
         let control_port = *control_port;
-        return Ok(ZeroConf {
+        Ok(ZeroConf {
             sqlite,
             server_id,
             control_port,
@@ -150,6 +164,31 @@ impl ZeroConf {
                 }
             };
         }
+        // Leaving multicast groups, do the opposite of the join
+        match if_addrs::get_if_addrs() {
+            Ok(addrs) => {
+                for iface in addrs {
+                    if let if_addrs::IfAddr::V4(addr) = iface.addr {
+                        if addr.is_loopback() == false {
+                            match self.socket.leave_multicast_v4(
+                                &Ipv4Addr::from_str(ZERO_CONF_MULTICAST_ADDR).unwrap(),
+                                &addr.ip
+                            ) {
+                                Ok(_) => {
+                                    println!("Successfully left multicast group on ip {}.", addr.ip);
+                                },
+                                Err(e) => {
+                                    println!("Unable to leave multicast group. {e}");
+                                },
+                            }
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                println!("Error getting network interfaces: {e}");
+            }
+        };
         println!("Zero Conf Server has shut down.");
     }
 }
