@@ -1,7 +1,8 @@
-use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}};
+use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}};
 
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
+use socket2::{Socket, Type, Protocol, Domain};
 
 use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery}, results, processor, remote::{self, uploader}};
 
@@ -38,13 +39,47 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     // Our control port will be semi-random at the start to try to ensure we don't try to get a port in use.
     let control_port = get_available_port();
 
-    let listener = match TcpListener::bind(("0.0.0.0", control_port)) {
-        Ok(list) => list,
+    let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+        Ok(sock) => sock,
         Err(e) => {
-            println!("Error opening listener. {e}");
+            println!("Error creating socket to listen to: {e}");
             return
         }
     };
+
+    let address: SocketAddr = match format!("0.0.0.0:{control_port}").parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            println!("Error getting address: {e}");
+            return
+        }
+    };
+
+    let address = address.into();
+    match socket.set_reuse_address(true) {
+        Ok(_) => {}
+        Err(e) => {
+            println!("Unable to set SO_REUSEADDR to true: {e}");
+            return
+        }
+    }
+    match socket.bind(&address) {
+        Ok(_) => {
+            println!("Control socket successfully bound.");
+        }
+        Err(e) => {
+            println!("Error binding control socket: {e}");
+            return
+        }
+    }
+    match socket.listen(512) {
+        Ok(_) => {},
+        Err(e) => {
+            println!("Socket Listen call failed: {e}");
+            return
+        }
+    }
+    let listener: TcpListener = socket.into();
 
     // create our zero configuration udp socket struct
     let zero = match ZeroConf::new(

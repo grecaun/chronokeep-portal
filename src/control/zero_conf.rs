@@ -1,6 +1,7 @@
-use std::{net::{UdpSocket, Ipv4Addr}, sync::{Arc, Mutex}, time::Duration, io::ErrorKind, str::FromStr};
+use std::{net::{UdpSocket, Ipv4Addr, SocketAddr}, sync::{Arc, Mutex}, time::Duration, io::ErrorKind, str::FromStr};
 
 use rand::{thread_rng, Rng};
+use socket2::{Socket, Domain, Type, Protocol};
 
 use crate::{database::{Database, sqlite}};
 
@@ -27,13 +28,40 @@ impl ZeroConf {
             server_id.push(chars[rng.gen_range(0..chars.len())])
         }
         println!("Zero Conf Server id is {}, port is {}", server_id, ZERO_CONF_PORT);
-        let socket = match UdpSocket::bind(format!("0.0.0.0:{}", ZERO_CONF_PORT)) {
+        let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
             Ok(sock) => sock,
             Err(e) => {
-                println!("Something went wrong trying to connect to zero conf port: {e}");
-                return Err("unable to establish udp socket");
+                println!("Something went wrong trying to create our socket: {e}");
+                return Err("unable to create udp socket")
             }
         };
+        let address: SocketAddr = match format!("0.0.0.0:{ZERO_CONF_PORT}").parse() {
+            Ok(a) => a,
+            Err(e) => {
+                println!("Error creating SockAddr: {e}");
+                return Err("unable to create sock address")
+            }
+        };
+        let address = address.into();
+        // on windows specifically, SO_REUSEADDR must be set before bind or
+        // it does not work
+        match socket.set_reuse_address(true) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Unable to set SO_REUSEADDR to true: {e}");
+                return Err("error setting SO_REUSEADDR to true")
+            }
+        }
+        match socket.bind(&address) {
+            Ok(_) => {
+                println!("Zero conf socket successfully bound.");
+            }
+            Err(e) => {
+                println!("Error binding zero conf socket: {e}");
+                return Err("error binding socket")
+            }
+        }
+        let socket: UdpSocket = socket.into();
         match socket.set_read_timeout(Some(Duration::new(2,0))) {
             Ok(_) => {},
             Err(e) => {
