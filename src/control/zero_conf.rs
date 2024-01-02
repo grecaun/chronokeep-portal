@@ -3,7 +3,7 @@ use std::{net::{UdpSocket, Ipv4Addr, SocketAddr}, sync::{Arc, Mutex}, time::Dura
 use rand::{thread_rng, Rng};
 use socket2::{Socket, Domain, Type, Protocol};
 
-use crate::{database::{Database, sqlite}};
+use crate::database::{Database, sqlite};
 
 use super::SETTING_PORTAL_NAME;
 
