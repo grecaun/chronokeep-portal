@@ -104,6 +104,8 @@ pub enum Request {
     TimeSet {
         time: String,
     },
+    // Request to update the software.
+    Update,
 }
 
 #[derive(Deserialize, Debug)]

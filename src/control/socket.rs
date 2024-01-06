@@ -1,4 +1,4 @@
-use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}};
+use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}, env};
 
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
@@ -1440,6 +1440,29 @@ fn handle_stream(
                     }
                     if message.len() > 0 {
                         no_error = write_error(&stream, errors::Errors::AlreadySubscribed { message: message });
+                    }
+                },
+                requests::Request::Update => {
+                    match std::env::consts::OS {
+                        "linux" => {
+                            if let Ok(update_path) = env::var("PORTAL_UPDATE_SCRIPT") {
+                                match std::process::Command::new(update_path).spawn() {
+                                    Ok(_) => {
+                                        no_error = write_success(&stream, 0);
+                                    },
+                                    Err(e) => {
+                                        println!("error updating time: {e}");
+                                        no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error updating: {e}") })
+                                    }
+                                }
+                            } else {
+                                no_error = write_error(&stream, errors::Errors::ServerError { message: format!("update script environment variable not set") })
+                            }
+                        },
+                        other => {
+                            println!("not supported on this platform ({other})");
+                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
+                        }
                     }
                 },
                 _ => {
