@@ -343,8 +343,11 @@ fn handle_stream(
             };
             let cmd: requests::Request = match serde_json::from_slice(&data[0..size]) {
                 Ok(data) => {
-                    if data != requests::Request::KeepaliveAck {
-                        println!("Received message: {:?}", data);
+                    match data {
+                        requests::Request::KeepaliveAck => {},
+                        _ => {
+                            println!("Received message: {:?}", data);
+                        }
                     }
                     data
                 },
