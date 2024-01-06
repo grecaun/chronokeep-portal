@@ -1410,7 +1410,7 @@ fn handle_stream(
                 requests::Request::TimeSet { time } => {
                     match std::env::consts::OS {
                         "linux" => {
-                            match std::process::Command::new("date").arg("-s").arg(format!("'{time}'")).spawn() {
+                            match std::process::Command::new("sudo").arg("date").arg("-s").arg(format!("'{time}'")).spawn() {
                                 Ok(_) => {
                                     no_error = write_time(&stream);
                                 },
