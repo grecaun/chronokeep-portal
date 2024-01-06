@@ -806,7 +806,7 @@ fn handle_stream(
                     println!("Sending OS shutdown command if on Linux.");
                     match std::env::consts::OS {
                         "linux" => {
-                            match std::process::Command::new("shutdown").arg("now").spawn() {
+                            match std::process::Command::new("sudo").arg("shutdown").arg("now").spawn() {
                                 Ok(_) => {
                                     println!("Shutdown command sent to OS successfully.");
                                 },
