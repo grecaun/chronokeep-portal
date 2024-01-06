@@ -343,7 +343,9 @@ fn handle_stream(
             };
             let cmd: requests::Request = match serde_json::from_slice(&data[0..size]) {
                 Ok(data) => {
-                    println!("Received message: {:?}", data);
+                    if data != requests::Request::KeepaliveAck {
+                        println!("Received message: {:?}", data);
+                    }
                     data
                 },
                 Err(e) => {
@@ -1456,7 +1458,8 @@ fn handle_stream(
                                     }
                                 }
                             } else {
-                                no_error = write_error(&stream, errors::Errors::ServerError { message: format!("update script environment variable not set") })
+                                println!("update script environment variable not set");
+                                no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("update script environment variable not set") })
                             }
                         },
                         other => {
@@ -1991,7 +1994,7 @@ fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: Stri
         }
         other => {
             println!("invalid status code: {other}");
-            return Err(errors::Errors::ServerError { message: format!("invalid status code") })
+            return Err(errors::Errors::ServerError { message: String::from("invalid status code") })
         }
     };
     Ok(output)
@@ -2029,7 +2032,7 @@ fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: St
         }
         other => {
             println!("invalid status code: {other}");
-            return Err(errors::Errors::ServerError { message: format!("invalid status code") })
+            return Err(errors::Errors::ServerError { message: String::from("invalid status code") })
         }
     };
     Ok(output)
