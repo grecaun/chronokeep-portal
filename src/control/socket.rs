@@ -345,6 +345,7 @@ fn handle_stream(
                 Ok(data) => {
                     match data {
                         requests::Request::KeepaliveAck => {},
+                        requests::Request::TimeGet => {},
                         _ => {
                             println!("Received message: {:?}", data);
                         }
