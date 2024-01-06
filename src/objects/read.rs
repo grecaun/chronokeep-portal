@@ -22,6 +22,8 @@ pub struct Read {
     chip: String,
     seconds: u64,
     milliseconds: u32,
+    reader_seconds: u64,
+    reader_milliseconds: u32,
     antenna: u32,
     reader: String,
     rssi: String,
@@ -44,6 +46,8 @@ impl Read {
         chip: String,
         seconds: u64,
         milliseconds: u32,
+        reader_seconds: u64,
+        reader_milliseconds: u32,
         antenna: u32,
         reader: String,
         rssi: String,
@@ -55,6 +59,8 @@ impl Read {
                 chip,
                 seconds,
                 milliseconds,
+                reader_seconds,
+                reader_milliseconds,
                 antenna,
                 reader,
                 rssi,
@@ -69,6 +75,8 @@ impl Read {
         self.chip == other.chip &&
         self.seconds == other.seconds &&
         self.milliseconds == other.milliseconds &&
+        self.reader_seconds == other.reader_seconds &&
+        self.reader_milliseconds == other.reader_milliseconds &&
         self.antenna == other.antenna &&
         self.reader == other.reader &&
         self.status == other.status &&
@@ -89,6 +97,14 @@ impl Read {
 
     pub fn milliseconds(&self) -> u32 {
         self.milliseconds
+    }
+
+    pub fn reader_seconds(&self) -> u64 {
+        self.reader_seconds
+    }
+
+    pub fn reader_milliseconds(&self) -> u32 {
+        self.reader_milliseconds
     }
 
     pub fn antenna(&self) -> u32 {

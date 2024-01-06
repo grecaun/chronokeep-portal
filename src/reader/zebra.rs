@@ -56,7 +56,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         println!("Error setting read timeout. {e}")
                     }
                 }
-                let mut read_map: HashMap<u128, (u64, TagData)> = HashMap::new();
+                let mut read_map: HashMap<u128, (u128, TagData)> = HashMap::new();
                 loop {
                     if let Ok(keepalive) = t_mutex.lock() {
                         // check if we've been told to quit
@@ -246,7 +246,7 @@ fn stop(
 }
 
 fn save_reads(
-    map: &mut HashMap<u128, (u64, TagData)>,
+    map: &mut HashMap<u128, (u128, TagData)>,
     chip_type: &str,
     sqlite: &Arc<Mutex<sqlite::SQLite>>,
     r_name: &str
@@ -257,7 +257,9 @@ fn save_reads(
         reads.push(read::Read::new(
             0,
             chip,
-            old_tag.first_seen / 1000000,
+            (old_tag.portal_time / 1000000) as u64,
+            ((old_tag.portal_time / 1000) % 1000) as u32,
+            (old_tag.first_seen / 1000000) as u64,
             ((old_tag.first_seen / 1000) % 1000) as u32,
             old_tag.antenna as u32,
             String::from(r_name),
@@ -313,7 +315,7 @@ fn send_new(
 }
 
 fn process_tags(
-    map: &mut HashMap<u128, (u64, TagData)>,
+    map: &mut HashMap<u128, (u128, TagData)>,
     tags: &mut Vec<TagData>,
     read_window: u8,
     chip_type: &str,
@@ -325,76 +327,83 @@ fn process_tags(
         Err(_) => return Err("something went wrong trying to get current time")
     };
     // get the read window from 1/10 of a second to milliseconds
-    let window = (read_window as u64) * 100000;
+    let window = (read_window as u128) * 100000;
     let one_second = 1000000;
     // sort tags so the earliest seen are first
-    tags.sort_by(|a, b| a.first_seen.cmp(&b.first_seen));
+    tags.sort_by(|a, b| a.portal_time.cmp(&b.portal_time));
     let mut reads: Vec<read::Read> = Vec::new();
     for tag in tags {
         // check if the map contains the tag
         if map.contains_key(&tag.tag) {
-            let (fs, old_data) = match map.remove(&tag.tag) {
+            let (fs, old_tag) = match map.remove(&tag.tag) {
                 Some(v) => v,
                 None => return Err("didn't find data we expected")
             };
             // check if we're in the window
             // First Seen + Window is a value greater than when we've seen this tag
             // then we are in the window
-            if fs + window > tag.first_seen {
+            if fs + window > tag.portal_time {
                 // if our new tag has a higher rssi we want to record it
-                if tag.rssi > old_data.rssi {
+                if tag.rssi > old_tag.rssi {
                     map.insert(tag.tag, (fs, TagData{
                         tag: tag.tag,
                         rssi: tag.rssi,
                         antenna: tag.antenna,
                         first_seen: fs,
                         last_seen: tag.last_seen,
+                        portal_time: tag.portal_time,
                     }));
                 } else {
-                    map.insert(tag.tag, (fs, old_data));
+                    map.insert(tag.tag, (fs, old_tag));
                 }
             // otherwise we can save the old value and start a new one for this tag
             } else {
-                let chip = if chip_type == types::TYPE_CHIP_DEC {format!("{}", old_data.tag)} else {format!("{:x}", old_data.tag)};
+                let chip = if chip_type == types::TYPE_CHIP_DEC {format!("{}", old_tag.tag)} else {format!("{:x}", old_tag.tag)};
                 reads.push(read::Read::new(
                     0,
                     chip,
-                    old_data.first_seen / 1000000,
-                    ((old_data.first_seen / 1000) % 1000) as u32,
-                    old_data.antenna as u32,
+                    (old_tag.portal_time / 1000000) as u64,
+                    ((old_tag.portal_time / 1000) % 1000) as u32,
+                    (old_tag.first_seen / 1000000) as u64,
+                    ((old_tag.first_seen / 1000) % 1000) as u32,
+                    old_tag.antenna as u32,
                     String::from(r_name),
-                    format!("{}", old_data.rssi),
+                    format!("{}", old_tag.rssi),
                     read::READ_STATUS_UNUSED,
                     read::READ_UPLOADED_FALSE
                 ));
-                map.insert(tag.tag, (tag.first_seen, TagData{
+                map.insert(tag.tag, (tag.portal_time, TagData{
                     tag: tag.tag,
                     rssi: tag.rssi,
                     antenna: tag.antenna,
                     first_seen: tag.first_seen,
                     last_seen: tag.last_seen,
+                    portal_time: tag.portal_time,
                 }));
             }
         // else add the tag to the map
         } else {
-            map.insert(tag.tag, (tag.first_seen, TagData{
+            map.insert(tag.tag, (tag.portal_time, TagData{
                 tag: tag.tag,
                 rssi: tag.rssi,
                 antenna: tag.antenna,
                 first_seen: tag.first_seen,
                 last_seen: tag.last_seen,
+                portal_time: tag.portal_time,
             }));
         }
     }
     let mut removed: Vec<u128> = Vec::new();
     for (fs, old_tag) in map.values() {
         // if we're 1 second past the window
-        if fs + window + one_second < since_epoch {
+        if fs + window + one_second < since_epoch.into() {
             let chip = if chip_type == types::TYPE_CHIP_DEC {format!("{}", old_tag.tag)} else {format!("{:x}", old_tag.tag)};
             reads.push(read::Read::new(
                 0,
                 chip,
-                old_tag.first_seen / 1000000,
+                (old_tag.portal_time / 1000000) as u64,
+                ((old_tag.portal_time / 1000) % 1000) as u32,
+                (old_tag.first_seen / 1000000) as u64,
                 ((old_tag.first_seen / 1000) % 1000) as u32,
                 old_tag.antenna as u32,
                 String::from(r_name),
@@ -581,11 +590,12 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;51200]) -> Result<Vec<TagData>
 
 #[derive(Debug)]
 pub struct TagData {
-    tag: u128,       // 96 bits possible
-    antenna: u16,    // short integer
-    rssi: i8,        // possible values -128 to +127
-    first_seen: u64, // time since 00:00::00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
-    last_seen: u64,  // time since 00:00::00 UTC Jan 1 1970 in microseconds
+    tag: u128,              // 96 bits possible
+    antenna: u16,           // short integer
+    rssi: i8,               // possible values -128 to +127
+    first_seen: u128,       // time since 00:00:00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
+    last_seen: u64,         // time since 00:00:00 UTC Jan 1 1970 in microseconds
+    portal_time: u128, // time since 00:00:00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
 }
 
 fn process_tag_read(buf: &[u8;51200], start_ix: usize, max_ix: &usize) -> Result<Option<TagData>, &'static str> {
@@ -610,7 +620,8 @@ fn process_tag_read(buf: &[u8;51200], start_ix: usize, max_ix: &usize) -> Result
         antenna: 0,
         rssi: 0,
         first_seen: 0,
-        last_seen: 0
+        last_seen: 0,
+        portal_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros(),
     };
     let mut param_ix = start_ix + 4;
     while param_ix < *max_ix {
@@ -652,14 +663,14 @@ fn process_tag_read(buf: &[u8;51200], start_ix: usize, max_ix: &usize) -> Result
                 param_ix = param_ix + 2;
             },
             parameter_types::FIRST_SEEN_TIMESTAMP_UTC => {
-                data.first_seen = ((buf[param_ix+1] as u64) << 56) +
-                                ((buf[param_ix+2] as u64) << 48) +
-                                ((buf[param_ix+3] as u64) << 40) +
-                                ((buf[param_ix+4] as u64) << 32) +
-                                ((buf[param_ix+5] as u64) << 24) +
-                                ((buf[param_ix+6] as u64) << 16) +
-                                ((buf[param_ix+7] as u64) << 8) +
-                                (buf[param_ix+8] as u64);
+                data.first_seen = ((buf[param_ix+1] as u128) << 56) +
+                                ((buf[param_ix+2] as u128) << 48) +
+                                ((buf[param_ix+3] as u128) << 40) +
+                                ((buf[param_ix+4] as u128) << 32) +
+                                ((buf[param_ix+5] as u128) << 24) +
+                                ((buf[param_ix+6] as u128) << 16) +
+                                ((buf[param_ix+7] as u128) << 8) +
+                                (buf[param_ix+8] as u128);
                 param_ix = param_ix + 9;
             },
             parameter_types::LAST_SEEN_TIMESTAMP_UTC => {

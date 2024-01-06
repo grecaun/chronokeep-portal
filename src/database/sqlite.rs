@@ -12,7 +12,7 @@ mod tests;
 const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 
 const DATABASE_VERSION_SETTING: &str = "PORTAL_DATABASE_VERSION";
-const DATABASE_VERSION: u16 = 1;
+const DATABASE_VERSION: u16 = 2;
 
 pub struct SQLite {
     conn: rusqlite::Connection,
@@ -50,7 +50,10 @@ impl SQLite {
         if old_version < new_version {
             match old_version {
                 1 => {
-                    return self.make_tables()
+                    if let Err(e) = self.update_from_v1() {
+                        return Err(e)
+                    }
+                    return Ok(())
                 }
                 _ => {
                     return Err(DBError::InvalidVersionError(String::from("invalid version specified for upgrade")))
@@ -60,6 +63,31 @@ impl SQLite {
             return Err(DBError::DatabaseTooNew(String::from("database version is newer than our known version")))
         }
         return Ok(())
+    }
+
+    fn update_from_v1(&mut self) -> Result<(), DBError> {
+        if let Ok(tx) = self.conn.transaction() {
+            let updates = [
+                "ALTER TABLE chip_reads ADD COLUMN reader_seconds BIGINT NOT NULL DEFAULT 0;",
+                "ALTER TABLE chip_reads ADD COLUMN reader_milliseconds INTEGER NOT NULL DEFAULT 0;"
+            ];
+            for table in updates {
+                if let Err(e) = tx.execute(table, ()) {
+                    return Err(DBError::DataInsertionError(e.to_string()))
+                }
+            }
+            if let Err(e) = tx.execute(
+                "INSERT INTO settings (setting, value) VALUES (?1, ?2);",
+                (DATABASE_VERSION_SETTING, "2")
+            ) {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            if let Err(e) = tx.commit() {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            return Ok(())
+        }
+        return Err(DBError::ConnectionError(String::from("unable to start transaction")))
     }
 
     fn make_tables(&mut self) -> Result<(), DBError> {
@@ -102,6 +130,8 @@ impl SQLite {
                     chip VARCHAR(100) NOT NULL,
                     seconds BIGINT NOT NULL,
                     milliseconds INTEGER NOT NULL,
+                    reader_seconds BIGINT NOT NULL,
+                    reader_milliseconds INTEGER NOT NULL,
                     antenna INTEGER,
                     reader VARCHAR(75),
                     rssi VARCHAR(10),
@@ -153,7 +183,7 @@ impl super::Database for SQLite {
         }
         // Get the results of the version check.
         // This could cause issues if the UNIQUE trait on settings.setting fails.
-        match self.conn.query_row("SELECT * FROM settings WHERE setting=?1;",
+        match self.conn.query_row("SELECT setting, value FROM settings WHERE setting=?1;",
             [DATABASE_VERSION_SETTING],
             |row| {
                 Ok(setting::Setting::new(row.get(0)?, row.get(1)?))
@@ -187,7 +217,7 @@ impl super::Database for SQLite {
     }
 
     fn get_setting(&self, name: &str) -> Result<setting::Setting, DBError> {
-        match self.conn.query_row("SELECT * FROM settings WHERE setting=?1;",
+        match self.conn.query_row("SELECT setting, value FROM settings WHERE setting=?1;",
             [name],
             |row| {
                 Ok(setting::Setting::new(row.get(0)?, row.get(1)?))
@@ -216,7 +246,7 @@ impl super::Database for SQLite {
     }
 
     fn get_reader(&self, id: &i64) -> Result<reader::Reader, DBError> {
-        match self.conn.query_row("SELECT * FROM readers WHERE reader_id=?1;",
+        match self.conn.query_row("SELECT reader_id, nickname, kind, ip_address, port, auto_connect FROM readers WHERE reader_id=?1;",
             [id],
             |row| {
                 Ok(TempReader {
@@ -247,7 +277,7 @@ impl super::Database for SQLite {
     }
 
     fn get_readers(&self) -> Result<Vec<reader::Reader>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT * FROM readers;") {
+        let mut stmt = match self.conn.prepare("SELECT reader_id, nickname, kind, ip_address, port, auto_connect FROM readers;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -321,7 +351,7 @@ impl super::Database for SQLite {
     }
 
     fn get_apis(&self) -> Result<Vec<api::Api>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT * FROM results_api;") {
+        let mut stmt = match self.conn.prepare("SELECT api_id, nickname, kind, token, uri FROM results_api;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -381,13 +411,15 @@ impl super::Database for SQLite {
                             chip, 
                             seconds,
                             milliseconds,
+                            reader_seconds,
+                            reader_milliseconds,
                             antenna,
                             reader,
                             rssi,
                             status,
                             uploaded
-                        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8);",
-                    (r.chip(), r.seconds(), r.milliseconds(), r.antenna(), r.reader(), r.rssi(), r.status(), r.uploaded())
+                        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10);",
+                    (r.chip(), r.seconds(), r.milliseconds(), r.reader_seconds(), r.reader_milliseconds(), r.antenna(), r.reader(), r.rssi(), r.status(), r.uploaded())
                 ) {
                     Ok(val) => count = count + val,
                     Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
@@ -402,7 +434,7 @@ impl super::Database for SQLite {
     }
 
     fn get_reads(&self, start: i64, end: i64) -> Result<Vec<read::Read>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;") {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -419,6 +451,8 @@ impl super::Database for SQLite {
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -437,7 +471,7 @@ impl super::Database for SQLite {
     }
 
     fn get_all_reads(&self) -> Result<Vec<read::Read>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads;") {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -454,6 +488,8 @@ impl super::Database for SQLite {
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -492,7 +528,7 @@ impl super::Database for SQLite {
     }
 
     fn get_useful_reads(&self) -> Result<Vec<read::Read>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads WHERE status <> ?1;") {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads WHERE status <> ?1;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -509,6 +545,8 @@ impl super::Database for SQLite {
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -527,7 +565,7 @@ impl super::Database for SQLite {
     }
     
     fn get_not_uploaded_reads(&self) -> Result<Vec<read::Read>, DBError> {       
-        let mut stmt = match self.conn.prepare("SELECT * FROM chip_reads WHERE uploaded=?1;") {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads WHERE uploaded=?1;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -544,6 +582,8 @@ impl super::Database for SQLite {
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -677,7 +717,7 @@ impl super::Database for SQLite {
     }
 
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT * FROM participants;") {
+        let mut stmt = match self.conn.prepare("SELECT part_id, bib, first, last, age, gender, age_group, distance, part_chip, anonymous FROM participants;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -751,6 +791,8 @@ impl super::Database for SQLite {
                 chip_id,
                 seconds,
                 milliseconds,
+                reader_seconds,
+                reader_milliseconds,
                 antenna,
                 reader,
                 rssi,
@@ -788,6 +830,8 @@ impl super::Database for SQLite {
                         row.get(15)?,
                         row.get(16)?,
                         row.get(17)?,
+                        row.get(18)?,
+                        row.get(19)?,
                     )
                 })
             }
@@ -821,6 +865,8 @@ impl super::Database for SQLite {
                 chip_id,
                 seconds,
                 milliseconds,
+                reader_seconds,
+                reader_milliseconds,
                 antenna,
                 reader,
                 rssi,
@@ -856,6 +902,8 @@ impl super::Database for SQLite {
                         row.get(15)?,
                         row.get(16)?,
                         row.get(17)?,
+                        row.get(18)?,
+                        row.get(19)?,
                     )
                 })
             }
