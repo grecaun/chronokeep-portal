@@ -3,6 +3,7 @@ use crate::network::api;
 use crate::database::DBError;
 use crate::reader;
 
+use std::env;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -29,13 +30,24 @@ struct TempReader {
 
 impl SQLite {
     pub fn new() -> Result<SQLite, DBError> {
-        let new_conn = rusqlite::Connection::open(DATABASE_URI);
-        match new_conn {
-            Ok(c) => 
-                Ok(SQLite {
-                    conn: c,
-                }),
-            Err(e) => Err(DBError::ConnectionError(e.to_string()))
+        if let Ok(db_path) = env::var("PORTAL_DATABASE_PATH") {
+            let new_conn = rusqlite::Connection::open(db_path);
+            match new_conn {
+                Ok(c) => 
+                    Ok(SQLite {
+                        conn: c,
+                    }),
+                Err(e) => Err(DBError::ConnectionError(e.to_string()))
+            }
+        } else {
+            let new_conn = rusqlite::Connection::open(DATABASE_URI);
+            match new_conn {
+                Ok(c) => 
+                    Ok(SQLite {
+                        conn: c,
+                    }),
+                Err(e) => Err(DBError::ConnectionError(e.to_string()))
+            }
         }
     }
 

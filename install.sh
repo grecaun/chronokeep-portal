@@ -9,58 +9,55 @@ if [[ "$EUID" -eq 0 ]]; then
     echo "This script is not meant to be run as root. Please run as a user with sudo privileges."
     exit 1
 fi;
+sudo ping -c 1 1.1.1.1 > /dev/null 2> /dev/null
+if [[ $? != 0 ]]; then
+    echo "This script requires an internet connection to work."
+    exit 1
+fi;
 echo "--------------------------------------"
 echo "---- Now installing Chronoportal! ----"
 echo "--------------------------------------"
 export USER=$(whoami)
 echo "---- User is $USER ----"
-echo "---- Installing git. ----"
-sudo apt install git -y
-export PORTALNUM=$((1 + $RANDOM % 100))
-if [[ $1 -gt 0 ]]; then
-    export PORTALNUM=$1
+git --version > /dev/null 2> /dev/null
+if [[ $? != 0 ]]; then
+    echo "---- Installing git. ----"
+    sudo apt install git -y
 fi;
 if [[ -e /home/$USER/portal ]] || [[ -e /home/$USER/portal-quit ]]; then
     echo "---- One or more directories already exist. ----"
 else
     echo "---- Clone github repos. ----"
-    git clone git@github.com:grecaun/chronokeep-portal /home/$USER/portal
-    git clone git@github.com:grecaun/chronokeep-portal-quit /home/$USER/portal-quit
+    git clone https://github.com/grecaun/chronokeep-portal.git /home/$USER/portal
+    git clone https://github.com/grecaun/chronokeep-portal-quit.git /home/$USER/portal-quit
 fi;
 echo "---- Setting git directories as safe. ----"
 git config --global --add safe.direcotry /home/$USER/portal
 git config --global --add safe.direcotry /home/$USER/portal-quit
-if [[ -e /portal/ ]]; then
-    echo "Portal directory already exists."
-else
+if ! [[ -e /portal/ ]]; then
     echo "---- Creating portal directory. ----"
     sudo mkdir /portal/
     sudo chown $USER:root /portal/
 fi;
-if [[ -e /portal/run.sh ]]; then
-    echo "---- Portal run script already exists. ----"
-else
+if ! [[ -e /portal/run.sh ]]; then
     echo "---- Creating portal run script. ----"
     echo "#!/bin/bash" > /portal/run.sh
     echo >> /portal/run.sh
     echo "export PORTAL_UPDATE_SCRIPT=\"/portal/update_portal.sh\"" >> /portal/run.sh
+    echo "export PORTAL_DATABASE_PATH=\"/portal/chronokeep-portal.sqlite\"" >> /portal/run.sh
     echo "/portal/chronokeep-portal >> /portal/portal.log 2>> /portal/portal.log" >> /portal/run.sh
     sudo chown $USER:root /portal/run.sh
     sudo chmod +x /portal/run.sh
 fi;
-if [[ -e /portal/quit.sh ]]; then
-    echo "---- Portal quit script already exists. ----"
-else
+if ! [[ -e /portal/quit.sh ]]; then
     echo "---- Creating portal quit script. ----"
     echo "#!/bin/bash" > /portal/quit.sh
     echo >> /portal/quit.sh
     echo "/portal/chronokeep-portal-quit >> /portal/quit.log" >> /portal/quit.sh
-    sudo chown $USER:root /portal/run.sh
-    sudo chmod +x /portal/run.sh
+    sudo chown $USER:root /portal/quit.sh
+    sudo chmod +x /portal/quit.sh
 fi;
-if [[ -e /portal/update_portal.sh ]]; then
-    echo "---- Update script already exists. ----"
-else
+if ! [[ -e /portal/update_portal.sh ]]; then
     echo "---- Creating update script. ----"
     echo "#!/bin/bash" > /portal/update_portal.sh
     echo >> /portal/update_portal.sh
@@ -80,67 +77,82 @@ else
     echo "sudo chown -R $USER:root /portal" >> /portal/update_portal.sh
     echo "echo Restarting portal software." >> /portal/update_portal.sh
     echo "sudo systemctl restart portal" >> /portal/update_portal.sh
+    sudo chown $USER:root /portal/update_portal.sh
+    sudo chmod +x /portal/update_portal.sh
 fi;
+source "$HOME/.cargo/env"
 rustup -V > /dev/null 2> /dev/null
 if [[ $? != 0 ]]; then
+    curl -V
+    if [[ $? != 0 ]]; then
+        echo "Installing curl."
+        sudo apt install curl -y
+    fi;
     echo "Installing rust."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
 fi;
-echo "---- Installing libssl-dev (OpenSSL). ----"
-sudo apt install libssl-dev -y
-if [[ -e /etc/systemd/system/portal.service ]]; then
-    echo "---- Portal service already exists. ----"
-else
+sudo apt list --installed 2>> /dev/null | grep libssl-dev > /dev/null 2> /dev/null
+if [[ $? != 0 ]]; then
+    echo "---- Installing libssl-dev (OpenSSL). ----"
+    sudo apt install libssl-dev -y
+fi;
+sudo apt list --installed 2>> /dev/null | grep pkg-config > /dev/null 2> /dev/null
+if [[ $? != 0 ]]; then
+    echo "---- Installing pkg-config. ----"
+    sudo apt install pkg-config -y
+fi;
+cc -v > /dev/null 2> /dev/null
+if [[ $? != 0 ]]; then
+    echo "---- Installing gcc. ----"
+    sudo apt install gcc -y
+fi;
+if ! [[ -e /etc/systemd/system/portal.service ]]; then
     echo "---- Creating portal service. ----"
-    echo "    [Unit]" > /etc/systemd/system/portal.service
-    echo "Description=Chronokeep Portal Service" >> /etc/systemd/system/portal.service
-    echo "Wants=network-online.target" >> /etc/systemd/system/portal.service
-    echo "After=network.target network-online.target" >> /etc/systemd/system/portal.service
-    echo "StartLimitIntervalSec=0" >> /etc/systemd/system/portal.service
-    echo >> /etc/systemd/system/portal.service
-    echo "[Service]" >> /etc/systemd/system/portal.service
-    echo "Type=simple" >> /etc/systemd/system/portal.service
-    echo "Restart=on-failure" >> /etc/systemd/system/portal.service
-    echo "RestartSec=1" >> /etc/systemd/system/portal.service
-    echo "User=$USER" >> /etc/systemd/system/portal.service
-    echo "ExecStart=/portal/run.sh" >> /etc/systemd/system/portal.service
-    echo >> /etc/systemd/system/portal.service
-    echo "[Install]" >> /etc/systemd/system/portal.service
-    echo "WantedBy=multi-user.target" >> /etc/systemd/system/portal.service
+    sudo echo "    [Unit]" | sudo tee /etc/systemd/system/portal.service
+    sudo echo "Description=Chronokeep Portal Service" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "Wants=network-online.target" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "After=network.target network-online.target" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "StartLimitIntervalSec=0" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "[Service]" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "Type=simple" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "Restart=on-failure" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "RestartSec=1" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "User=$USER" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "ExecStart=/portal/run.sh" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "[Install]" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "WantedBy=multi-user.target" | sudo tee -a /etc/systemd/system/portal.service
 fi;
-if [[ -e /etc/systemd/system/portal-quit.service ]]; then
-    echo "---- Portal quit service already exists. ----"
-else
+if ! [[ -e /etc/systemd/system/portal-quit.service ]]; then
     echo "---- Creating portal quit service. ----"
-    echo "[Unit]" > /etc/systemd/system/portal-quit.service
-    echo "Description=Ensure Chronokeep Portal closes before a server shutdown occurs." >> /etc/systemd/system/portal-quit.service
-    echo "DefaultDependencies=no" >> /etc/systemd/system/portal-quit.service
-    echo "Before=shutdown.target" >> /etc/systemd/system/portal-quit.service
-    echo  >> /etc/systemd/system/portal-quit.service
-    echo "[Service]" >> /etc/systemd/system/portal-quit.service
-    echo "Type=oneshot" >> /etc/systemd/system/portal-quit.service
-    echo "ExecStart=/portal/quit.sh" >> /etc/systemd/system/portal-quit.service
-    echo "TimeoutStartSec=0" >> /etc/systemd/system/portal-quit.service
-    echo  >> /etc/systemd/system/portal-quit.service
-    echo "[Install]" >> /etc/systemd/system/portal-quit.service
-    echo "WantedBy=shutdown.target" >> /etc/systemd/system/portal-quit.service
+    sudo echo "[Unit]" | sudo tee /etc/systemd/system/portal-quit.service
+    sudo echo "Description=Ensure Chronokeep Portal closes before a server shutdown occurs." | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "DefaultDependencies=no" | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "Before=shutdown.target" | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo  | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "[Service]" | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "Type=oneshot" | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "ExecStart=/portal/quit.sh" | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "TimeoutStartSec=0" | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo  | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "[Install]" | sudo tee -a /etc/systemd/system/portal-quit.service
+    sudo echo "WantedBy=shutdown.target" | sudo tee -a /etc/systemd/system/portal-quit.service
 fi;
 echo "---- Reloading systemctl daemons, enabling portal service, and starting portal service. ----"
 sudo systemctl daemon-reload
 sudo systemctl enable portal
 sudo systemctl start portal
-if [[ -e /etc/sudoers.d/chronoportal ]]; then
-    echo "---- User already set up for nopasswd for reboot, shutdown, and date functions. ----"
-else
+if ! [[ -e /etc/sudoers.d/chronoportal ]]; then
     if [[ -e /etc/sudoers.d/010_pi-nopasswd ]]; then
         sudo rm /etc/sudoers.d/010_pi-nopasswd
     fi;
-    echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/date" > /etc/sudoers.d/chronoportal
-    echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/reboot" >> /etc/sudoers.d/chronoportal
-    echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/shutdown" >> /etc/sudoers.d/chronoportal
+    sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/date" | sudo tee /etc/sudoers.d/chronoportal
+    sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/reboot" | sudo tee -a /etc/sudoers.d/chronoportal
+    sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/shutdown" | sudo tee -a /etc/sudoers.d/chronoportal
 fi;
-/portal/update_porta.sh
+echo "---- Running the update script. ----"
+/portal/update_portal.sh
 echo "----------------------------"
 echo "---- Setup is finished! ----"
 echo "----------------------------"
