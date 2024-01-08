@@ -15,6 +15,8 @@ const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 const DATABASE_VERSION_SETTING: &str = "PORTAL_DATABASE_VERSION";
 const DATABASE_VERSION: u16 = 2;
 
+const DATABASE_PATH_ENV: &str = "PORTAL_DATABASE_PATH";
+
 pub struct SQLite {
     conn: rusqlite::Connection,
 }
@@ -30,7 +32,7 @@ struct TempReader {
 
 impl SQLite {
     pub fn new() -> Result<SQLite, DBError> {
-        if let Ok(db_path) = env::var("PORTAL_DATABASE_PATH") {
+        if let Ok(db_path) = env::var(DATABASE_PATH_ENV) {
             let new_conn = rusqlite::Connection::open(db_path);
             match new_conn {
                 Ok(c) => 

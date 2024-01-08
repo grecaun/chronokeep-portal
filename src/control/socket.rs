@@ -19,6 +19,8 @@ pub const CONNECTION_VERS: usize = 1;
 pub const READ_TIMEOUT_SECONDS: u64 = 5;
 pub const KEEPALIVE_INTERVAL_SECONDS: u64 = 30;
 
+pub const UPDATE_SCRIPT_ENV: &str = "PORTAL_UPDATE_SCRIPT";
+
 pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
     // Keepalive is the boolean that tells us if we need to keep running.
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
@@ -1451,7 +1453,7 @@ fn handle_stream(
                 requests::Request::Update => {
                     match std::env::consts::OS {
                         "linux" => {
-                            if let Ok(update_path) = env::var("PORTAL_UPDATE_SCRIPT") {
+                            if let Ok(update_path) = env::var(UPDATE_SCRIPT_ENV) {
                                 match std::process::Command::new(update_path).spawn() {
                                     Ok(_) => {
                                         no_error = write_success(&stream, 0);
@@ -1765,13 +1767,20 @@ fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, si
             auto_connect: r.auto_connect() == reader::AUTO_CONNECT_TRUE,
         })
     };
+    let mut updatable: bool = false;
+    if let Ok(env) = env::var(UPDATE_SCRIPT_ENV) {
+        if env.len() > 0 {
+            updatable = true;
+        }
+    }
     let output = match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
         name,
         kind: String::from(CONNECTION_TYPE),
         version: CONNECTION_VERS,
         reads_subscribed: reads,
         sightings_subscribed: sightings,
-        readers: list
+        readers: list,
+        updatable: updatable,
     }) {
         Ok(_) => true,
         Err(e) => {

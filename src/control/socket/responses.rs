@@ -50,7 +50,8 @@ pub enum Responses {
         version: usize,
         reads_subscribed: bool,
         sightings_subscribed: bool,
-        readers: Vec<Reader>
+        readers: Vec<Reader>,
+        updatable: bool
     },
     Keepalive,
     Disconnect,
