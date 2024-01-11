@@ -47,8 +47,11 @@ pub fn restore_backup() -> Result<Backup, &'static str> {
     }
 }
 
-pub fn save_backup(backup: &Backup) {
-    let path = Path::new(BACKUP_FILE_PATH);
+pub fn save_backup(backup: &Backup, back_path: Option<&str>) {
+    let mut path = Path::new(BACKUP_FILE_PATH);
+    if let Some(b_path) = back_path {
+        path = Path::new(b_path);
+    }
     let file = match File::create(&path) {
         Ok(file) => file,
         Err(e) => {

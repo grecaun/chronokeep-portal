@@ -127,7 +127,7 @@ fn main() {
             readers,
             api
         };
-        backup::save_backup(&backup);
+        backup::save_backup(&backup, None);
     }
     println!("Goodbye!")
 }
