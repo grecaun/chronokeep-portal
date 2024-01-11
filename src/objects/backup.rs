@@ -13,6 +13,7 @@ pub struct Backup {
     pub sighting_period: u32,
     pub read_window: u8,
     pub chip_type: String,
+    pub play_sound: bool,
 
     pub readers: Vec<reader::Reader>,
     pub api: Vec<api::Api>,

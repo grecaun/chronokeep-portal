@@ -1,4 +1,4 @@
-use std::{str::{self, FromStr}, net::{TcpStream, SocketAddr, IpAddr}, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
+use std::{str::{self, FromStr}, net::{TcpStream, SocketAddr, IpAddr}, thread::{self, JoinHandle}, sync::{self, Arc, Mutex, Condvar}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
 use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control::{self, socket::{MAX_CONNECTED, self}}};
@@ -7,7 +7,7 @@ pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 
-pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str> {
+pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control, sound_notifier: Arc<Condvar>) -> Result<JoinHandle<()>, &'static str> {
     let ip_addr = match IpAddr::from_str(&reader.ip_address) {
         Ok(addr) => addr,
         Err(e) => {
@@ -44,6 +44,8 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
             let t_window = controls.read_window.clone();
             let t_chip_type = controls.chip_type.clone();
             let t_connected = reader.connected.clone();
+            let t_sound_notifier = sound_notifier.clone();
+
             let t_control_sockets = reader.control_sockets.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
             let mut t_sight_processor = reader.sight_processor.clone();
@@ -69,6 +71,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                     }
                     match read(&mut t_stream, buf) {
                         Ok(mut tags) => {
+                            t_sound_notifier.notify_one();
                             match process_tags(&mut read_map, &mut tags, t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
                                 Ok(new_reads) => {
                                     if new_reads.len() > 0 {
@@ -191,7 +194,6 @@ pub fn initialize(reader: &mut super::Reader) -> Result<(), &'static str> {
         return Err("unable to get stream mutex")
     }
 }
-
 
 pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
     if let Ok(r) = reader.reading.lock() {

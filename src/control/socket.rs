@@ -1,10 +1,10 @@
-use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}, env};
+use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard, Condvar}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}, env};
 
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery}, results, processor, remote::{self, uploader}};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound}, results, processor, remote::{self, uploader}};
 
 use super::zero_conf::ZeroConf;
 
@@ -150,6 +150,17 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     // create our reads uploader struct for auto uploading if the user wants to
     let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone()));
 
+    // start a thread to play sounds if we are told we want to
+    let sound_notifier = Arc::new(Condvar::new());
+    let mut sound = sound::Sounds::new(
+        controls.play_sound.clone(),
+        sound_notifier.clone(),
+        keepalive.clone()
+    );
+    thread::spawn(move || {
+        sound.run();
+    });
+
     // create the auto connector for automatically connecting to readers
     let ac_state = Arc::new(Mutex::new(auto_connect::State::Unknown));
     let mut auto_connector = auto_connect::AutoConnector::new(
@@ -160,7 +171,8 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
         read_repeaters.clone(),
         sight_processor.clone(),
         controls.clone(),
-        sqlite.clone()
+        sqlite.clone(),
+        sound_notifier.clone()
     );
     // start a thread to automatically connect to readers
     thread::spawn(move|| {
@@ -198,7 +210,8 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                     sighting_period: controls.sighting_period.clone(),
                     name: controls.name.clone(),
                     chip_type: controls.chip_type.clone(),
-                    read_window: controls.read_window.clone(),                    
+                    read_window: controls.read_window.clone(),
+                    play_sound: controls.play_sound.clone(),
                 };
                 let t_readers = readers.clone();
                 let t_joiners = joiners.clone();
@@ -209,6 +222,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                 let t_sight_processor = sight_processor.clone();
                 let t_uploader = uploader.clone();
                 let t_ac_state = ac_state.clone();
+                let t_sound_notifier = sound_notifier.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -244,6 +258,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                                 t_sqlite,
                                 t_uploader,
                                 t_ac_state,
+                                t_sound_notifier
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
@@ -303,6 +318,7 @@ fn handle_stream(
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     uploader: Arc<uploader::Uploader>,
     ac_state: Arc<Mutex<auto_connect::State>>,
+    sound_notifier: Arc<Condvar>
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -556,7 +572,7 @@ fn handle_stream(
                                                 sight_processor.clone(),
                                             ) {
                                                 Ok(mut reader) => {
-                                                    match reader.connect(&sqlite, &controls) {
+                                                    match reader.connect(&sqlite.clone(), &controls.clone(), sound_notifier.clone()) {
                                                         Ok(j) => {
                                                             if let Ok(mut join) = joiners.lock() {
                                                                 join.push(j);
@@ -747,7 +763,8 @@ fn handle_stream(
                             super::SETTING_CHIP_TYPE |
                             super::SETTING_PORTAL_NAME |
                             super::SETTING_READ_WINDOW |
-                            super::SETTING_SIGHTING_PERIOD => {
+                            super::SETTING_SIGHTING_PERIOD |
+                            super::SETTING_PLAY_SOUND => {
                                 if let Ok(sq) = sqlite.lock() {
                                     match sq.set_setting(&setting) {
                                         Ok(_) => {
@@ -1580,6 +1597,7 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
         super::SETTING_PORTAL_NAME,
         super::SETTING_READ_WINDOW,
         super::SETTING_SIGHTING_PERIOD,
+        super::SETTING_PLAY_SOUND
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

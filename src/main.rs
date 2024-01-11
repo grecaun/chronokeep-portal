@@ -99,6 +99,7 @@ fn main() {
     println!("Control values retrieved from database.");
     println!("Portal is named '{}'.", control.name);
     println!("Sightings will be ignored if received within {}", util::pretty_time(&u64::from(control.sighting_period)));
+    println!("Play sound value set to {}.", control.play_sound);
     let args: Vec<String> = env::args().collect();
     if args.len() > 0 && args[0].as_str() == "daemon" {
         control::socket::control_loop(sqlite.clone(), control)
@@ -116,7 +117,7 @@ fn main() {
         }
     }
     if let Ok(sq) = sqlite.lock() {
-        let control = control::Control::new(&sq).unwrap();
+        let control: control::Control = control::Control::new(&sq).unwrap();
         let readers = sq.get_readers().unwrap();
         let api = sq.get_apis().unwrap();
         let backup = Backup{
@@ -124,6 +125,7 @@ fn main() {
             sighting_period: control.sighting_period,
             read_window: control.read_window,
             chip_type: control.chip_type,
+            play_sound: control.play_sound,
             readers,
             api
         };

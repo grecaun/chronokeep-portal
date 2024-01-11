@@ -2,7 +2,9 @@
 use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Condvar;
 use std::sync::Mutex;
+use std::thread;
 use std::thread::JoinHandle;
 
 use crate::database::Database;
@@ -13,11 +15,25 @@ use crate::reader::{self, Reader};
 use crate::reader::zebra;
 use crate::util;
 
+use super::sound;
+
 pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
     let mut keepalive: bool = true;
     let mut input: String = String::new();
     let mut connected: Vec<reader::Reader> = Vec::new();
     let mut joiners: Vec<JoinHandle<()>> = Vec::new();
+    
+    // start a thread to play sounds if we are told we want to
+    let sound_notifier = Arc::new(Condvar::new());
+    let ka_mtx = Arc::new(Mutex::new(true));
+    let mut sound = sound::Sounds::new(
+        controls.play_sound.clone(),
+        sound_notifier.clone(),
+        ka_mtx.clone(),
+    );
+    thread::spawn(move || {
+        sound.run();
+    });
 
     while keepalive {
         // read standard in
@@ -61,7 +77,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                             let id = add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sq);
                             drop(sq);
                             if id > 0 {
-                                connect_reader(id, &sqlite, &mut connected, &mut joiners, &controls);
+                                connect_reader(id, &sqlite.clone(), &mut connected, &mut joiners, &controls.clone(), sound_notifier.clone());
                             }
                             continue
                         }
@@ -70,7 +86,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                             continue
                         }
                         if let Ok(id) = i64::from_str(parts[2]) {
-                            connect_reader(id, &sqlite, &mut connected, &mut joiners, &controls);
+                            connect_reader(id, &sqlite.clone(), &mut connected, &mut joiners, &controls.clone(), sound_notifier.clone());
                         } else {
                             println!("Invalid reader number.");
                         }
@@ -236,6 +252,12 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
             Err(e) => println!("Join failed. {:?}", e),
         }
     }
+
+    let lock = ka_mtx.lock();
+    if let Ok(mut ka) = lock {
+        *ka = false;
+    }
+    sound_notifier.notify_one();
 }
 
 fn disconnect_reader(id: i64, connected: &mut Vec<Reader>){
@@ -279,7 +301,8 @@ fn connect_reader(
     mtx: &Arc<Mutex<sqlite::SQLite>>,
     connected: &mut Vec<reader::Reader>,
     joiners: &mut Vec<JoinHandle<()>>,
-    controls: &super::Control
+    controls: &super::Control,
+    sound_notifier: Arc<Condvar>
 ) {
     let sqlite = match mtx.lock() {
         Ok(v) => v,
@@ -312,7 +335,7 @@ fn connect_reader(
                     return;
                 }
             };
-            match r.connect(mtx, &controls) {
+            match r.connect(mtx, &controls, sound_notifier) {
                 Ok(j) => {
                     connected.push(r);
                     joiners.push(j);

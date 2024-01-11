@@ -1,4 +1,4 @@
-use std::{thread::JoinHandle, sync::{Mutex, Arc, self}, net::TcpStream, io::Write};
+use std::{thread::JoinHandle, sync::{Mutex, Arc, self, Condvar}, net::TcpStream, io::Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -250,10 +250,10 @@ impl Reader {
         output
     }
 
-    pub fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control) -> Result<JoinHandle<()>, &'static str> {
+    pub fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control, sound_notifier: Arc<Condvar>) -> Result<JoinHandle<()>, &'static str> {
         match self.kind.as_str() {
             READER_KIND_ZEBRA => {
-                zebra::connect(self, sqlite, controls)
+                zebra::connect(self, sqlite, controls, sound_notifier)
             }
             _ => {
                 Err("reader type not supported")

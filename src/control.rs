@@ -4,11 +4,13 @@ use rand::prelude::random;
 pub mod cli;
 pub mod socket;
 pub mod zero_conf;
+pub mod sound;
 
 pub const SETTING_SIGHTING_PERIOD: &str = "SETTING_SIGHTING_PERIOD";
 pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";
 pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
 pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
+pub const SETTING_PLAY_SOUND: &str = "SETTING_PLAY_SOUND";
 
 #[derive(Clone)]
 pub struct Control {
@@ -16,6 +18,7 @@ pub struct Control {
     pub sighting_period: u32,
     pub read_window: u8,
     pub chip_type: String,
+    pub play_sound: bool,
 }
 
 impl Control {
@@ -24,7 +27,8 @@ impl Control {
             sighting_period: defaults::DEFAULT_SIGHTING_PERIOD,
             name: String::from(""),
             chip_type: String::from(defaults::DEFAULT_CHIP_TYPE),
-            read_window: defaults::DEFAULT_READ_WINDOW
+            read_window: defaults::DEFAULT_READ_WINDOW,
+            play_sound: defaults::DEFAULT_PLAY_SOUND
         };
         match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
             Ok(s) => {
@@ -99,6 +103,28 @@ impl Control {
                         let rw: u8 = s.value().parse().unwrap();
                         output.read_window = rw;
                         println!("Read window successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            }
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_PLAY_SOUND) {
+            Ok(s) => {
+                let rw: bool = s.value().parse().unwrap();
+                output.play_sound = rw;
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_PLAY_SOUND),
+                    format!("{}", defaults::DEFAULT_PLAY_SOUND),
+                )) {
+                    Ok(s) => {
+                        let rw: u8 = s.value().parse().unwrap();
+                        output.read_window = rw;
+                        println!("Play sound successfully set to '{}'.", s.value());
                     },
                     Err(e) => return Err(e)
                 }

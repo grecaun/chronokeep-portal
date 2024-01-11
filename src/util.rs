@@ -56,3 +56,15 @@ impl Time {
         })
     }
 }
+
+pub fn play_sound() {
+    let (_source, source_handle) = rodio::OutputStream::try_default().unwrap();
+    let sink = rodio::Sink::try_new(&source_handle).unwrap();
+    sink.set_volume(0.2);
+
+    // this should be a beep
+    let source = rodio::source::SineWave::new(800.0);
+    sink.append(source);
+
+    std::thread::sleep(std::time::Duration::from_millis(200));
+}

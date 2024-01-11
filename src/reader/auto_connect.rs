@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Mutex}, thread::{JoinHandle, self}, net::TcpStream, time::Duration};
+use std::{sync::{Arc, Mutex, Condvar}, thread::{JoinHandle, self}, net::TcpStream, time::Duration};
 
 use serde::{Serialize, Deserialize};
 
@@ -22,7 +22,8 @@ pub struct AutoConnector {
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     sight_processor: Arc<processor::SightingsProcessor>,
     controls: control::Control,
-    sqlite: Arc<Mutex<sqlite::SQLite>>
+    sqlite: Arc<Mutex<sqlite::SQLite>>,
+    sound_notifier: Arc<Condvar>
 }
 
 impl AutoConnector {
@@ -34,7 +35,8 @@ impl AutoConnector {
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
         sight_processor: Arc<processor::SightingsProcessor>,
         controls: control::Control,
-        sqlite: Arc<Mutex<sqlite::SQLite>>
+        sqlite: Arc<Mutex<sqlite::SQLite>>,
+        sound_notifier: Arc<Condvar>
     ) -> AutoConnector {
         AutoConnector {
             state,
@@ -44,7 +46,8 @@ impl AutoConnector {
             read_repeaters,
             sight_processor,
             controls,
-            sqlite
+            sqlite,
+            sound_notifier
         }
     }
 
@@ -79,7 +82,7 @@ impl AutoConnector {
                     reader.set_control_sockets(self.control_sockets.clone());
                     reader.set_read_repeaters(self.read_repeaters.clone());
                     reader.set_sight_processor(self.sight_processor.clone());
-                    match reader.connect(&self.sqlite, &self.controls) {
+                    match reader.connect(&self.sqlite.clone(), &self.controls.clone(), self.sound_notifier.clone()) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
