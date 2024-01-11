@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::objects::{setting::Setting, read};
+use crate::objects::{setting::Setting, read, participant::Participant};
 
 #[derive(Deserialize, Debug)]
 #[serde(tag="command", rename_all="snake_case")]
@@ -45,6 +45,9 @@ pub enum Request {
     // Participants related requests
     ParticipantsGet,
     ParticipantsRemove,
+    ParticipantsAdd {
+        participants: Vec<Participant>,
+    },
     // Reader related requests
     ReaderAdd {
         name: String,

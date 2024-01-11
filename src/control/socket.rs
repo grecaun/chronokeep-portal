@@ -1285,6 +1285,41 @@ fn handle_stream(
                         }
                     }
                 },
+                requests::Request::ParticipantsAdd { participants } => {
+                    if let Ok(mut sq) = sqlite.lock() {
+                        match sq.add_participants(&participants) {
+                            Ok(_) => {
+                                match sq.get_participants() {
+                                    Ok(parts) => {
+                                        if let Ok(c_socks) = control_sockets.lock() {
+                                            for sock in c_socks.iter() {
+                                                if let Some(sock) = sock {
+                                                    // we might be writing to other sockets
+                                                    // so errors here shouldn't close our connection
+                                                    _ = write_participants(&sock, &parts);
+                                                }
+                                            }
+                                        } else {
+                                            no_error = write_participants(&stream, &parts);
+                                        }
+                                    },
+                                    Err(e) => {
+                                        println!("error getting participants. {e}");
+                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            message: format!("error getting participants: {e}")
+                                        });
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("Error adding participants. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error adding participants: {e}")
+                                });
+                            }
+                        }
+                    }
+                },
                 requests::Request::ReadsAdd { read } => {
                     if read.is_valid() == false {
                         no_error = write_error(&stream, errors::Errors::InvalidRead)
