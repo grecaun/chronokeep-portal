@@ -122,8 +122,8 @@ impl Control {
                     format!("{}", defaults::DEFAULT_PLAY_SOUND),
                 )) {
                     Ok(s) => {
-                        let rw: bool = s.value().parse().unwrap();
-                        output.play_sound = rw;
+                        let ps: bool = s.value().parse().unwrap();
+                        output.play_sound = ps;
                         println!("Play sound successfully set to '{}'.", s.value());
                     },
                     Err(e) => return Err(e)
