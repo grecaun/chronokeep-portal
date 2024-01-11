@@ -57,10 +57,10 @@ impl Time {
     }
 }
 
-pub fn play_sound() {
+pub fn play_sound(volume: f32) {
     let (_source, source_handle) = rodio::OutputStream::try_default().unwrap();
     let sink = rodio::Sink::try_new(&source_handle).unwrap();
-    sink.set_volume(0.2);
+    sink.set_volume(volume);
 
     // this should be a beep
     let source = rodio::source::SineWave::new(800.0);

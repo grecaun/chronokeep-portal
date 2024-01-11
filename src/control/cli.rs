@@ -27,7 +27,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     let sound_notifier = Arc::new(Condvar::new());
     let ka_mtx = Arc::new(Mutex::new(true));
     let mut sound = sound::Sounds::new(
-        controls.play_sound.clone(),
+        controls.clone(),
         sound_notifier.clone(),
         ka_mtx.clone(),
     );

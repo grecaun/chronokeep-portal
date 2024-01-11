@@ -11,6 +11,7 @@ pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";
 pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
 pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
 pub const SETTING_PLAY_SOUND: &str = "SETTING_PLAY_SOUND";
+pub const SETTING_VOLUME: &str = "SETTING_VOLUME";
 
 #[derive(Clone)]
 pub struct Control {
@@ -19,6 +20,7 @@ pub struct Control {
     pub read_window: u8,
     pub chip_type: String,
     pub play_sound: bool,
+    pub volume: f32
 }
 
 impl Control {
@@ -28,7 +30,8 @@ impl Control {
             name: String::from(""),
             chip_type: String::from(defaults::DEFAULT_CHIP_TYPE),
             read_window: defaults::DEFAULT_READ_WINDOW,
-            play_sound: defaults::DEFAULT_PLAY_SOUND
+            play_sound: defaults::DEFAULT_PLAY_SOUND,
+            volume: defaults::DEFAULT_VOLUME,
         };
         match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
             Ok(s) => {
@@ -128,7 +131,29 @@ impl Control {
                     },
                     Err(e) => return Err(e)
                 }
+            },
+            Err(e) => {
+                return Err(e)
             }
+        }
+        match sqlite.get_setting(SETTING_VOLUME) {
+            Ok(s) => {
+                let vol: f32 = s.value().parse().unwrap();
+                output.volume = vol;
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_VOLUME),
+                    format!("{}", defaults::DEFAULT_VOLUME)
+                )) {
+                    Ok(s) => {
+                        let vol: f32 = s.value().parse().unwrap();
+                        output.volume = vol;
+                        println!("Volume successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            },
             Err(e) => {
                 return Err(e)
             }

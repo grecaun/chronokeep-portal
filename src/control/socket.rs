@@ -153,7 +153,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     // start a thread to play sounds if we are told we want to
     let sound_notifier = Arc::new(Condvar::new());
     let mut sound = sound::Sounds::new(
-        controls.play_sound.clone(),
+        controls.clone(),
         sound_notifier.clone(),
         keepalive.clone()
     );
@@ -212,6 +212,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                     chip_type: controls.chip_type.clone(),
                     read_window: controls.read_window.clone(),
                     play_sound: controls.play_sound.clone(),
+                    volume: controls.volume.clone(),
                 };
                 let t_readers = readers.clone();
                 let t_joiners = joiners.clone();
@@ -764,7 +765,8 @@ fn handle_stream(
                             super::SETTING_PORTAL_NAME |
                             super::SETTING_READ_WINDOW |
                             super::SETTING_SIGHTING_PERIOD |
-                            super::SETTING_PLAY_SOUND => {
+                            super::SETTING_PLAY_SOUND |
+                            super::SETTING_VOLUME => {
                                 if let Ok(sq) = sqlite.lock() {
                                     match sq.set_setting(&setting) {
                                         Ok(_) => {
@@ -1597,7 +1599,8 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
         super::SETTING_PORTAL_NAME,
         super::SETTING_READ_WINDOW,
         super::SETTING_SIGHTING_PERIOD,
-        super::SETTING_PLAY_SOUND
+        super::SETTING_PLAY_SOUND,
+        super::SETTING_VOLUME
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {
