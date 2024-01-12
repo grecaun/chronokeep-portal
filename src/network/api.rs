@@ -11,7 +11,7 @@ pub const API_URI_CHRONOKEEP_REMOTE: &str = "https://remote.chronokeep.com/";
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all="camelCase")]
 pub struct Api {
-    id: usize,
+    id: i64,
     nickname: String,
     kind: String,
     token: String,
@@ -20,7 +20,7 @@ pub struct Api {
 
 impl Api {
     pub fn new(
-        id: usize,
+        id: i64,
         nickname: String,
         kind: String,
         token: String,
@@ -34,7 +34,7 @@ impl Api {
         }
     }
 
-    pub fn id(&self) -> usize {
+    pub fn id(&self) -> i64 {
         self.id
     }
 

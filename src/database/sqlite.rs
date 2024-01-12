@@ -350,6 +350,20 @@ impl super::Database for SQLite {
             {},
             _ => return Err(DBError::DataInsertionError(String::from("invalid kind specified")))
         }
+        if api.id() > 0 {
+            match self.conn.execute(
+                "UPDATE results_api SET 
+                        nickname=?1, 
+                        kind=?2, 
+                        token=?3, 
+                        uri=?4 
+                    WHERE api_id=?5",
+                (api.nickname(), api.kind(), api.token(), api.uri(), api.id()))
+            {
+                Ok(num) => return Ok(num),
+                Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
+            }
+        }
         match self.conn.execute(
             "INSERT INTO results_api (
                     nickname,

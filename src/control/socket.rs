@@ -856,7 +856,7 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiAdd { name, kind, uri, token } => {
+                requests::Request::ApiSave { id, name, kind, uri, token } => {
                     match kind.as_str() {
                         api::API_TYPE_CHRONOKEEP_REMOTE |
                         api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
@@ -873,7 +873,7 @@ fn handle_stream(
                                     Ok(apis) => {
                                         let mut remote_exists = false;
                                         for api in apis {
-                                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                            if (api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF) && api.id() != id  {
                                                 remote_exists = true;
                                                 break;
                                             }
@@ -883,7 +883,7 @@ fn handle_stream(
                                             no_error = write_error(&stream, errors::Errors::TooManyRemoteApi)
                                         } else {
                                             match sq.save_api(&api::Api::new(
-                                                0,
+                                                id,
                                                 name,
                                                 kind,
                                                 token,
@@ -942,7 +942,7 @@ fn handle_stream(
                                     }
                                 };
                                 match sq.save_api(&api::Api::new(
-                                    0,
+                                    id,
                                     name,
                                     kind,
                                     token,
@@ -985,6 +985,168 @@ fn handle_stream(
                             no_error = write_error(&stream, errors::Errors::InvalidApiType {
                                 message: format!("'{other}' is not a valid api type")
                             });
+                        }
+                    }
+                },
+                requests::Request::ApiSaveAll { list } => {
+                    if let Ok(sq) = sqlite.lock() {
+                        let mut remote_api: Option<Api> = None;
+                        // check if we have a remote api already set, there can only be one
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                for api in apis {
+                                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                        remote_api = Some(api);
+                                        break;
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                println!("error getting api list. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting apis: {e}")
+                                })
+                            }
+                        }
+                        // if we've got a remote api set we need to check if there is another
+                        if let Some(remote) = remote_api {
+                            let mut remote_exists = false;
+                            let mut invalid_type = false;
+                            for api in &list {
+                                match api.kind() {
+                                    api::API_TYPE_CHRONOKEEP_REMOTE |
+                                    api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
+                                        // if the id's don't match then they're trying to save a second
+                                        if remote.id() != api.id() {
+                                            remote_exists = true;
+                                        }
+                                    },
+                                    api::API_TYPE_CHRONOKEEP_RESULTS |
+                                    api::API_TYPE_CHRONOKEEP_RESULTS_SELF => {},
+                                    _ => {
+                                        invalid_type = true;
+                                    }
+                                }
+                            }
+                            // if we found a duplicate remote, don't save and write error
+                            if remote_exists {
+                                println!("Remote api already exists.");
+                                no_error = write_error(&stream, errors::Errors::TooManyRemoteApi);
+                            // if there's an invalid type, don't save and write error
+                            } else if invalid_type {
+                                println!("One or more invalid api types found.");
+                                no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
+                            // all are saveable
+                            } else {
+                                let mut error_saving = false;
+                                // check if we have any errors saving apis
+                                for api in list {
+                                    match sq.save_api(&api) {
+                                        Ok(_) => { },
+                                        Err(_) => {
+                                            error_saving = true;
+                                        }
+                                    }
+                                }
+                                // write an error message if we had an issue
+                                if error_saving {
+                                    println!("Error saving one or more apis");
+                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                        message: String::from("error saving one or more apis")
+                                    });
+                                // otherwise send everyone connected the updated list of apis
+                                } else {
+                                    match sq.get_apis() {
+                                        Ok(apis) => {
+                                            if let Ok(c_socks) = control_sockets.lock() {
+                                                for sock in c_socks.iter() {
+                                                    if let Some(sock) = sock {
+                                                        // we might be writing to other sockets
+                                                        // so errors here shouldn't close our connection
+                                                        _ = write_api_list(&sock, &apis);
+                                                    }
+                                                }
+                                            } else {
+                                                no_error = write_api_list(&stream, &apis);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("error getting api list. {e}");
+                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                message: format!("error getting api list: {e}")
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        // no previous remote api found
+                        } else {
+                            let mut remote_count = 0;
+                            let mut invalid_type = false;
+                            for api in &list {
+                                match api.kind() {
+                                    api::API_TYPE_CHRONOKEEP_REMOTE |
+                                    api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
+                                        remote_count += 1
+                                    },
+                                    api::API_TYPE_CHRONOKEEP_RESULTS |
+                                    api::API_TYPE_CHRONOKEEP_RESULTS_SELF => {},
+                                    _ => {
+                                        invalid_type = true;
+                                    }
+                                }
+                            }
+                            // if we found a duplicate remote, don't save and write error
+                            if remote_count > 1 {
+                                println!("Remote api already exists.");
+                                no_error = write_error(&stream, errors::Errors::TooManyRemoteApi);
+                            // if there's an invalid type, don't save and write error
+                            } else if invalid_type {
+                                println!("One or more invalid api types found.");
+                                no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
+                            // all are saveable
+                            } else {
+                                let mut error_saving = false;
+                                // check if we have any errors saving apis
+                                for api in list {
+                                    match sq.save_api(&api) {
+                                        Ok(_) => { },
+                                        Err(_) => {
+                                            error_saving = true;
+                                        }
+                                    }
+                                }
+                                // write an error message if we had an issue
+                                if error_saving {
+                                    println!("Error saving one or more apis");
+                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                        message: String::from("error saving one or more apis")
+                                    });
+                                // otherwise send everyone connected the updated list of apis
+                                } else {
+                                    match sq.get_apis() {
+                                        Ok(apis) => {
+                                            if let Ok(c_socks) = control_sockets.lock() {
+                                                for sock in c_socks.iter() {
+                                                    if let Some(sock) = sock {
+                                                        // we might be writing to other sockets
+                                                        // so errors here shouldn't close our connection
+                                                        _ = write_api_list(&sock, &apis);
+                                                    }
+                                                }
+                                            } else {
+                                                no_error = write_api_list(&stream, &apis);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("error getting api list. {e}");
+                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                message: format!("error getting api list: {e}")
+                                            });
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 },

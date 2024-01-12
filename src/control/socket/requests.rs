@@ -1,17 +1,21 @@
 use serde::Deserialize;
 
-use crate::objects::{setting::Setting, read, participant::Participant};
+use crate::{objects::{setting::Setting, read, participant::Participant}, network::api};
 
 #[derive(Deserialize, Debug)]
 #[serde(tag="command", rename_all="snake_case")]
 pub enum Request {
     Unknown,
     // Api related requests
-    ApiAdd {
+    ApiSave {
+        id: i64,
         name: String,
         kind: String,
         uri: String,
         token: String,
+    },
+    ApiSaveAll{
+        list: Vec<api::Api>,
     },
     ApiList,
     ApiRemoteAutoUpload {
