@@ -323,6 +323,7 @@ fn handle_stream(
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
+    let mut buffer = String::new();
     let mut no_error = true;
     let mut last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let http_client = reqwest::blocking::Client::new();
@@ -360,7 +361,23 @@ fn handle_stream(
                     0
                 }
             };
-            let cmd: requests::Request = match serde_json::from_slice(&data[0..size]) {
+            let s = match std::str::from_utf8(&data[0..size]) {
+                Ok(buf) => buf,
+                Err(e) => {
+                    println!("Error parsing data received: {e}");
+                    ""
+                },
+            };
+            buffer.push_str(&s);
+        }
+        while buffer.len() > 0
+        {
+            let mut newline = buffer.find('\n').unwrap_or(buffer.len());
+            if newline < buffer.len() {
+                newline += 1;
+            }
+            let line: String = buffer.drain(..newline).collect();
+            let cmd: requests::Request = match serde_json::from_str(&line) {
                 Ok(data) => {
                     match data {
                         requests::Request::KeepaliveAck => {},
@@ -372,7 +389,11 @@ fn handle_stream(
                     data
                 },
                 Err(e) => {
-                    println!("Error deserializing request. {e}");
+                    if buffer.len() == 0 {
+                        buffer.push_str(&line);
+                    } else {
+                        println!("Error deserializing request. {e}");
+                    }
                     requests::Request::Unknown
                 },
             };
@@ -758,6 +779,26 @@ fn handle_stream(
                         no_error = write_settings(&stream, &get_settings(&sq));
                     }
                 },
+                requests::Request::SettingsGetAll => {
+                    if let Ok(sq) = sqlite.lock() {
+                        let settings = get_settings(&sq);
+                        match sq.get_apis() {
+                            Ok(apis) => {
+                                if let Ok(u_readers) = readers.lock() {
+                                    no_error = write_all_settings(&stream, &settings, &u_readers, &apis);
+                                } else {
+                                    no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error getting the readers mutex") });
+                                }
+                            },
+                            Err(e) => {
+                                println!("error getting api list. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting api list: {e}")
+                                });
+                            }
+                        }
+                    }
+                },
                 requests::Request::SettingsSet { settings } => {
                     for setting in settings {
                         match setting.name() {
@@ -821,8 +862,6 @@ fn handle_stream(
                         println!("Starting program stop sequence.");
                         *ka = false;
                     }
-                    // connect to ensure the spawning thread will exit the accept call
-                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
                     // send shutdown command to the OS
                     println!("Sending OS shutdown command if on Linux.");
                     match std::env::consts::OS {
@@ -840,6 +879,8 @@ fn handle_stream(
                             println!("Shutdown not supported on this platform ({other})");
                         }
                     }
+                    // connect to ensure the spawning thread will exit the accept call
+                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
                 },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
@@ -1450,28 +1491,8 @@ fn handle_stream(
                 requests::Request::ParticipantsAdd { participants } => {
                     if let Ok(mut sq) = sqlite.lock() {
                         match sq.add_participants(&participants) {
-                            Ok(_) => {
-                                match sq.get_participants() {
-                                    Ok(parts) => {
-                                        if let Ok(c_socks) = control_sockets.lock() {
-                                            for sock in c_socks.iter() {
-                                                if let Some(sock) = sock {
-                                                    // we might be writing to other sockets
-                                                    // so errors here shouldn't close our connection
-                                                    _ = write_participants(&sock, &parts);
-                                                }
-                                            }
-                                        } else {
-                                            no_error = write_participants(&stream, &parts);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        println!("error getting participants. {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error getting participants: {e}")
-                                        });
-                                    }
-                                }
+                            Ok(num) => {
+                                no_error = write_success(&stream, num);
                             },
                             Err(e) => {
                                 println!("Error adding participants. {e}");
@@ -1826,6 +1847,42 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool 
         Ok(_) => true,
         Err(e) => {
             println!("3/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
+}
+
+fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_readers: &MutexGuard<Vec<reader::Reader>>, apis: &Vec<Api>) -> bool {
+    let mut list: Vec<responses::Reader> = Vec::new();
+    for r in u_readers.iter() {
+        list.push(responses::Reader{
+            id: r.id(),
+            name: String::from(r.nickname()),
+            kind: String::from(r.kind()),
+            ip_address: String::from(r.ip_address()),
+            port: r.port(),
+            reading: r.is_reading(),
+            connected: r.is_connected(),
+            auto_connect: r.auto_connect() == reader::AUTO_CONNECT_TRUE,
+        })
+    };
+    let output = match serde_json::to_writer(stream, &responses::Responses::SettingsAll {
+        settings: settings.to_vec(),
+        readers: list,
+        apis: apis.to_vec()
+    }) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("4/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("4/ Something went wrong writing to the socket. {e}");
             false
         }
     };

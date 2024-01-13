@@ -116,7 +116,7 @@ impl Control {
         }
         match sqlite.get_setting(SETTING_PLAY_SOUND) {
             Ok(s) => {
-                let ps: bool = s.value().parse().unwrap();
+                let ps: bool = s.value().eq_ignore_ascii_case("true");
                 output.play_sound = ps;
             },
             Err(DBError::NotFound) => {

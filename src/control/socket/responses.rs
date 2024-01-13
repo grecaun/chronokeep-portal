@@ -16,6 +16,11 @@ pub enum Responses {
     Settings {
         settings: Vec<setting::Setting>,
     },
+    SettingsAll {
+        settings: Vec<setting::Setting>,
+        readers: Vec<Reader>,
+        apis: Vec<api::Api>,
+    },
     ApiList {
         apis: Vec<api::Api>,
     },

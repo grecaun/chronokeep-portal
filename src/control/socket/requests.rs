@@ -101,6 +101,7 @@ pub enum Request {
         settings: Vec<Setting>
     },
     SettingsGet,
+    SettingsGetAll,
     // Subscription request to subscribe to new reads/sightings.
     Subscribe {
         reads: bool,
