@@ -260,12 +260,12 @@ fn test_save_reader() {
     assert_eq!(original.ip_address(), first.ip_address());
     assert_eq!(original.port(), first.port());
     assert_eq!(original.auto_connect(), first.auto_connect());
-    // Test auto update feature of the 
+    // Test auto update feature of the reader based on reader name
     let updated_ip = "random_ip";
     let updated_port = 12345;
     let tmp = reader::Reader::new_no_repeaters(
         0,
-        String::from(reader::READER_KIND_ZEBRA),
+        String::from(original.kind()),
         String::from(original.nickname()),
         String::from(updated_ip),
         updated_port,
@@ -276,15 +276,47 @@ fn test_save_reader() {
     let result = sqlite.save_reader(&tmp);
     assert!(result.is_ok());
     // second entry, row id should be 2
-    assert_eq!(2, result.unwrap());
+    let row_id = result.unwrap();
+    assert_eq!(2, row_id);
     let readers = sqlite.get_readers().unwrap();
     assert_eq!(1, readers.len());
     let first = readers.first().unwrap();
+    assert_eq!(row_id, first.id());
     assert_eq!(original.nickname(), first.nickname());
     assert_eq!(original.kind(), first.kind());
     assert_eq!(updated_ip, first.ip_address());
     assert_eq!(updated_port, first.port());
     assert_eq!(reader::AUTO_CONNECT_FALSE, first.auto_connect());
+
+    // Test update feature of save_reader when id matches.
+    let updated_name = "new name";
+    let updated_ip = "random_ip";
+    let updated_port = 12345;
+    let tmp = reader::Reader::new_no_repeaters(
+        2,
+        String::from(original.kind()),
+        String::from(updated_name),
+        String::from(original.ip_address()),
+        original.port(),
+        reader::AUTO_CONNECT_TRUE
+    );
+    assert!(tmp.is_ok());
+    let tmp = tmp.unwrap();
+    let result = sqlite.save_reader(&tmp);
+    assert!(result.is_ok());
+    // the id should match the result
+    let row_id = result.unwrap();
+    assert_eq!(tmp.id(), row_id);
+    let readers = sqlite.get_readers().unwrap();
+    assert_eq!(1, readers.len());
+    let first = readers.first().unwrap();
+    assert_eq!(row_id, first.id());
+    assert_eq!(updated_name, first.nickname());
+    assert_eq!(original.kind(), first.kind());
+    assert_eq!(original.ip_address(), first.ip_address());
+    assert_eq!(original.port(), first.port());
+    assert_eq!(reader::AUTO_CONNECT_TRUE, first.auto_connect());
+
     // Test invalid reader kind
     let result = sqlite.save_reader(&reader::Reader::new_internal(
         0,

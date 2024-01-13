@@ -470,7 +470,7 @@ fn handle_stream(
                                             match sq.save_reader(&tmp) {
                                                 Ok(val) => {
                                                     if let Ok(mut u_readers) = readers.lock() {
-                                                        match u_readers.iter().position(|x| x.nickname() == tmp.nickname()) {
+                                                        match u_readers.iter().position(|x| x.id() == tmp.id() || x.nickname().eq_ignore_ascii_case(tmp.nickname())) {
                                                             Some(ix) => {
                                                                 let mut itmp = u_readers.remove(ix);
                                                                 itmp.set_nickname(String::from(tmp.nickname()));
