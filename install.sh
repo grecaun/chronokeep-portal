@@ -108,6 +108,12 @@ if [[ $? != 0 ]]; then
     echo "------------------------------------------------"
     sudo apt install libssl-dev -y
 fi;
+sudo apt list --installed 2>> /dev/null | grep libasound2-dev > /dev/null 2> /dev/null
+if [[ $? != 0 ]]; then
+    echo "---------- Installing libasound2-dev -----------"
+    echo "------------------------------------------------"
+    sudo apt install libasound2-dev -y
+fi;
 sudo apt list --installed 2>> /dev/null | grep pkg-config > /dev/null 2> /dev/null
 if [[ $? != 0 ]]; then
     echo "------------ Installing pkg-config. ------------"

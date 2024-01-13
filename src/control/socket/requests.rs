@@ -54,6 +54,7 @@ pub enum Request {
     },
     // Reader related requests
     ReaderAdd {
+        id: i64,
         name: String,
         kind: String,
         ip_address: String,

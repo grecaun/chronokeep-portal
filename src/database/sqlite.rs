@@ -250,12 +250,24 @@ impl super::Database for SQLite {
             reader::READER_KIND_RFID => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
             _ => return Err(DBError::DataInsertionError(String::from("unknown reader kind specified")))
         }
-        match self.conn.execute(
-            "INSERT INTO readers (nickname, kind, ip_address, port, auto_connect) VALUES (?1, ?2, ?3, ?4, ?5);",
-            (reader.nickname(), reader.kind(), reader.ip_address(), reader.port(), reader.auto_connect()),
-        ) {
-            Ok(_) => return Ok(self.conn.last_insert_rowid()),
-            Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
+        // if our id is set to a number greater than 0 we should be updating
+        if reader.id() > 0 {
+            match self.conn.execute(
+                "UPDATE readers SET nickname=?1, kind=?2, ip_address=?3, port=?4, auto_connect=?5 WHERE reader_id=?6;",
+                (reader.nickname(), reader.kind(), reader.ip_address(), reader.port(), reader.auto_connect(), reader.id()),
+            ) {
+                Ok(_) => return Ok(reader.id()),
+                Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
+            }
+        // otherwise add a new reader
+        } else {
+            match self.conn.execute(
+                "INSERT INTO readers (nickname, kind, ip_address, port, auto_connect) VALUES (?1, ?2, ?3, ?4, ?5);",
+                (reader.nickname(), reader.kind(), reader.ip_address(), reader.port(), reader.auto_connect()),
+            ) {
+                Ok(_) => return Ok(self.conn.last_insert_rowid()),
+                Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
+            }
         }
     }
 

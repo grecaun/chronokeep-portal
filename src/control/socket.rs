@@ -446,7 +446,7 @@ fn handle_stream(
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
-                requests::Request::ReaderAdd { name, kind, ip_address, port, auto_connect } => {
+                requests::Request::ReaderAdd { id, name, kind, ip_address, port, auto_connect } => {
                     if let Ok(ac) = ac_state.lock() {
                         match *ac {
                             auto_connect::State::Finished |
@@ -457,7 +457,7 @@ fn handle_stream(
                                         ac = reader::AUTO_CONNECT_TRUE
                                     }
                                     match reader::Reader::new_no_repeaters(
-                                        0,
+                                        id,
                                         kind,
                                         name,
                                         ip_address,
