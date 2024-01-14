@@ -353,7 +353,7 @@ impl super::Database for SQLite {
     }
 
     // Results API
-    fn save_api(&self, api: &api::Api) -> Result<usize, DBError> {
+    fn save_api(&self, api: &api::Api) -> Result<i64, DBError> {
         match api.kind() {
             api::API_TYPE_CHRONOKEEP_RESULTS |
             api::API_TYPE_CHRONOKEEP_RESULTS_SELF |
@@ -372,7 +372,7 @@ impl super::Database for SQLite {
                     WHERE api_id=?5",
                 (api.nickname(), api.kind(), api.token(), api.uri(), api.id()))
             {
-                Ok(num) => return Ok(num),
+                Ok(_) => return Ok(api.id()),
                 Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
             }
         }
@@ -385,7 +385,7 @@ impl super::Database for SQLite {
                 ) VALUES (?1,?2,?3,?4);",
             (api.nickname(), api.kind(), api.token(), api.uri())
         ) {
-            Ok(num) => return Ok(num),
+            Ok(_) => return Ok(self.conn.last_insert_rowid()),
             Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
         }
     }
@@ -430,8 +430,8 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn delete_api(&self, name: &str) -> Result<usize, DBError> {
-        match self.conn.execute("DELETE FROM results_api WHERE nickname=?1", [name]) {
+    fn delete_api(&self, id: &i64) -> Result<usize, DBError> {
+        match self.conn.execute("DELETE FROM results_api WHERE api_id=?1", [id]) {
             Ok(num) => return Ok(num),
             Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
         }

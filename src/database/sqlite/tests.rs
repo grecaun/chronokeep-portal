@@ -490,7 +490,7 @@ fn test_save_api() {
     let sqlite = setup_tests(unique_path);
     let results = sqlite.save_api(&original);
     assert!(results.is_ok());
-    assert_eq!(1, results.unwrap());
+    assert_ne!(0, results.unwrap());
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(1, apis.len());
     let first = apis.first().unwrap();
@@ -505,7 +505,7 @@ fn test_save_api() {
             String::from("https:://random.com/")
         ));
     assert!(results.is_ok());
-    assert_eq!(1, results.unwrap());
+    assert_ne!(0, results.unwrap());
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(1, apis.len());
     let first = apis.first().unwrap();
@@ -529,7 +529,7 @@ fn test_save_api() {
         String::from(original.uri())
     ));
     assert!(results.is_ok());
-    assert_eq!(1, results.unwrap());
+    assert_ne!(0, results.unwrap());
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(1, apis.len());
     let first = apis.first().unwrap();
@@ -603,30 +603,34 @@ fn test_delete_api() {
         String::from("random-token-value"),
         String::from("https:://example.com/"));
     let sqlite = setup_tests(unique_path);
-    _ = sqlite.save_api(&original);
+    let orig_id = sqlite.save_api(&original).unwrap_or(0);
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(1, apis.len());
-    let result = sqlite.delete_api(original.nickname());
+    let result = sqlite.delete_api(&orig_id);
     assert!(result.is_ok());
     assert_eq!(1, result.unwrap());
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(0, apis.len());
-    let result = sqlite.delete_api(original.nickname());
+    let result = sqlite.delete_api(&orig_id);
     assert!(result.is_ok());
     assert_eq!(0, result.unwrap());
     // verify that we only delete one from a list of apis
+    let mut five_id: i64 = 0;
     for i in 0..10 {
-        _ = sqlite.save_api(&api::Api::new(
+        let tmp = sqlite.save_api(&api::Api::new(
             0,
             format!("results-api-{i}"),
             String::from(api::API_TYPE_CHRONOKEEP_RESULTS),
             format!("random-token-value-{i}"),
             String::from("https:://example.com/")
-        ))
+        ));
+        if i == 5 {
+            five_id = tmp.unwrap_or(-1);
+        }
     }
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(10, apis.len());
-    let result = sqlite.delete_api("results-api-5");
+    let result = sqlite.delete_api(&five_id);
     assert!(result.is_ok());
     assert_eq!(1, result.unwrap());
     let apis = sqlite.get_apis().unwrap();

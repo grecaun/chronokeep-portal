@@ -221,7 +221,11 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                                 continue
                             }
                         };
-                        remove_api(parts[2], &sq);
+                        if let Ok(id) = parts[2].parse::<i64>() {
+                            remove_api(&id, &sq);
+                        } else {
+                            println!("Invalid api id value given.");
+                        }
                     },
                     _ => {
                         println!("Unknown command.");
@@ -434,9 +438,9 @@ fn add_api(name: &str, kind: &str, token: &str, uri: &str, sqlite: &sqlite::SQLi
     }
 }
 
-fn remove_api(name: &str, sqlite: &sqlite::SQLite) {
-    match sqlite.delete_api(name) {
-        Ok(_) => println!("Successfully removed {name} from saved api list."),
+fn remove_api(id: &i64, sqlite: &sqlite::SQLite) {
+    match sqlite.delete_api(id) {
+        Ok(_) => println!("Successfully removed api {id} from saved api list."),
         Err(e) => println!("Error removing the api from saved api list. {e}"),
     }
 }

@@ -46,9 +46,9 @@ pub trait Database {
     fn get_readers(&self) -> Result<Vec<reader::Reader>, DBError>;
     fn delete_reader(&self, id: &i64) -> Result<usize, DBError>;
     // API information
-    fn save_api(&self, api: &api::Api) -> Result<usize, DBError>;
+    fn save_api(&self, api: &api::Api) -> Result<i64, DBError>;
     fn get_apis(&self) -> Result<Vec<api::Api>, DBError>;
-    fn delete_api(&self, name: &str) -> Result<usize, DBError>;
+    fn delete_api(&self, id: &i64) -> Result<usize, DBError>;
     // Information gathered from readers
     fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
     fn get_reads(&self, start: i64, end: i64) -> Result<Vec<read::Read>, DBError>;

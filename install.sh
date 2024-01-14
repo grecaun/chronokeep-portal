@@ -75,15 +75,15 @@ if ! [[ -e /portal/update_portal.sh ]]; then
     echo "echo Building portal software." >> /portal/update_portal.sh
     echo "cd /home/$USER/portal && /home/$USER/.cargo/bin/cargo build --release" >> /portal/update_portal.sh
     echo "echo Moving portal software to run location." >> /portal/update_portal.sh
-    echo "sudo mv -f ./target/release/chronokeep-portal /portal/" >> /portal/update_portal.sh
+    echo "mv -f ./target/release/chronokeep-portal /portal/" >> /portal/update_portal.sh
     echo "echo Pulling git for newest version of portal-quit." >> /portal/update_portal.sh
     echo "git -C /home/$USER/portal-quit pull" >> /portal/update_portal.sh
     echo "echo Building portal-quit software." >> /portal/update_portal.sh
     echo "cd /home/$USER/portal-quit && /home/$USER/.cargo/bin/cargo build --release" >> /portal/update_portal.sh
     echo "echo Moving portal-quit software to run location." >> /portal/update_portal.sh
-    echo "sudo mv -f ./target/release/chronokeep-portal-quit /portal/" >> /portal/update_portal.sh
+    echo "mv -f ./target/release/chronokeep-portal-quit /portal/" >> /portal/update_portal.sh
     echo "echo Updating ownership of /portal" >> /portal/update_portal.sh
-    echo "sudo chown -R $USER:root /portal" >> /portal/update_portal.sh
+    echo "chown -R $USER:root /portal" >> /portal/update_portal.sh
     echo "echo Restarting portal software." >> /portal/update_portal.sh
     echo "sudo systemctl restart portal" >> /portal/update_portal.sh
     sudo chown $USER:root /portal/update_portal.sh
@@ -179,6 +179,7 @@ if ! [[ -e /etc/sudoers.d/chronoportal ]]; then
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/date" | sudo tee /etc/sudoers.d/chronoportal
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/reboot" | sudo tee -a /etc/sudoers.d/chronoportal
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/shutdown" | sudo tee -a /etc/sudoers.d/chronoportal
+    sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl" | sudo tee -a /etc/sudoers.d/chronoportal
 fi;
 echo "---------- Running the update script. ----------"
 echo "------------------------------------------------"

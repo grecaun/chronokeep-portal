@@ -1191,9 +1191,9 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiRemove { name } => {
+                requests::Request::ApiRemove { id } => {
                     if let Ok(sq) = sqlite.lock() {
-                        match sq.delete_api(&name) {
+                        match sq.delete_api(&id) {
                             Ok(_) => {
                                 match sq.get_apis() {
                                     Ok(apis) => {
@@ -1300,12 +1300,12 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiResultsEventsGet { api_name } => {
+                requests::Request::ApiResultsEventsGet { api_id } => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
                                 for api in apis {
-                                    if api.nickname() == api_name {
+                                    if api.id() == api_id {
                                         if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
                                             no_error = match get_events(&http_client, api) {
                                                 Ok(events) => {
@@ -1334,12 +1334,12 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiResultsEventYearsGet { api_name, event_slug } => {
+                requests::Request::ApiResultsEventYearsGet { api_id, event_slug } => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
                                 for api in apis {
-                                    if api.nickname() == api_name {
+                                    if api.id() == api_id {
                                         if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
                                             no_error = match get_event_years(&http_client, api, event_slug) {
                                                 Ok(years) => {
@@ -1368,12 +1368,12 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiResultsParticipantsGet { api_name, event_slug, event_year } => {
+                requests::Request::ApiResultsParticipantsGet { api_id, event_slug, event_year } => {
                     if let Ok(mut sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
                                 for api in apis {
-                                    if api.nickname() == api_name {
+                                    if api.id() == api_id {
                                         if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
                                             // try to get the participants from the API
                                             let new_parts = match get_participants(&http_client, api, event_slug, event_year) {

@@ -23,17 +23,17 @@ pub enum Request {
     },
     ApiRemoteManualUpload,
     ApiRemove {
-        name: String,
+        id: i64,
     },
     ApiResultsEventsGet {
-        api_name: String,
+        api_id: i64,
     },
     ApiResultsEventYearsGet {
-        api_name: String,
+        api_id: i64,
         event_slug: String,
     },
     ApiResultsParticipantsGet {
-        api_name: String,
+        api_id: i64,
         event_slug: String,
         event_year: String,
     },
