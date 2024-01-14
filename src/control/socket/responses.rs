@@ -20,6 +20,7 @@ pub enum Responses {
         settings: Vec<setting::Setting>,
         readers: Vec<Reader>,
         apis: Vec<api::Api>,
+        auto_upload: uploader::Status,
     },
     ApiList {
         apis: Vec<api::Api>,

@@ -1,8 +1,8 @@
-use std::{sync::{Arc, Mutex}, thread, time::Duration};
+use std::{sync::{Arc, Mutex}, thread, time::Duration, net::TcpStream};
 
 use serde::Serialize;
 
-use crate::{database::{sqlite, Database}, control::socket, network::api, objects::read};
+use crate::{database::{sqlite, Database}, control::socket::{self, MAX_CONNECTED, write_uploader_status}, network::api, objects::read};
 
 pub const AUTO_UPLOAD_PAUSE: u64 = 5;
 
@@ -19,18 +19,21 @@ pub struct Uploader {
     local_keepalive: Arc<Mutex<bool>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     status: Arc<Mutex<Status>>,
+    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>
 }
 
 impl Uploader {
     pub fn new(
         keepalive: Arc<Mutex<bool>>,
-        sqlite: Arc<Mutex<sqlite::SQLite>>
+        sqlite: Arc<Mutex<sqlite::SQLite>>,
+        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>
     ) -> Uploader {
         Uploader {
             server_keepalive: keepalive,
             local_keepalive: Arc::new(Mutex::new(false)),
             sqlite,
-            status: Arc::new(Mutex::new(Status::Stopped))
+            status: Arc::new(Mutex::new(Status::Stopped)),
+            control_sockets
         }
     }
 
@@ -57,6 +60,8 @@ impl Uploader {
         if let Ok(mut r) = self.status.lock() {
             *r = Status::Stopping
         }
+        // let everyone know we're stopping
+        self.update_control_socks();
     }
 
     pub fn run(&self) {
@@ -67,6 +72,8 @@ impl Uploader {
             }
             *r = Status::Running;
         }
+        // let everyone know we're running
+        self.update_control_socks();
         // set local keepalive to true to keep running until told to stop
         if let Ok(mut ka) = self.local_keepalive.lock() {
             *ka = true;
@@ -256,6 +263,20 @@ impl Uploader {
         if let Ok(mut r) = self.status.lock() {
             *r = Status::Stopped;
         }
+        // let everyone know we're stopped
+        self.update_control_socks();
         println!("Auto upload of reads finished.")
+    }
+
+    fn update_control_socks(&self) {
+        // let all the control sockets know of our status
+        if let Ok(c_socks) = self.control_sockets.lock() {
+            let stat = self.status();
+            for sock in c_socks.iter() {
+                if let Some(sock) = sock {
+                    _ = write_uploader_status(&sock, stat.clone());
+                }
+            }
+        }
     }
 }

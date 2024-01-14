@@ -148,7 +148,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
     }
 
     // create our reads uploader struct for auto uploading if the user wants to
-    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone()));
+    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone()));
 
     // start a thread to play sounds if we are told we want to
     let sound_notifier = Arc::new(Condvar::new());
@@ -785,7 +785,7 @@ fn handle_stream(
                         match sq.get_apis() {
                             Ok(apis) => {
                                 if let Ok(u_readers) = readers.lock() {
-                                    no_error = write_all_settings(&stream, &settings, &u_readers, &apis);
+                                    no_error = write_all_settings(&stream, &settings, &u_readers, &apis, uploader.status());
                                 } else {
                                     no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error getting the readers mutex") });
                                 }
@@ -1284,13 +1284,11 @@ fn handle_stream(
                                 if let Ok(mut j) = joiners.lock() {
                                     j.push(t_joiner);
                                 }
-                                no_error = write_uploader_status(&stream, uploader.status());
                             }
                         }
                         AutoUploadQuery::Stop => {
                             if uploader.running() {
                                 uploader.stop();
-                                no_error = write_uploader_status(&stream, uploader.status());
                             } else {
                                 no_error = write_error(&stream, errors::Errors::NotRunning);
                             }
@@ -1853,7 +1851,7 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool 
     output
 }
 
-fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_readers: &MutexGuard<Vec<reader::Reader>>, apis: &Vec<Api>) -> bool {
+fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_readers: &MutexGuard<Vec<reader::Reader>>, apis: &Vec<Api>, status: uploader::Status) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         list.push(responses::Reader{
@@ -1870,7 +1868,8 @@ fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_re
     let output = match serde_json::to_writer(stream, &responses::Responses::SettingsAll {
         settings: settings.to_vec(),
         readers: list,
-        apis: apis.to_vec()
+        apis: apis.to_vec(),
+        auto_upload: status
     }) {
         Ok(_) => true,
         Err(e) => {
