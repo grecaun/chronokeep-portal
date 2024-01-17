@@ -250,7 +250,7 @@ impl Reader {
         output
     }
 
-    pub fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control, sound_notifier: Arc<Condvar>) -> Result<JoinHandle<()>, &'static str> {
+    pub fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<control::Control>>, sound_notifier: Arc<Condvar>) -> Result<JoinHandle<()>, &'static str> {
         match self.kind.as_str() {
             READER_KIND_ZEBRA => {
                 zebra::connect(self, sqlite, controls, sound_notifier)

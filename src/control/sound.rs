@@ -3,7 +3,7 @@ use std::{sync::{Arc, Mutex, Condvar}, time::{Duration, Instant}};
 use crate::util;
 
 pub struct Sounds {
-    control: super::Control,
+    control: Arc<Mutex<super::Control>>,
     sound_notifier: Arc<Condvar>,
     keepalive: Arc<Mutex<bool>>,
     mtx: Arc<Mutex<bool>>
@@ -11,7 +11,7 @@ pub struct Sounds {
 
 impl Sounds {
     pub fn new(
-        control: super::Control,
+        control: Arc<Mutex<super::Control>>,
         sound_notifier: Arc<Condvar>,
         keepalive: Arc<Mutex<bool>>
     ) -> Sounds {
@@ -36,9 +36,11 @@ impl Sounds {
             }
             let notifier = self.mtx.lock().unwrap();
             if let Ok(_) = self.sound_notifier.wait(notifier) {
-                if self.control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(500) {
-                    util::play_sound(self.control.volume);
-                    last_sound = Instant::now();
+                if let Ok(control) = self.control.lock() {
+                    if control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(350) {
+                        util::play_sound(control.volume);
+                        last_sound = Instant::now();
+                    }
                 }
             } else {
                 println!("Error waiting to play a sound.");

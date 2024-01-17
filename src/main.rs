@@ -94,12 +94,17 @@ fn main() {
             Err(_) => (),
         };
     }
-    let control = control::Control::new(&sqlite).unwrap();
+    let control = Arc::new(Mutex::new(control::Control::new(&sqlite).unwrap()));
     let sqlite = Arc::new(Mutex::new(sqlite));
     println!("Control values retrieved from database.");
-    println!("Portal is named '{}'.", control.name);
-    println!("Sightings will be ignored if received within {}", util::pretty_time(&u64::from(control.sighting_period)));
-    println!("Play sound value set to {}.", control.play_sound);
+    if let Ok(control) = control.lock() {
+        println!("Portal is named '{}'.", control.name);
+        println!("Sightings will be ignored if received within {}", util::pretty_time(&u64::from(control.sighting_period)));
+        println!("Play sound value set to {}.", control.play_sound);
+    }
+    else {
+        println!("Unable to get control mutex for some reason.");
+    }
     let args: Vec<String> = env::args().collect();
     if args.len() > 0 && args[0].as_str() == "daemon" {
         control::socket::control_loop(sqlite.clone(), control)

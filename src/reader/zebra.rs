@@ -1,13 +1,13 @@
 use std::{str::{self, FromStr}, net::{TcpStream, SocketAddr, IpAddr}, thread::{self, JoinHandle}, sync::{self, Arc, Mutex, Condvar}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control::{self, socket::{MAX_CONNECTED, self}}};
+use crate::{llrp::{self, parameter_types}, database::{sqlite, Database}, objects::read, types, control::{self, socket::{MAX_CONNECTED, self}}, defaults};
 
 pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 
-pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &control::Control, sound_notifier: Arc<Condvar>) -> Result<JoinHandle<()>, &'static str> {
+pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<control::Control>>, sound_notifier: Arc<Condvar>) -> Result<JoinHandle<()>, &'static str> {
     let ip_addr = match IpAddr::from_str(&reader.ip_address) {
         Ok(addr) => addr,
         Err(e) => {
@@ -41,8 +41,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
             let reading = reader.reading.clone();
             let t_reader_name = reader.nickname.clone();
             let t_sqlite = sqlite.clone();
-            let t_window = controls.read_window.clone();
-            let t_chip_type = controls.chip_type.clone();
+            let t_controls = controls.clone();
             let t_connected = reader.connected.clone();
             let t_sound_notifier = sound_notifier.clone();
 
@@ -72,7 +71,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                     match read(&mut t_stream, buf) {
                         Ok(mut tags) => {
                             t_sound_notifier.notify_one();
-                            match process_tags(&mut read_map, &mut tags, t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
+                            match process_tags(&mut read_map, &mut tags, &t_controls, &t_sqlite, t_reader_name.as_str()) {
                                 Ok(new_reads) => {
                                     if new_reads.len() > 0 {
                                         match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -97,7 +96,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                                 }
                                 // TimedOut == Windows, WouldBlock == Linux
                                 ErrorKind::TimedOut | ErrorKind::WouldBlock => {
-                                    match process_tags(&mut read_map, &mut Vec::new(), t_window, &t_chip_type, &t_sqlite, t_reader_name.as_str()) {
+                                    match process_tags(&mut read_map, &mut Vec::new(), &t_controls, &t_sqlite, t_reader_name.as_str()) {
                                         Ok(new_reads) => {
                                             if new_reads.len() > 0 {
                                                 match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -122,7 +121,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                 }
                 stop(&mut t_stream, &reading, &t_reader_name, &msg_id);
                 finalize(&mut t_stream, &msg_id, &reading);
-                save_reads(&mut read_map, &t_chip_type, &t_sqlite, t_reader_name.as_str());
+                save_reads(&mut read_map, &t_controls, &t_sqlite, t_reader_name.as_str());
                 if let Ok(mut con) = t_connected.lock() {
                     *con = false;
                 }
@@ -249,12 +248,16 @@ fn stop(
 
 fn save_reads(
     map: &mut HashMap<u128, (u128, TagData)>,
-    chip_type: &str,
+    controls: &Arc<Mutex<control::Control>>,
     sqlite: &Arc<Mutex<sqlite::SQLite>>,
     r_name: &str
 ) {
     let mut reads: Vec<read::Read> = Vec::new();
     for (_, old_tag) in map.values() {
+        let mut chip_type = String::from(defaults::DEFAULT_CHIP_TYPE);
+        if let Ok(control) = controls.lock() {
+            control.chip_type.clone_into(&mut chip_type);
+        }
         let chip = if chip_type == types::TYPE_CHIP_DEC {format!("{}", old_tag.tag)} else {format!("{:x}", old_tag.tag)};
         reads.push(read::Read::new(
             0,
@@ -319,8 +322,7 @@ fn send_new(
 fn process_tags(
     map: &mut HashMap<u128, (u128, TagData)>,
     tags: &mut Vec<TagData>,
-    read_window: u8,
-    chip_type: &str,
+    controls: &Arc<Mutex<control::Control>>,
     sqlite: &Arc<Mutex<sqlite::SQLite>>,
     r_name: &str
 ) -> Result<Vec<read::Read>, &'static str> {
@@ -329,11 +331,18 @@ fn process_tags(
         Err(_) => return Err("something went wrong trying to get current time")
     };
     // get the read window from 1/10 of a second to milliseconds
-    let window = (read_window as u128) * 100000;
+    let mut window = (defaults::DEFAULT_READ_WINDOW as u128) * 100000;
+    if let Ok(controls) = controls.lock() {
+        window = (controls.read_window as u128) * 100000;
+    }
     let one_second = 1000000;
     // sort tags so the earliest seen are first
     tags.sort_by(|a, b| a.portal_time.cmp(&b.portal_time));
     let mut reads: Vec<read::Read> = Vec::new();
+    let mut chip_type = String::from(defaults::DEFAULT_CHIP_TYPE);
+    if let Ok(control) = controls.lock() {
+        control.chip_type.clone_into(&mut chip_type);
+    }
     for tag in tags {
         // check if the map contains the tag
         if map.contains_key(&tag.tag) {

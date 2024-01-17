@@ -4,7 +4,7 @@ use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound}, results, processor, remote::{self, uploader}};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound}, results, processor, remote::{self, uploader}, util};
 
 use super::zero_conf::ZeroConf;
 
@@ -21,7 +21,7 @@ pub const KEEPALIVE_INTERVAL_SECONDS: u64 = 30;
 
 pub const UPDATE_SCRIPT_ENV: &str = "PORTAL_UPDATE_SCRIPT";
 
-pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
+pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: Arc<Mutex<super::Control>>) {
     // Keepalive is the boolean that tells us if we need to keep running.
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
 
@@ -179,6 +179,13 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
         auto_connector.run();
     });
 
+    // play a sound to let the user know we've booted up fully and can accept control connections
+    if let Ok(controls) = controls.lock() {
+        if controls.play_sound {
+            util::play_start_sound(controls.volume);
+        }
+    }
+
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
@@ -206,14 +213,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control
                     }
                 };
                 let t_keepalive = keepalive.clone();
-                let t_controls = super::Control {
-                    sighting_period: controls.sighting_period.clone(),
-                    name: controls.name.clone(),
-                    chip_type: controls.chip_type.clone(),
-                    read_window: controls.read_window.clone(),
-                    play_sound: controls.play_sound.clone(),
-                    volume: controls.volume.clone(),
-                };
+                let t_controls = controls.clone();
                 let t_readers = readers.clone();
                 let t_joiners = joiners.clone();
                 let t_read_repeaters = read_repeaters.clone();
@@ -308,7 +308,7 @@ fn handle_stream(
     index: usize,
     mut stream: TcpStream,
     keepalive: Arc<Mutex<bool>>,
-    mut controls: super::Control,
+    controls: Arc<Mutex<super::Control>>,
     control_port: &u16,
     readers: Arc<Mutex<Vec<reader::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
@@ -811,23 +811,30 @@ fn handle_stream(
                                 if let Ok(sq) = sqlite.lock() {
                                     match sq.set_setting(&setting) {
                                         Ok(_) => {
-                                            controls = match super::Control::new(&sq) {
-                                                Ok(c) => c,
-                                                Err(e) => {
-                                                    println!("error getting controls for some reason {e}");
-                                                    controls
-                                                }
-                                            };
-                                            let settings = get_settings(&sq);
-                                            if let Ok(c_socks) = control_sockets.lock() {
-                                                for sock in c_socks.iter() {
-                                                    if let Some(sock) = sock {
-                                                        // we might be writing to other sockets
-                                                        // so errors here shouldn't close our connection
-                                                        _ = write_settings(&sock, &settings);
+                                            if let Ok(new_controls) = super::Control::new(&sq) {
+                                                if let Ok(mut control) = controls.lock() {
+                                                    control.chip_type = new_controls.chip_type;
+                                                    control.name = new_controls.name;
+                                                    control.play_sound = new_controls.play_sound;
+                                                    control.read_window = new_controls.read_window;
+                                                    control.sighting_period = new_controls.sighting_period;
+                                                    control.volume = new_controls.volume;
+                                                    let settings = get_settings(&sq);
+                                                    if let Ok(c_socks) = control_sockets.lock() {
+                                                        for sock in c_socks.iter() {
+                                                            if let Some(sock) = sock {
+                                                                // we might be writing to other sockets
+                                                                // so errors here shouldn't close our connection
+                                                                _ = write_settings(&sock, &settings);
+                                                            }
+                                                        }
                                                     }
+                                                } else {
+                                                    let settings = get_settings(&sq);
+                                                    no_error = write_settings(&stream, &settings);
                                                 }
                                             } else {
+                                                let settings = get_settings(&sq);
                                                 no_error = write_settings(&stream, &settings);
                                             }
                                         },

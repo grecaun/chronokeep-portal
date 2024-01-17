@@ -2,7 +2,7 @@ use std::{sync::{Arc, Mutex, Condvar}, thread::{JoinHandle, self}, net::TcpStrea
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{socket::{MAX_CONNECTED, self}, self}, database::sqlite, reader::AUTO_CONNECT_TRUE, processor};
+use crate::{control::{socket::{MAX_CONNECTED, self}, self}, database::sqlite, reader::AUTO_CONNECT_TRUE, processor, util};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 30;
 
@@ -21,7 +21,7 @@ pub struct AutoConnector {
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     sight_processor: Arc<processor::SightingsProcessor>,
-    controls: control::Control,
+    controls: Arc<Mutex<control::Control>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     sound_notifier: Arc<Condvar>
 }
@@ -34,7 +34,7 @@ impl AutoConnector {
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
         sight_processor: Arc<processor::SightingsProcessor>,
-        controls: control::Control,
+        controls: Arc<Mutex<control::Control>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
         sound_notifier: Arc<Condvar>
     ) -> AutoConnector {
@@ -111,6 +111,11 @@ impl AutoConnector {
             }
         }
         println!("All done connecting to readers.");
+        if let Ok(controls) = self.controls.lock() {
+            if controls.play_sound {
+                util::play_auto_connected_sound(controls.volume);
+            }
+        }
         if let Ok(mut state) = self.state.lock() {
             *state = State::Finished
         }

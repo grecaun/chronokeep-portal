@@ -58,13 +58,52 @@ impl Time {
 }
 
 pub fn play_sound(volume: f32) {
-    let (_source, source_handle) = rodio::OutputStream::try_default().unwrap();
-    let sink = rodio::Sink::try_new(&source_handle).unwrap();
-    sink.set_volume(volume);
+    if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
+        if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
+            sink.set_volume(volume);
+        
+            // this should be a beep
+            let source = rodio::source::SineWave::new(800.0);
+            sink.append(source);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+}
 
-    // this should be a beep
-    let source = rodio::source::SineWave::new(800.0);
-    sink.append(source);
+pub fn play_start_sound(volume: f32) {
+    if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
+        if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
+            sink.set_volume(volume);
+        
+            // this should be two beeps of the same frequency
+            let source = rodio::source::SineWave::new(440.0);
+            sink.append(source);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            // pause between sounds
+            sink.stop();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let source = rodio::source::SineWave::new(440.0);
+            sink.append(source);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+}
 
-    std::thread::sleep(std::time::Duration::from_millis(200));
+pub fn play_auto_connected_sound(volume: f32) {
+    if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
+        if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
+            sink.set_volume(volume);
+        
+            // this should be two beeps of different frequencies
+            let source = rodio::source::SineWave::new(800.0);
+            sink.append(source);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            // pause between sounds
+            sink.stop();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let source = rodio::source::SineWave::new(600.0);
+            sink.append(source);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
 }

@@ -17,7 +17,7 @@ use crate::util;
 
 use super::sound;
 
-pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: super::Control) {
+pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: Arc<Mutex<super::Control>>) {
     let mut keepalive: bool = true;
     let mut input: String = String::new();
     let mut connected: Vec<reader::Reader> = Vec::new();
@@ -305,7 +305,7 @@ fn connect_reader(
     mtx: &Arc<Mutex<sqlite::SQLite>>,
     connected: &mut Vec<reader::Reader>,
     joiners: &mut Vec<JoinHandle<()>>,
-    controls: &super::Control,
+    controls: &Arc<Mutex<super::Control>>,
     sound_notifier: Arc<Condvar>
 ) {
     let sqlite = match mtx.lock() {
