@@ -181,6 +181,9 @@ if ! [[ -e /etc/sudoers.d/chronoportal ]]; then
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/shutdown" | sudo tee -a /etc/sudoers.d/chronoportal
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl" | sudo tee -a /etc/sudoers.d/chronoportal
 fi;
+echo "--------- Setting base volume to 100%. ---------"
+echo "------------------------------------------------"
+amixer set 'PCM' 100%
 echo "---------- Running the update script. ----------"
 echo "------------------------------------------------"
 /portal/update_portal.sh
