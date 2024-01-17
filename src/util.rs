@@ -81,7 +81,6 @@ pub fn play_start_sound(volume: f32) {
             std::thread::sleep(std::time::Duration::from_millis(150));
             // pause between sounds
             sink.stop();
-            std::thread::sleep(std::time::Duration::from_millis(150));
             let source = rodio::source::SineWave::new(440.0);
             sink.append(source);
             std::thread::sleep(std::time::Duration::from_millis(150));
@@ -97,13 +96,32 @@ pub fn play_auto_connected_sound(volume: f32) {
             // this should be two beeps of different frequencies
             let source = rodio::source::SineWave::new(800.0);
             sink.append(source);
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(150));
             // pause between sounds
             sink.stop();
             std::thread::sleep(std::time::Duration::from_millis(150));
             let source = rodio::source::SineWave::new(600.0);
             sink.append(source);
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+}
+
+pub fn play_close_sound(volume: f32) {
+    if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
+        if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
+            sink.set_volume(volume);
+        
+            // this should be two beeps of different frequencies
+            let source = rodio::source::SineWave::new(400.0);
+            sink.append(source);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            // clear the sink so we can play a different tone
+            sink.stop();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let source = rodio::source::SineWave::new(900.0);
+            sink.append(source);
+            std::thread::sleep(std::time::Duration::from_millis(150));
         }
     }
 }

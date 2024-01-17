@@ -21,7 +21,7 @@ pub const KEEPALIVE_INTERVAL_SECONDS: u64 = 30;
 
 pub const UPDATE_SCRIPT_ENV: &str = "PORTAL_UPDATE_SCRIPT";
 
-pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: Arc<Mutex<super::Control>>) {
+pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<super::Control>>) {
     // Keepalive is the boolean that tells us if we need to keep running.
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
 

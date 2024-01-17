@@ -17,7 +17,7 @@ use crate::util;
 
 use super::sound;
 
-pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: Arc<Mutex<super::Control>>) {
+pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<super::Control>>) {
     let mut keepalive: bool = true;
     let mut input: String = String::new();
     let mut connected: Vec<reader::Reader> = Vec::new();

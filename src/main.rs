@@ -107,14 +107,14 @@ fn main() {
     }
     let args: Vec<String> = env::args().collect();
     if args.len() > 0 && args[0].as_str() == "daemon" {
-        control::socket::control_loop(sqlite.clone(), control)
+        control::socket::control_loop(sqlite.clone(), &control)
     }  else {
         match CONTROL_TYPE {
             "socket" => {
-                control::socket::control_loop(sqlite.clone(), control)
+                control::socket::control_loop(sqlite.clone(), &control)
             },
             "cli" => {
-                control::cli::control_loop(sqlite.clone(), control);
+                control::cli::control_loop(sqlite.clone(), &control);
             },
             other => {
                 println!("'{other}' is not a valid control type.");
@@ -136,5 +136,10 @@ fn main() {
         };
         backup::save_backup(&backup, None);
     }
-    println!("Goodbye!")
+    println!("Goodbye!");
+    if let Ok(control) = control.lock() {
+        if control.play_sound {
+            util::play_close_sound(control.volume);
+        }
+    };
 }
