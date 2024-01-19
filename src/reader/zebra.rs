@@ -204,6 +204,9 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
     }
     let msg_id = reader.get_next_id();
     if let Ok(stream) = reader.socket.lock() {
+        if let Ok(mut con) = reader.connected.lock() {
+            *con = false;
+        }
         match &*stream {
             Some(s) => {
                 let mut w_stream = match s.try_clone() {
@@ -211,7 +214,9 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
                     Err(_) => return Err("unable to copy stream"),
                 };
                 match stop_reading(&mut w_stream, msg_id) {
-                    Ok(_) => println!("No longer reading from reader {}", reader.nickname()),
+                    Ok(_) => {
+                        println!("No longer reading from reader {}", reader.nickname());
+                    }
                     Err(e) => return Err(e),
                 }
             },
