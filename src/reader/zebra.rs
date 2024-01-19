@@ -204,8 +204,8 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
     }
     let msg_id = reader.get_next_id();
     if let Ok(stream) = reader.socket.lock() {
-        if let Ok(mut con) = reader.connected.lock() {
-            *con = false;
+        if let Ok(mut r) = reader.reading.lock() {
+            *r = false;
         }
         match &*stream {
             Some(s) => {
