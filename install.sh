@@ -179,6 +179,7 @@ if ! [[ -e /etc/sudoers.d/chronoportal ]]; then
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/reboot" | sudo tee -a /etc/sudoers.d/chronoportal
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/shutdown" | sudo tee -a /etc/sudoers.d/chronoportal
     sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl" | sudo tee -a /etc/sudoers.d/chronoportal
+    sudo echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/hwclock" | sudo tee -a /etc/sudoers.d/chronoportal
 fi;
 echo "--------- Setting base volume to 100%. ---------"
 echo "------------------------------------------------"

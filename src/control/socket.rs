@@ -1656,7 +1656,15 @@ fn handle_stream(
                         "linux" => {
                             match std::process::Command::new("sudo").arg("date").arg("-s").arg(format!("'{time}Z'")).spawn() {
                                 Ok(_) => {
-                                    no_error = write_time(&stream);
+                                    match std::process::Command::new("sudo").arg("hwclock").arg("-w").spawn(){
+                                        Ok(_) => {
+                                            no_error = write_time(&stream);
+                                        },
+                                        Err(e) => {
+                                            println!("error setting time: {e}");
+                                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
+                                        }
+                                    }
                                 },
                                 Err(e) => {
                                     println!("error setting time: {e}");
