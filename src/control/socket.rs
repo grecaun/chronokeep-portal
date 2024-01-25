@@ -1656,7 +1656,7 @@ fn handle_stream(
                         "linux" => {
                             match std::process::Command::new("sudo").arg("date").arg("-s").arg(format!("'{time}Z'")).output() {
                                 Ok(_) => {
-                                    match std::process::Command::new("sudo").arg("hwclock").arg("-w").output() {
+                                    match std::process::Command::new("sudo").arg("hwclock").arg("--set").arg("--date=\"$(date +'%Y-%m-%d %T')\"").output() {
                                         Ok(_) => {
                                             no_error = write_time(&stream)
                                         },
