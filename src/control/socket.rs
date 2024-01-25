@@ -1654,9 +1654,9 @@ fn handle_stream(
                 requests::Request::TimeSet { time } => {
                     match std::env::consts::OS {
                         "linux" => {
-                            match std::process::Command::new("sudo").arg("date").arg("-s").arg(format!("'{time}'")).output() {
+                            match std::process::Command::new("sudo").arg("date").arg(format!("--set={time}")).status() {
                                 Ok(_) => {
-                                    match std::process::Command::new("sudo").arg("hwclock").arg("--set").arg("--date=\"$(date +'%Y-%m-%d %T')\"").output() {
+                                    match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
                                         Ok(_) => {
                                             no_error = write_time(&stream)
                                         },
