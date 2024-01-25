@@ -18,7 +18,3 @@ rodio = "0.17.3"
 [dependencies.rusqlite]
 version = "0.28.0"
 features = ["bundled"]
-
-#[build]
-[target.armv7-unknown-linux-gnueabihf]
-linker="arm-linux-gnueabihf-gcc-12"
