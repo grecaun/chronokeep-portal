@@ -18,11 +18,10 @@ echo "------------------------------------------------"
 echo "--------- Now installing Chronoportal! ---------"
 echo "------------------------------------------------"
 export USER=$(whoami)
-echo "---------------- User is $USER -----------------"
-echo "------------------------------------------------"
 git --version > /dev/null 2> /dev/null
 if [[ $? != 0 ]]; then
-    echo "---- Installing git. ----"
+    echo "--------------- Installing git. ----------------"
+    echo "------------------------------------------------"
     sudo apt install git -y
 fi;
 if ! [[ -e /home/$USER/portal ]]; then
