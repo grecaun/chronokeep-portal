@@ -21,6 +21,9 @@ pub const KEEPALIVE_INTERVAL_SECONDS: u64 = 30;
 
 pub const UPDATE_SCRIPT_ENV: &str = "PORTAL_UPDATE_SCRIPT";
 
+pub const JSON_START_CHAR: char = '{';
+pub const JSON_END_CHAR: char = '}';
+
 pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<super::Control>>) {
     // Keepalive is the boolean that tells us if we need to keep running.
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
@@ -304,6 +307,39 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
     println!("Finished control thread shutdown.");
 }
 
+fn find_json_end(buffer: &String) -> usize {
+    let chars = buffer.as_bytes();
+    let mut start_count = 0;
+    let mut ix = 0;
+    // get to the first start char
+    while ix < chars.len() {
+        if chars[ix] == JSON_START_CHAR as u8 {
+            start_count += 1;
+            ix += 1;
+            break;
+        }
+        ix += 1;
+    }
+    if ix >= chars.len() - 1 {
+        return chars.len() - 1;
+    }
+    while ix < chars.len() {
+        if chars[ix] == JSON_START_CHAR as u8 {
+            start_count += 1;
+        } else if chars[ix] == JSON_END_CHAR as u8 {
+            start_count -= 1;
+            if start_count < 1 {
+                if ix + 1 < chars.len() && chars[ix + 1] == '\n' as u8 {
+                    return ix + 1;
+                }
+                return ix;
+            }
+        }
+        ix += 1;
+    }
+    return chars.len() - 1;
+}
+
 fn handle_stream(
     index: usize,
     mut stream: TcpStream,
@@ -372,12 +408,13 @@ fn handle_stream(
         }
         while buffer.len() > 0
         {
-            let mut newline = buffer.find('\n').unwrap_or(buffer.len());
+            // custom parse //
+            let mut newline = find_json_end(&buffer);
             if newline < buffer.len() {
                 newline += 1;
             }
-            let line: String = buffer.drain(..newline).collect();
-            let cmd: requests::Request = match serde_json::from_str(&line) {
+            let single_line: String = buffer.drain(..newline).collect();
+            let cmd: requests::Request = match serde_json::from_str(&single_line) {
                 Ok(data) => {
                     match data {
                         requests::Request::KeepaliveAck => {},
@@ -390,7 +427,7 @@ fn handle_stream(
                 },
                 Err(e) => {
                     if buffer.len() == 0 {
-                        buffer.push_str(&line);
+                        buffer.push_str(&single_line);
                     } else {
                         println!("Error deserializing request. {e}");
                     }
@@ -1725,8 +1762,12 @@ fn handle_stream(
                     }
                 },
                 _ => {
+                    println!("Unknown command received - line was {:?}", single_line);
                     no_error = write_error(&stream, errors::Errors::UnknownCommand)
                 },
+            }
+            if no_error == false {
+                break;
             }
         }
         if let Ok(time) = SystemTime::now().duration_since(UNIX_EPOCH) {
