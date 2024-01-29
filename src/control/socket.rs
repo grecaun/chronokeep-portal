@@ -428,10 +428,10 @@ fn handle_stream(
                 Err(e) => {
                     if buffer.len() == 0 {
                         buffer.push_str(&single_line);
+                        break;
                     } else {
                         println!("Error deserializing request. {e}");
                     }
-                    break;
                 },
             };
             match cmd {
