@@ -431,7 +431,7 @@ fn handle_stream(
                     } else {
                         println!("Error deserializing request. {e}");
                     }
-                    requests::Request::Unknown
+                    break;
                 },
             };
             match cmd {
@@ -1494,7 +1494,7 @@ fn handle_stream(
                             }
                         }
                     }
-                }
+                },
                 requests::Request::ParticipantsRemove => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_participants() {
@@ -1579,7 +1579,7 @@ fn handle_stream(
                             }
                         }
                     }
-                }
+                },
                 requests::Request::ReadsGet { start_seconds, end_seconds } => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_reads(start_seconds, end_seconds) {
@@ -1639,7 +1639,7 @@ fn handle_stream(
                             }
                         }
                     }
-                }
+                },
                 requests::Request::ReadsDelete { start_seconds, end_seconds } => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_reads(start_seconds, end_seconds) {
@@ -1684,7 +1684,7 @@ fn handle_stream(
                             }
                         }
                     }
-                }
+                },
                 requests::Request::TimeGet => {
                     no_error = write_time(&stream);
                 },
