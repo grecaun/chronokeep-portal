@@ -432,6 +432,7 @@ fn handle_stream(
                     } else {
                         println!("Error deserializing request. {e}");
                     }
+                    requests::Request::Unknown
                 },
             };
             match cmd {
