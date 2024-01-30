@@ -4,6 +4,7 @@ PORTAL_DEST=/portal/
 SERVICE_NAME=portal
 QUIT_SERVICE_NAME=portal-quit
 UPDATE_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/update.sh'
+UNINSTALL_SCRUPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/uninstall.sh'
 PORTAL_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal/releases/latest'
 QUIT_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal-quit/releases/latest'
 
@@ -87,6 +88,51 @@ if ! [[ -e ${PORTAL_DEST}update.sh ]]; then
     curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh
     sudo chown $USER:root ${PORTAL_DEST}update.sh
     sudo chmod +x ${PORTAL_DEST}update.sh
+else
+    OLD_SCRIPT_VERS=$(cat ${PORTAL_DEST}update.sh | grep VERSION= | sed s/VERSION=//)
+    if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
+        curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update_tmp.sh
+        NEW_SCRIPT_VERS=$(cat ${PORTAL_DEST}update.sh | grep VERSION= | sed s/VERSION=//)
+        if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
+            echo "----------- Updating update script. ------------"
+            echo "------------------------------------------------"
+            mv ${PORTAL_DEST}update_tmp.sh ${PORTAL_DEST}update.sh
+        else
+            rm ${PORTAL_DEST}update_tmp.sh
+        fi;
+    else
+        echo "----------- Updating update script. ------------"
+        echo "------------------------------------------------"
+        curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh
+        sudo chown $USER:root ${PORTAL_DEST}update.sh
+        sudo chmod +x ${PORTAL_DEST}update.sh
+    fi;
+fi;
+if ! [[ -e ${PORTAL_DEST}uninstall.sh ]]; then
+    echo "--------- Fetching uninstall script. -----------"
+    echo "------------------------------------------------"
+    curl -L ${UNINSTALL_SCRUPT_URL} -o ${PORTAL_DEST}uninstall.sh
+    sudo chown $USER:root ${PORTAL_DEST}uninstall.sh
+    sudo chmod +x ${PORTAL_DEST}uninstall.sh
+else
+    OLD_SCRIPT_VERS=$(cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed s/VERSION=//)
+    if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
+        curl -L ${UNINSTALL_SCRUPT_URL} -o ${PORTAL_DEST}uninstall_tmp.sh
+        NEW_SCRIPT_VERS=$(cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed s/VERSION=//)
+        if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
+            echo "---------- Updating uninstall script. ----------"
+            echo "------------------------------------------------"
+            mv ${PORTAL_DEST}uninstall_tmp.sh ${PORTAL_DEST}uninstall.sh
+        else
+            rm ${PORTAL_DEST}uninstall_tmp.sh
+        fi;
+    else
+        echo "---------- Updating uninstall script. ----------"
+        echo "------------------------------------------------"
+        curl -L ${UNINSTALL_SCRUPT_URL} -o ${PORTAL_DEST}uninstall.sh
+        sudo chown $USER:root ${PORTAL_DEST}uninstall.sh
+        sudo chmod +x ${PORTAL_DEST}uninstall.sh
+    fi;
 fi;
 if ! [[ -e /etc/systemd/system/${SERVICE_NAME}.service ]]; then
     echo "----------- Creating portal service. -----------"
