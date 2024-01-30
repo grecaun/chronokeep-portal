@@ -5,15 +5,15 @@ echo Adding architectures.
 echo "---------------------------------------------------------------------------------"
 sudo dpkg --add-architecture arm64
 sudo dpkg --add-architecture armhf
-ehco Setting up apt sources and updating current apt packages.
+echo Setting up apt sources and updating current apt packages.
 echo "---------------------------------------------------------------------------------"
-echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy main restricted | sudo tee /etc/apt/sources.list/arm-cross-compile-sources.list
-echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-updates main restricted | sudo tee -a /etc/apt/sources.list/arm-cross-compile-sources.list
-echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy universe | sudo tee -a /etc/apt/sources.list/arm-cross-compile-sources.list
-echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-updates universe | sudo tee -a /etc/apt/sources.list/arm-cross-compile-sources.list
-echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy multiverse | sudo tee -a /etc/apt/sources.list/arm-cross-compile-sources.list
-echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-updates multiverse | sudo tee -a /etc/apt/sources.list/arm-cross-compile-sources.list
-echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-backports main restricted universe multiverse | sudo tee -a /etc/apt/sources.list/arm-cross-compile-sources.list
+echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy main restricted | sudo tee /etc/apt/sources.list.d/arm-cross-compile-sources.list
+echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-updates main restricted | sudo tee -a /etc/apt/sources.list.d/arm-cross-compile-sources.list
+echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy universe | sudo tee -a /etc/apt/sources.list.d/arm-cross-compile-sources.list
+echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-updates universe | sudo tee -a /etc/apt/sources.list.d/arm-cross-compile-sources.list
+echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy multiverse | sudo tee -a /etc/apt/sources.list.d/arm-cross-compile-sources.list
+echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-updates multiverse | sudo tee -a /etc/apt/sources.list.d/arm-cross-compile-sources.list
+echo deb [arch=armhf,arm64] http://ports.ubuntu.com/ jammy-backports main restricted universe multiverse | sudo tee -a /etc/apt/sources.list.d/arm-cross-compile-sources.list
 echo deb [arch=amd64] http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse | sudo tee /etc/apt/sources.list
 echo deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse | sudo tee -a /etc/apt/sources.list
 echo deb [arch=amd64] http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse | sudo tee -a /etc/apt/sources.list
