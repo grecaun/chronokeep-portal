@@ -1,6 +1,8 @@
 /target
 *.sqlite
+*.sqlite.bak
 *.pdf
 *.cfg
 *.pcapng
 *.csv
+/vendor
