@@ -41,13 +41,12 @@ if ! [[ -e ${PORTAL_DEST}update.sh ]]; then
     echo "------------------------------------------------"
     exit 1
 else
-    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep VERSION= | sed 's/VERSION=//'`
-    if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
+    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep ^VERSION= | sed 's/VERSION=//'`
+    if [[ $OLD_SCRIPT_VERS -ge 0 ]]; then
         curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update_tmp.sh > /dev/null 2>&1
-        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep VERSION= | sed 's/VERSION=//'`
+        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}update_tmp.sh | grep ^VERSION= | sed 's/VERSION=//'`
         if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
             echo "----------- Updating update script. ------------"
-            echo "----- Going from $OLD_SCRIPT_VERS to $NEW_SCRIPT_VERS -----"
             echo "------------------------------------------------"
             mv ${PORTAL_DEST}update_tmp.sh ${PORTAL_DEST}update.sh
             echo "------- Please re-run the updated script -------"
@@ -76,10 +75,10 @@ if ! [[ -e ${PORTAL_DEST}uninstall.sh ]]; then
     sudo chown $USER:root ${PORTAL_DEST}uninstall.sh
     sudo chmod +x ${PORTAL_DEST}uninstall.sh
 else
-    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed 's/VERSION=//'`
-    if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
+    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep ^VERSION= | sed 's/VERSION=//'`
+    if [[ $OLD_SCRIPT_VERS -ge 0 ]]; then
         curl -L ${UNINSTALL_SCRIPT_URL} -o ${PORTAL_DEST}uninstall_tmp.sh > /dev/null 2>&1
-        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed 's/VERSION=//'`
+        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall_tmp.sh | grep ^VERSION= | sed 's/VERSION=//'`
         if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
             echo "---------- Updating uninstall script. ----------"
             echo "------------------------------------------------"
@@ -104,7 +103,9 @@ CURRENT_PORTAL='0.0.0'
 if [[ -e ${PORTAL_DEST}version.txt ]]; then
     CURRENT_PORTAL=`cat ${PORTAL_DEST}version.txt | sed -e "s/v//"`
 fi;
-echo Latest portal version is ${LATEST_PORTAL} - current portal version is ${CURRENT_PORTAL}.
+echo Latest portal version is ${LATEST_PORTAL}
+echo "------------------------------------------------"
+echo Current portal version is ${CURRENT_PORTAL}
 echo "------------------------------------------------"
 LATEST_PORTAL_VERSION_MAJOR=`echo ${LATEST_PORTAL} | cut -d '.' -f 1`
 LATEST_PORTAL_VERSION_MINOR=`echo ${LATEST_PORTAL} | cut -d '.' -f 2`
@@ -139,7 +140,9 @@ CURRENT_QUIT='0.0.0'
 if [[ -e ${PORTAL_DEST}quit-version.txt ]]; then
     CURRENT_QUIT=`cat ${PORTAL_DEST}quit-version.txt | sed -e "s/v//"`
 fi;
-echo Latest portal quit version is ${LATEST_QUIT} - current portal quit version is ${CURRENT_QUIT}.
+echo Latest portal quit version is ${LATEST_QUIT}
+echo "------------------------------------------------"
+echo Current portal quit version is ${CURRENT_QUIT}
 echo "------------------------------------------------"
 LATEST_QUIT_VERSION_MAJOR=`echo ${LATEST_QUIT} | cut -d '.' -f 1`
 LATEST_QUIT_VERSION_MINOR=`echo ${LATEST_QUIT} | cut -d '.' -f 2`
