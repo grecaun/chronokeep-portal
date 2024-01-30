@@ -7,7 +7,7 @@ on:
 
 jobs:
     build:
-        name: Build Remote
+        name: Build Portal
         runs-on: ubuntu-22.04
         steps:
             - name: Check out source code
@@ -55,11 +55,11 @@ jobs:
               uses: svenstaro/upload-release-action@v2
               with:
                 repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: armv7-*.tar.gz
+                file: armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar.gz
 
             - name: Update release asset amd64
               id: upload-release-asset-amd64
               uses: svenstaro/upload-release-action@v2
               with:
                 repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: amd64-*.tar.gz
+                file: amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar.gz
