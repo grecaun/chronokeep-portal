@@ -24,7 +24,7 @@ jobs:
 
             # Set an environment variable to the tag we want to use to describe this release for file naming purposes
             - name: Get tag environment variable.
-              run: echo "FILE_RELEASE_VERSION=$(git describe --tag | sed s/v// | sed -E s/[\.]/-/g)" >> $GITHUB_OUTPUT
+              run: echo "FILE_RELEASE_VERSION=$(git describe --tag)" >> $GITHUB_OUTPUT
               id: release-version-actual
 
             - name: Replace Cargo.toml version with tag.
@@ -35,12 +35,12 @@ jobs:
               run: chmod +x ./setup_cross.sh && ./setup_cross.sh
 
             - name: Tar and Zip the version and executable files for armv7
-              run: tar -cvf armv7-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar target/armv7-unknown-linux-gnueabihf/release/chronokeep-portal version.txt && gzip armv7-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
+              run: tar -cvf armv7-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/armv7-unknown-linux-gnueabihf/release/ chronokeep-portal ../../../version.txt && gzip armv7-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
               env:
                 ARCH: armv7
 
             - name: Tar and Zip the version and executable files for amd64
-              run: tar -cvf amd64-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar target/release/chronokeep-portal version.txt && gzip amd64-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
+              run: tar -cvf amd64-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/release/ chronokeep-portal ../../version.txt && gzip amd64-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
                 
             - name: Create release
               id: create_release
