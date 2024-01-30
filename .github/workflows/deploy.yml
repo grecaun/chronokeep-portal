@@ -35,12 +35,12 @@ jobs:
               run: chmod +x ./setup_cross.sh && ./setup_cross.sh
 
             - name: Tar and Zip the version and executable files for armv7
-              run: tar -cvf armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar target/armv7-unknown-linux-gnueabihf/release/chronokeep-portal version.txt && gzip armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar
+              run: tar -cvf armv7-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar target/armv7-unknown-linux-gnueabihf/release/chronokeep-portal version.txt && gzip armv7-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
               env:
                 ARCH: armv7
 
             - name: Tar and Zip the version and executable files for amd64
-              run: tar -cvf amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar target/release/chronokeep-portal version.txt && gzip amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar
+              run: tar -cvf amd64-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar target/release/chronokeep-portal version.txt && gzip amd64-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
                 
             - name: Create release
               id: create_release
@@ -48,18 +48,18 @@ jobs:
               env:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
-                tag: ${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}
+                tag: ${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}
 
             - name: Update release asset armv7
               id: upload-release-asset-armv7
               uses: svenstaro/upload-release-action@v2
               with:
                 repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar.gz
+                file: armv7-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar.gz
 
             - name: Update release asset amd64
               id: upload-release-asset-amd64
               uses: svenstaro/upload-release-action@v2
               with:
                 repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar.gz
+                file: amd64-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar.gz
