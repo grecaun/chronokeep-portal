@@ -31,11 +31,11 @@ jobs:
               run: sed -i -E '0,/^version.*$/{s/^version.*$/version = "${{ steps.release-version.outputs.RELEASE_VERSION }}"/}' Cargo.toml
 
             # Install dependencies
-            - name: Install dependencies
+            - name: Install dependencies & build amd64 (x86_64) and armv7 versions of the software for linux.
               run: chmod +x ./setup_cross.sh && ./setup_cross.sh
 
             - name: Tar the version and executable files for armv7
-              run: tar -cvf armv7-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/armv7-linux-unknown-linux-gnueabihf/release/ chronokeep-portal ../../../version.txt
+              run: tar -cvf armv7-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/armv7-unknown-linux-gnueabihf/release/ chronokeep-portal ../../../version.txt
             - name: Zip armv7 tar
               run: gzip armv7-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
 
