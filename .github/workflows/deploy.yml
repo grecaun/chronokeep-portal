@@ -23,7 +23,7 @@ jobs:
               id: release-version
 
             - name: Replace Cargo.toml version with tag.
-              run: sed -i -E 's/^version.*$/version = "${{ steps.release-version.outputs.RELEASE_VERSION }}"/' Cargo.toml
+              run: sed -i -E '0,/^version.*$/{s/^version.*$/version = "${{ steps.release-version.outputs.RELEASE_VERSION }}"/}' Cargo.toml
 
             # Compile rust code
             - name: Build rust code.
