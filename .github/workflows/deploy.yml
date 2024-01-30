@@ -12,15 +12,59 @@ jobs:
         steps:
             - name: Check out source code
               uses: actions/checkout@v4
+
             # Generate version information
             - name: Generate version text file
               run: git describe --tag > version.txt
+
             # Set an environment variable to the tag we want to use to describe this release.
             - name: Get tag environment variable.
               run: echo "RELEASE_VERSION=$(git describe --tag | sed s/v// | sed -E s/[\.]/\\\\\./g)" >> $GITHUB_OUTPUT
               id: release-version
+
             - name: Replace Cargo.toml version with tag.
               run: sed -i -E 's/^version.*$/version = "${{ steps.release-version.outputs.RELEASE_VERSION }}"/' Cargo.toml
+
             # Compile rust code
             - name: Build rust code.
               run: chmod +x ./cross_compile.sh && ./cross_compile.sh
+
+            - name: Tar and Zip the version and executable files for armv7
+              id: create_archive_armv7
+              uses: thedoctor0/zip-release@0.7.5
+              with:
+                type: 'tar'
+                filename: armv7-${{ steps.release-version.outputs.RELEASE_VERSION }}.tar.gz
+                path: target/armv7-unknown-linux-gnueabihf/release
+                exclusions: '*.d .fingerprint build deps examples incremental .cargo*'
+
+            - name: Tar and Zip the version and executable files for amd64
+              id: create_archive_amd64
+              uses: thedoctor0/zip-release@0.7.5
+              with:
+                type: 'tar'
+                filename: amd64-${{ steps.release-version.outputs.RELEASE_VERSION }}.tar.gz
+                path: target/armv7-unknown-linux-gnueabihf/release
+                exclusions: '*.d .fingerprint build deps examples incremental .cargo*'
+                
+            #- name: Create release
+            #  id: create_release
+            #  uses: ncipollo/release-action@v1
+            #  env:
+            #    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            #  with:
+            #    tag: ${{ steps.release-version.outputs.RELEASE_VERSION }}
+
+            #- name: Update release asset armv7
+            #  id: upload-release-asset-armv7
+            #  uses: svenstaro/upload-release-action@v2
+            #  with:
+            #    repo_token: ${{ secrets.GITHUB_TOKEN }}
+            #    file: armv7-*.tar.gz
+
+            #- name: Update release asset amd64
+            #  id: upload-release-asset-amd64
+            #  uses: svenstaro/upload-release-action@v2
+            #  with:
+            #    repo_token: ${{ secrets.GITHUB_TOKEN }}
+            #    file: amd64-*.tar.gz

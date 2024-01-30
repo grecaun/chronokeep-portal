@@ -27,8 +27,7 @@ sudo apt install gcc pkg-config libasound2-dev libssl-dev git gcc-arm-linux-gnue
 echo "---------------------------------------------------------------------------------"
 echo Installing rust.
 echo "---------------------------------------------------------------------------------"
-curl --proto '=https' --tlsv1.2 -sSf -O https://sh.rustup.rs
-chmod +x rustup.sh && ./rustup.sh -y
+curl --proto '=https' --tlsv1.2 -sSf -O https://sh.rustup.rs | sh -s -- -y
 echo "---------------------------------------------------------------------------------"
 echo Adding rust target
 rustup target add armv7-unknown-linux-gnueabihf
@@ -59,5 +58,14 @@ if [ $? -eq 0 ]; then
 else
     echo "---------------------------------------------------------------------------------"
     echo Unable to cross compile portal software for armv7-unknown-linux-gnueabihf.
+    echo "---------------------------------------------------------------------------------"
+fi;
+if [[ -e version.txt ]]; then
+    echo Copying version text files.
+    echo "---------------------------------------------------------------------------------"
+    cp version.txt target/armv7-unknown-linux-gnueabihf/release/
+    cp version.txt target/release/
+else
+    echo Version file does not exist.
     echo "---------------------------------------------------------------------------------"
 fi;
