@@ -1,0 +1,40 @@
+name: Release Portal
+on:
+    push:
+        tags:
+            - '*'
+    workflow_dispatch:
+
+jobs:
+    build:
+        name: Build Remote
+        runs-on: ubuntu-22.04
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - target: x86_64-pc-windows-gnu
+                      archive: zip
+                    - target: x86_64-unknown-linux-musl
+                      archive: tar.gz tar.xz tar.zst
+                    - target: armv7-unknown-linux-gnueabihf
+                      archive: tar.gz tar.xz tar.zst
+        steps:
+            - name: Check out source code
+              uses: actions/checkout@v4
+            # Generate version information
+            - name: Generate version text file
+              run: git describe --tag > version.txt
+            # Set an environment variable to the tag we want to use to describe this release.
+            - name: Get tag environment variable.
+              run: echo "RELEASE_VERSION=$(git describe --tag | sed s/v// | sed -E s/[\.]/\\\\\./g)" >> $GITHUB_OUTPUT
+              id: release-version
+            - name: Replace Cargo.toml version with tag.
+              run: sed -i -E 's/^version.*$/version = "${{ steps.release-version.outputs.RELEASE_VERSION }}"/' Cargo.toml
+            # Compile rust code\
+            - name: Add architectures.
+              run: 
+            - name: Install required dependencies.
+              run: 
+            - name: Install rust
+              run: 
