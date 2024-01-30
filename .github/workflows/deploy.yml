@@ -42,7 +42,7 @@ jobs:
             - name: Tar the version and executable files for amd64
               run: tar -cvf amd64-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/release/ chronokeep-portal ../../version.txt
             - name: Zip amd64 tar
-              run: gzip gzip amd64-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
+              run: gzip amd64-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
                 
             - name: Create release
               id: create_release
