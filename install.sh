@@ -4,7 +4,7 @@ PORTAL_DEST=/portal/
 SERVICE_NAME=portal
 QUIT_SERVICE_NAME=portal-quit
 UPDATE_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/update.sh'
-UNINSTALL_SCRUPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/uninstall.sh'
+UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/uninstall.sh'
 PORTAL_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal/releases/latest'
 QUIT_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal-quit/releases/latest'
 
@@ -82,43 +82,57 @@ if ! [[ -e ${PORTAL_DEST}quit.sh ]]; then
     sudo chown $USER:root ${PORTAL_DEST}quit.sh
     sudo chmod +x ${PORTAL_DEST}quit.sh
 fi;
+echo "------------ Checking update script ------------"
+echo "------------------------------------------------"
 if ! [[ -e ${PORTAL_DEST}update.sh ]]; then
     echo "----------- Fetching update script. ------------"
     echo "------------------------------------------------"
-    curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh
+    curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh > /dev/null 2>&1
     sudo chown $USER:root ${PORTAL_DEST}update.sh
     sudo chmod +x ${PORTAL_DEST}update.sh
+    echo "------- Please re-run the updated script -------"
+    echo "------------------------------------------------"
+    exit 1
 else
-    OLD_SCRIPT_VERS=$(cat ${PORTAL_DEST}update.sh | grep VERSION= | sed s/VERSION=//)
+    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep VERSION= | sed 's/VERSION=//'`
     if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
-        curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update_tmp.sh
-        NEW_SCRIPT_VERS=$(cat ${PORTAL_DEST}update.sh | grep VERSION= | sed s/VERSION=//)
+        curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update_tmp.sh > /dev/null 2>&1
+        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep VERSION= | sed 's/VERSION=//'`
         if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
             echo "----------- Updating update script. ------------"
+            echo "----- Going from $OLD_SCRIPT_VERS to $NEW_SCRIPT_VERS -----"
             echo "------------------------------------------------"
             mv ${PORTAL_DEST}update_tmp.sh ${PORTAL_DEST}update.sh
+            echo "------- Please re-run the updated script -------"
+            echo "------------------------------------------------"
+            exit 1
         else
             rm ${PORTAL_DEST}update_tmp.sh
         fi;
     else
         echo "----------- Updating update script. ------------"
         echo "------------------------------------------------"
-        curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh
+        curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh > /dev/null 2>&1
         sudo chown $USER:root ${PORTAL_DEST}update.sh
         sudo chmod +x ${PORTAL_DEST}update.sh
+        echo "------- Please re-run the updated script -------"
+        echo "------------------------------------------------"
+        exit 1
     fi;
 fi;
+echo "---------- Checking uninstall script -----------"
+echo "------------------------------------------------"
 if ! [[ -e ${PORTAL_DEST}uninstall.sh ]]; then
     echo "--------- Fetching uninstall script. -----------"
     echo "------------------------------------------------"
-    curl -L ${UNINSTALL_SCRUPT_URL} -o ${PORTAL_DEST}uninstall.sh
+    curl -L ${UNINSTALL_SCRIPT_URL} -o ${PORTAL_DEST}uninstall.sh > /dev/null 2>&1
     sudo chown $USER:root ${PORTAL_DEST}uninstall.sh
     sudo chmod +x ${PORTAL_DEST}uninstall.sh
 else
-    OLD_SCRIPT_VERS=$(cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed s/VERSION=//)
+    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed 's/VERSION=//'`
     if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
-        curl -L ${UNINSTALL_SCRUPT_URL} -o ${PORTAL_DEST}uninstall_tmp.sh
-        NEW_SCRIPT_VERS=$(cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed s/VERSION=//)
+        curl -L ${UNINSTALL_SCRIPT_URL} -o ${PORTAL_DEST}uninstall_tmp.sh > /dev/null 2>&1
+        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed 's/VERSION=//'`
         if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
             echo "---------- Updating uninstall script. ----------"
             echo "------------------------------------------------"
@@ -129,7 +143,7 @@ else
     else
         echo "---------- Updating uninstall script. ----------"
         echo "------------------------------------------------"
-        curl -L ${UNINSTALL_SCRUPT_URL} -o ${PORTAL_DEST}uninstall.sh
+        curl -L ${UNINSTALL_SCRIPT_URL} -o ${PORTAL_DEST}uninstall.sh > /dev/null 2>&1
         sudo chown $USER:root ${PORTAL_DEST}uninstall.sh
         sudo chmod +x ${PORTAL_DEST}uninstall.sh
     fi;

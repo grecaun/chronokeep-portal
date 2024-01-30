@@ -4,6 +4,8 @@ PORTAL_DEST=/portal/
 SERVICE_NAME=portal
 QUIT_SERVICE_NAME=portal-quit
 
+VERSION=1
+
 if [[ "$EUID" -eq 0 ]]; then
     echo "This script is not meant to be run as root. Please run as a user with sudo privileges."
     exit 1
