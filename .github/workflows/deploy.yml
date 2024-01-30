@@ -22,30 +22,34 @@ jobs:
               run: echo "RELEASE_VERSION=$(git describe --tag | sed s/v// | sed -E s/[\.]/\\\\\./g)" >> $GITHUB_OUTPUT
               id: release-version
 
+            # Set an environment variable to the tag we want to use to describe this release for file naming purposes
+            - name: Get tag environment variable.
+              run: echo "FILE_RELEASE_VERSION=$(git describe --tag | sed s/v// | sed -E s/[\.]/-/g)" >> $GITHUB_OUTPUT
+              id: release-version-actual
+
             - name: Replace Cargo.toml version with tag.
               run: sed -i -E '0,/^version.*$/{s/^version.*$/version = "${{ steps.release-version.outputs.RELEASE_VERSION }}"/}' Cargo.toml
 
-            # Compile rust code
-            - name: Build rust code.
-              run: chmod +x ./cross_compile.sh && ./cross_compile.sh
+            # Install dependencies
+            - name: Install dependencies
+              run: chmod +x ./setup_cross.sh && ./setup_cross.sh
+
+            - name: Build Rust for AMD64
+              run: cargo build --release
+
+            - name: Build Rust for ARMv7
+              run: cargo build --release --target=armv7-unknown-linux-gnueabihf
+              env:
+                PKG_CONFIG_LIBDIR: /usr/lib/arm-linux-gnueabihf/pkgconfig
+                PKG_CONFIG_ALLOW_CROSS: 1
 
             - name: Tar and Zip the version and executable files for armv7
-              id: create_archive_armv7
-              uses: thedoctor0/zip-release@0.7.5
-              with:
-                type: 'tar'
-                filename: armv7-${{ steps.release-version.outputs.RELEASE_VERSION }}.tar.gz
-                path: target/armv7-unknown-linux-gnueabihf/release
-                exclusions: '*.d .fingerprint build deps examples incremental .cargo*'
+              run: tar -cvf armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar target/armv7-unknown-linux-gnueabihf/release/chronokeep-portal version.txt && gzip armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar
+              env:
+                ARCH: armv7
 
             - name: Tar and Zip the version and executable files for amd64
-              id: create_archive_amd64
-              uses: thedoctor0/zip-release@0.7.5
-              with:
-                type: 'tar'
-                filename: amd64-${{ steps.release-version.outputs.RELEASE_VERSION }}.tar.gz
-                path: target/armv7-unknown-linux-gnueabihf/release
-                exclusions: '*.d .fingerprint build deps examples incremental .cargo*'
+              run: tar -cvf amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar target/release/chronokeep-portal version.txt && gzip amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar
                 
             #- name: Create release
             #  id: create_release
