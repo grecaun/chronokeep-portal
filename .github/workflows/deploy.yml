@@ -32,16 +32,7 @@ jobs:
 
             # Install dependencies
             - name: Install dependencies
-              run: chmod +x ./setup_cross.sh && ./setup_cross.sh
-
-            - name: Build Rust for AMD64
-              run: cargo build --release
-
-            - name: Build Rust for ARMv7
-              run: cargo build --release --target=armv7-unknown-linux-gnueabihf
-              env:
-                PKG_CONFIG_LIBDIR: /usr/lib/arm-linux-gnueabihf/pkgconfig
-                PKG_CONFIG_ALLOW_CROSS: 1
+              run: chmod +x ./setup_cross.sh && ./setup_cross.sh && chmod +x cross_compile.sh && ./cross_compile.sh
 
             - name: Tar and Zip the version and executable files for armv7
               run: tar -cvf armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar target/armv7-unknown-linux-gnueabihf/release/chronokeep-portal version.txt && gzip armv7-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar
