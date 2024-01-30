@@ -28,6 +28,7 @@ echo "--------------------------------------------------------------------------
 echo Installing rust.
 echo "---------------------------------------------------------------------------------"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
 echo "---------------------------------------------------------------------------------"
 echo Adding rust target
 rustup target add armv7-unknown-linux-gnueabihf
