@@ -27,7 +27,8 @@ sudo apt install gcc pkg-config libasound2-dev libssl-dev git gcc-arm-linux-gnue
 echo "---------------------------------------------------------------------------------"
 echo Installing rust.
 echo "---------------------------------------------------------------------------------"
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+curl --proto '=https' --tlsv1.2 -sSf -O https://sh.rustup.rs
+chmod +x rustup.sh && ./rustup.sh -y
 echo "---------------------------------------------------------------------------------"
 echo Adding rust target
 rustup target add armv7-unknown-linux-gnueabihf
