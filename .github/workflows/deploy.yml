@@ -42,24 +42,24 @@ jobs:
             - name: Tar and Zip the version and executable files for amd64
               run: tar -cvf amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar target/release/chronokeep-portal version.txt && gzip amd64-${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}.tar
                 
-            #- name: Create release
-            #  id: create_release
-            #  uses: ncipollo/release-action@v1
-            #  env:
-            #    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            #  with:
-            #    tag: ${{ steps.release-version.outputs.RELEASE_VERSION }}
+            - name: Create release
+              id: create_release
+              uses: ncipollo/release-action@v1
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                tag: ${{ steps.release-version.outputs.FILE_RELEASE_VERSION }}
 
-            #- name: Update release asset armv7
-            #  id: upload-release-asset-armv7
-            #  uses: svenstaro/upload-release-action@v2
-            #  with:
-            #    repo_token: ${{ secrets.GITHUB_TOKEN }}
-            #    file: armv7-*.tar.gz
+            - name: Update release asset armv7
+              id: upload-release-asset-armv7
+              uses: svenstaro/upload-release-action@v2
+              with:
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                file: armv7-*.tar.gz
 
-            #- name: Update release asset amd64
-            #  id: upload-release-asset-amd64
-            #  uses: svenstaro/upload-release-action@v2
-            #  with:
-            #    repo_token: ${{ secrets.GITHUB_TOKEN }}
-            #    file: amd64-*.tar.gz
+            - name: Update release asset amd64
+              id: upload-release-asset-amd64
+              uses: svenstaro/upload-release-action@v2
+              with:
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                file: amd64-*.tar.gz
