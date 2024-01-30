@@ -44,6 +44,7 @@ else
     echo "---------------------------------------------------------------------------------"
     echo Unable to compile portal software for host architecture.
     echo "---------------------------------------------------------------------------------"
+    exit 1
 fi;
 echo Setting environment variables to cross compile for armv7-unknown-linux-gnueabihf.
 echo "---------------------------------------------------------------------------------"
@@ -60,4 +61,5 @@ else
     echo "---------------------------------------------------------------------------------"
     echo Unable to cross compile portal software for armv7-unknown-linux-gnueabihf.
     echo "---------------------------------------------------------------------------------"
+    exit 1
 fi;

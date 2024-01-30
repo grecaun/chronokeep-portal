@@ -34,13 +34,15 @@ jobs:
             - name: Install dependencies
               run: chmod +x ./setup_cross.sh && ./setup_cross.sh
 
-            - name: Tar and Zip the version and executable files for armv7
-              run: tar -cvf armv7-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/armv7-linux-unknown-linux-gnueabihf/release/ chronokeep-portal ../../../version.txt && gzip armv7-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
-              env:
-                ARCH: armv7
+            - name: Tar the version and executable files for armv7
+              run: tar -cvf armv7-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/armv7-linux-unknown-linux-gnueabihf/release/ chronokeep-portal ../../../version.txt
+            - name: Zip armv7 tar
+              run: gzip armv7-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
 
-            - name: Tar and Zip the version and executable files for amd64
-              run: tar -cvf amd64-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/release/ chronokeep-portal ../../version.txt && gzip amd64-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
+            - name: Tar the version and executable files for amd64
+              run: tar -cvf amd64-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar -C target/release/ chronokeep-portal ../../version.txt
+            - name: Zip amd64 tar
+              run: gzip gzip amd64-linux-${{ steps.release-version-actual.outputs.FILE_RELEASE_VERSION }}.tar
                 
             - name: Create release
               id: create_release
