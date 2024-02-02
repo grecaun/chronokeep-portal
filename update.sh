@@ -7,20 +7,20 @@ UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-porta
 PORTAL_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal/releases/latest'
 QUIT_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal-quit/releases/latest'
 
-VERSION=1
+VERSION=2
 
 # Check OS type & architecture
 OS=$(uname)
-if [[ $? -ne 0 ]] || [[ $OS -ne "Linux" ]]; then
+if [[ $? -ne 0 ]] || [[ $OS != "Linux" ]]; then
     echo "This script is only designed to work on linux."
     exit 1
 fi;
 ARCH=$(uname -m)
-if [[ $ARCH -ne "x86_64" ]] && [[ $ARCH -ne "armv7"* ]]; then
+if [[ $ARCH != "x86_64" ]] && [[ $ARCH != "aarch64"* ]]; then
     echo "This script does not recognize the system's architecture."
     exit 1
 fi;
-if [[ $ARCH -eq "x86_64" ]]; then
+if [[ $ARCH == "x86_64" ]]; then
     TARGET=amd64-linux
 else
     TARGET=armv7-linux
