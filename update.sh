@@ -7,7 +7,7 @@ UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-porta
 PORTAL_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal/releases/latest'
 QUIT_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal-quit/releases/latest'
 
-VERSION=2
+VERSION=3
 
 # Check OS type & architecture
 OS=$(uname)
@@ -49,6 +49,7 @@ else
             echo "----------- Updating update script. ------------"
             echo "------------------------------------------------"
             mv ${PORTAL_DEST}update_tmp.sh ${PORTAL_DEST}update.sh
+            sudo chmod +x ${PORTAL_DEST}update.sh
             echo "------- Please re-run the updated script -------"
             echo "------------------------------------------------"
             exit 1
