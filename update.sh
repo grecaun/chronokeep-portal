@@ -23,7 +23,7 @@ fi;
 if [[ $ARCH == "x86_64" ]]; then
     TARGET=amd64-linux
 else
-    TARGET=armv7-linux
+    TARGET=aarch64-linux
 fi;
 
 echo "------------------------------------------------"
