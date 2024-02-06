@@ -24,20 +24,25 @@ if [[ $? != 0 ]]; then
 fi;
 # Check OS type & architecture
 OS=$(uname)
-if [[ $? -ne 0 ]] || [[ $OS -ne "Linux" ]]; then
+if [[ $? -ne 0 ]] || [[ $OS != "Linux" ]]; then
     echo "This script is only designed to work on linux."
     exit 1
 fi;
 ARCH=$(uname -m)
-if [[ $ARCH -ne "x86_64" ]] && [[ $ARCH -ne "armv7"* ]]; then
+if [[ $ARCH != "x86_64" ]] && [[ $ARCH != armv7* ]] && [[ $ARCH != aarch64* ]]; then
     echo "This script does not recognize the system's architecture."
     exit 1
 fi;
-if [[ $ARCH -eq "x86_64" ]]; then
+if [[ $ARCH == "x86_64" ]]; then
     TARGET=amd64-linux
 else
-    TARGET=armv7-linux
+    if [[ $ARCH == aarch64* ]]; then
+        TARGET=aarch64-linux
+    else
+        TARGET=armv7-linux
+    fi;
 fi;
+echo $TARGET
 echo "------------------------------------------------"
 echo "--------- Now installing Chronoportal! ---------"
 echo "------------------------------------------------"
@@ -67,7 +72,7 @@ if ! [[ -e ${PORTAL_DEST}run.sh ]]; then
     echo "------------------------------------------------"
     echo "#!/bin/bash" | sudo tee ${PORTAL_DEST}run.sh
     echo | sudo tee -a ${PORTAL_DEST}run.sh
-    echo "export PORTAL_UPDATE_SCRIPT=\"${PORTAL_DEST}update_portal.sh\"" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_UPDATE_SCRIPT=\"${PORTAL_DEST}update.sh\"" | sudo tee -a ${PORTAL_DEST}run.sh
     echo "export PORTAL_DATABASE_PATH=\"${PORTAL_DEST}chronokeep-portal.sqlite\"" | sudo tee -a ${PORTAL_DEST}run.sh
     echo "${PORTAL_DEST}chronokeep-portal >> ${PORTAL_DEST}portal.log 2>> ${PORTAL_DEST}portal.log" | sudo tee -a ${PORTAL_DEST}run.sh
     sudo chown $USER:root ${PORTAL_DEST}run.sh
@@ -94,15 +99,15 @@ if ! [[ -e ${PORTAL_DEST}update.sh ]]; then
     echo "------------------------------------------------"
     exit 1
 else
-    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep VERSION= | sed 's/VERSION=//'`
-    if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
+    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep ^VERSION= | sed 's/VERSION=//'`
+    if [[ $OLD_SCRIPT_VERS -ge 0 ]]; then
         curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update_tmp.sh > /dev/null 2>&1
-        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep VERSION= | sed 's/VERSION=//'`
+        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}update_tmp.sh | grep ^VERSION= | sed 's/VERSION=//'`
         if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
             echo "----------- Updating update script. ------------"
-            echo "----- Going from $OLD_SCRIPT_VERS to $NEW_SCRIPT_VERS -----"
             echo "------------------------------------------------"
             mv ${PORTAL_DEST}update_tmp.sh ${PORTAL_DEST}update.sh
+            sudo chmod +x ${PORTAL_DEST}update.sh
             echo "------- Please re-run the updated script -------"
             echo "------------------------------------------------"
             exit 1
@@ -129,10 +134,10 @@ if ! [[ -e ${PORTAL_DEST}uninstall.sh ]]; then
     sudo chown $USER:root ${PORTAL_DEST}uninstall.sh
     sudo chmod +x ${PORTAL_DEST}uninstall.sh
 else
-    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed 's/VERSION=//'`
-    if [[ $OLD_SCRIPT_VERS -ge 1 ]]; then
+    OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep ^VERSION= | sed 's/VERSION=//'`
+    if [[ $OLD_SCRIPT_VERS -ge 0 ]]; then
         curl -L ${UNINSTALL_SCRIPT_URL} -o ${PORTAL_DEST}uninstall_tmp.sh > /dev/null 2>&1
-        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall.sh | grep VERSION= | sed 's/VERSION=//'`
+        NEW_SCRIPT_VERS=`cat ${PORTAL_DEST}uninstall_tmp.sh | grep ^VERSION= | sed 's/VERSION=//'`
         if [[ $NEW_SCRIPT_VERS -gt $OLD_SCRIPT_VERS ]]; then
             echo "---------- Updating uninstall script. ----------"
             echo "------------------------------------------------"
