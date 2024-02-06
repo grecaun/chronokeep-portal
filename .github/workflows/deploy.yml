@@ -24,7 +24,7 @@ jobs:
 
             # Install dependencies
             - name: Install dependencies & build software
-              run: chmod +x ./cross_compile.sh && ./cross_compile.sh
+              run: chmod +x ./deploy.sh && ./deploy.sh
 
             - name: Tar the version and executable files for amd64
               run: tar -cvf amd64-linux-${{ steps.release-version.outputs.RELEASE_VERSION }}.tar -C target/release/ chronokeep-portal ../../version.txt
