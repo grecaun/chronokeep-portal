@@ -95,9 +95,6 @@ if ! [[ -e ${PORTAL_DEST}update.sh ]]; then
     curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh > /dev/null 2>&1
     sudo chown $USER:root ${PORTAL_DEST}update.sh
     sudo chmod +x ${PORTAL_DEST}update.sh
-    echo "------- Please re-run the updated script -------"
-    echo "------------------------------------------------"
-    exit 1
 else
     OLD_SCRIPT_VERS=`cat ${PORTAL_DEST}update.sh | grep ^VERSION= | sed 's/VERSION=//'`
     if [[ $OLD_SCRIPT_VERS -ge 0 ]]; then
@@ -108,9 +105,6 @@ else
             echo "------------------------------------------------"
             mv ${PORTAL_DEST}update_tmp.sh ${PORTAL_DEST}update.sh
             sudo chmod +x ${PORTAL_DEST}update.sh
-            echo "------- Please re-run the updated script -------"
-            echo "------------------------------------------------"
-            exit 1
         else
             rm ${PORTAL_DEST}update_tmp.sh
         fi;
@@ -120,9 +114,6 @@ else
         curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh > /dev/null 2>&1
         sudo chown $USER:root ${PORTAL_DEST}update.sh
         sudo chmod +x ${PORTAL_DEST}update.sh
-        echo "------- Please re-run the updated script -------"
-        echo "------------------------------------------------"
-        exit 1
     fi;
 fi;
 echo "---------- Checking uninstall script -----------"
