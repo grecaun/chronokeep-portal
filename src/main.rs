@@ -21,6 +21,7 @@ pub mod llrp;
 pub mod results;
 pub mod remote;
 pub mod processor;
+pub mod sound_board;
 
 const CONTROL_TYPE: &str = "socket";
 
@@ -139,7 +140,7 @@ fn main() {
     println!("Goodbye!");
     if let Ok(control) = control.lock() {
         if control.play_sound {
-            util::play_close_sound(control.volume);
+            control.sound_board.play_close_sound(control.volume);
         }
     };
 }

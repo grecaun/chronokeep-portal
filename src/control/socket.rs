@@ -4,7 +4,7 @@ use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound}, results, processor, remote::{self, uploader}, util};
+use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound}, results, processor, remote::{self, uploader}};
 
 use super::zero_conf::ZeroConf;
 
@@ -24,7 +24,7 @@ pub const UPDATE_SCRIPT_ENV: &str = "PORTAL_UPDATE_SCRIPT";
 pub const JSON_START_CHAR: char = '{';
 pub const JSON_END_CHAR: char = '}';
 
-pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<super::Control>>) {
+pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<super::Control>>) {
     // Keepalive is the boolean that tells us if we need to keep running.
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
 
@@ -156,7 +156,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
     // start a thread to play sounds if we are told we want to
     let sound_notifier = Arc::new(Condvar::new());
     let mut sound = sound::Sounds::new(
-        controls.clone(),
+        control.clone(),
         sound_notifier.clone(),
         keepalive.clone()
     );
@@ -173,7 +173,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
         control_sockets.clone(),
         read_repeaters.clone(),
         sight_processor.clone(),
-        controls.clone(),
+        control.clone(),
         sqlite.clone(),
         sound_notifier.clone()
     );
@@ -183,9 +183,9 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
     });
 
     // play a sound to let the user know we've booted up fully and can accept control connections
-    if let Ok(controls) = controls.lock() {
-        if controls.play_sound {
-            util::play_start_sound(controls.volume);
+    if let Ok(control) = control.lock() {
+        if control.play_sound {
+            control.sound_board.play_start_sound(control.volume);
         }
     }
 
@@ -216,7 +216,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
                     }
                 };
                 let t_keepalive = keepalive.clone();
-                let t_controls = controls.clone();
+                let t_controls = control.clone();
                 let t_readers = readers.clone();
                 let t_joiners = joiners.clone();
                 let t_read_repeaters = read_repeaters.clone();
@@ -344,7 +344,7 @@ fn handle_stream(
     index: usize,
     mut stream: TcpStream,
     keepalive: Arc<Mutex<bool>>,
-    controls: Arc<Mutex<super::Control>>,
+    control: Arc<Mutex<super::Control>>,
     control_port: &u16,
     readers: Arc<Mutex<Vec<reader::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
@@ -632,7 +632,7 @@ fn handle_stream(
                                                 sight_processor.clone(),
                                             ) {
                                                 Ok(mut reader) => {
-                                                    match reader.connect(&sqlite.clone(), &controls.clone(), sound_notifier.clone()) {
+                                                    match reader.connect(&sqlite.clone(), &control.clone(), sound_notifier.clone()) {
                                                         Ok(j) => {
                                                             if let Ok(mut join) = joiners.lock() {
                                                                 join.push(j);
@@ -838,25 +838,30 @@ fn handle_stream(
                     }
                 },
                 requests::Request::SettingsSet { settings } => {
-                    for setting in settings {
-                        match setting.name() {
-                            super::SETTING_CHIP_TYPE |
-                            super::SETTING_PORTAL_NAME |
-                            super::SETTING_READ_WINDOW |
-                            super::SETTING_SIGHTING_PERIOD |
-                            super::SETTING_PLAY_SOUND |
-                            super::SETTING_VOLUME => {
-                                if let Ok(sq) = sqlite.lock() {
-                                    match sq.set_setting(&setting) {
-                                        Ok(_) => {
-                                            if let Ok(new_controls) = super::Control::new(&sq) {
-                                                if let Ok(mut control) = controls.lock() {
-                                                    control.chip_type = new_controls.chip_type;
-                                                    control.name = new_controls.name;
-                                                    control.play_sound = new_controls.play_sound;
-                                                    control.read_window = new_controls.read_window;
-                                                    control.sighting_period = new_controls.sighting_period;
-                                                    control.volume = new_controls.volume;
+                    if let Ok(mut control) = control.lock() {
+                        let old_volume = control.volume;
+                        let old_play_sound = control.play_sound;
+                        let old_voice = control.sound_board.get_voice();
+                        for setting in settings {
+                            match setting.name() {
+                                super::SETTING_CHIP_TYPE |
+                                super::SETTING_PORTAL_NAME |
+                                super::SETTING_READ_WINDOW |
+                                super::SETTING_SIGHTING_PERIOD |
+                                super::SETTING_PLAY_SOUND |
+                                super::SETTING_VOLUME |
+                                super::SETTING_VOICE => {
+                                    if let Ok(sq) = sqlite.lock() {
+                                        match sq.set_setting(&setting) {
+                                            Ok(_) => {
+                                                if let Ok(new_control) = super::Control::new(&sq) {
+                                                    control.chip_type = new_control.chip_type;
+                                                    control.name = new_control.name;
+                                                    control.sound_board.change_voice(new_control.sound_board.get_voice());
+                                                    control.play_sound = new_control.play_sound;
+                                                    control.volume = new_control.volume;
+                                                    control.read_window = new_control.read_window;
+                                                    control.sighting_period = new_control.sighting_period;
                                                     let settings = get_settings(&sq);
                                                     if let Ok(c_socks) = control_sockets.lock() {
                                                         for sock in c_socks.iter() {
@@ -867,30 +872,41 @@ fn handle_stream(
                                                             }
                                                         }
                                                     }
+                                                    
                                                 } else {
                                                     let settings = get_settings(&sq);
                                                     no_error = write_settings(&stream, &settings);
                                                 }
-                                            } else {
-                                                let settings = get_settings(&sq);
-                                                no_error = write_settings(&stream, &settings);
+                                            },
+                                            Err(e) => {
+                                                println!("Error saving setting. {e}");
+                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    message: format!("error saving setting: {e}")
+                                                });
                                             }
-                                        },
-                                        Err(e) => {
-                                            println!("Error saving setting. {e}");
-                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                message: format!("error saving setting: {e}")
-                                            });
                                         }
                                     }
+                                },
+                                other => {
+                                    println!("'{other}' is not a valid setting");
+                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                        message: format!("'{other}' is not a valid setting")
+                                    });
                                 }
-                            },
-                            other => {
-                                println!("'{other}' is not a valid setting");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("'{other}' is not a valid setting")
-                                });
                             }
+                        }
+                        if old_voice != control.sound_board.get_voice() && control.play_sound  {
+                            control.sound_board.play_introduction(control.volume);
+                        }
+                        if old_play_sound != control.play_sound && control.play_sound  {
+                            control.sound_board.play_volume(control.volume);
+                        } else if old_volume != control.volume  && control.play_sound {
+                            control.sound_board.play_volume(control.volume);
+                        }
+                    } else {
+                        if let Ok(sq) = sqlite.lock() {
+                            let settings = get_settings(&sq);
+                            no_error = write_settings(&stream, &settings);
                         }
                     }
                 },
@@ -1873,7 +1889,8 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
         super::SETTING_READ_WINDOW,
         super::SETTING_SIGHTING_PERIOD,
         super::SETTING_PLAY_SOUND,
-        super::SETTING_VOLUME
+        super::SETTING_VOLUME,
+        super::SETTING_VOICE,
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

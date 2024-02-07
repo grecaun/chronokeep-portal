@@ -1,4 +1,4 @@
-use crate::{database::{sqlite, self, Database, DBError}, defaults, objects::setting};
+use crate::{database::{self, sqlite, DBError, Database}, defaults, objects::setting, sound_board::{SoundBoard, Voice}};
 use rand::prelude::random;
 
 pub mod cli;
@@ -12,15 +12,17 @@ pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
 pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
 pub const SETTING_PLAY_SOUND: &str = "SETTING_PLAY_SOUND";
 pub const SETTING_VOLUME: &str = "SETTING_VOLUME";
+pub const SETTING_VOICE: &str = "SETTING_VOICE";
 
-#[derive(Clone)]
+
 pub struct Control {
     pub name: String,
     pub sighting_period: u32,
     pub read_window: u8,
     pub chip_type: String,
     pub play_sound: bool,
-    pub volume: f32
+    pub volume: f32,
+    pub sound_board: SoundBoard,
 }
 
 impl Control {
@@ -32,6 +34,7 @@ impl Control {
             read_window: defaults::DEFAULT_READ_WINDOW,
             play_sound: defaults::DEFAULT_PLAY_SOUND,
             volume: defaults::DEFAULT_VOLUME,
+            sound_board: SoundBoard::new(defaults::DEFAULT_VOICE),
         };
         match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
             Ok(s) => {
@@ -150,6 +153,26 @@ impl Control {
                         let vol: f32 = s.value().parse().unwrap();
                         output.volume = vol;
                         println!("Volume successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            },
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_VOICE) {
+            Ok(s) => {
+                output.sound_board.change_voice(Voice::from_str(s.value()));
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_VOICE),
+                    String::from(Voice::Emily.as_str())
+                )) {
+                    Ok(s) => {
+                        output.sound_board.change_voice(Voice::from_str(s.value()));
+                        println!("Voice successfully set as '{}'.", s.value());
                     },
                     Err(e) => return Err(e)
                 }
