@@ -1,8 +1,8 @@
-use std::{sync::{Arc, Mutex, Condvar}, thread::{JoinHandle, self}, net::TcpStream, time::Duration};
+use std::{sync::{Arc, Mutex}, thread::{JoinHandle, self}, net::TcpStream, time::Duration};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{socket::{MAX_CONNECTED, self}, self}, database::sqlite, reader::AUTO_CONNECT_TRUE, processor};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, processor, reader::AUTO_CONNECT_TRUE};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 30;
 
@@ -21,9 +21,9 @@ pub struct AutoConnector {
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     sight_processor: Arc<processor::SightingsProcessor>,
-    controls: Arc<Mutex<control::Control>>,
+    control: Arc<Mutex<control::Control>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
-    sound_notifier: Arc<Condvar>
+    sound: Arc<SoundNotifier>
 }
 
 impl AutoConnector {
@@ -34,9 +34,9 @@ impl AutoConnector {
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
         sight_processor: Arc<processor::SightingsProcessor>,
-        controls: Arc<Mutex<control::Control>>,
+        control: Arc<Mutex<control::Control>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
-        sound_notifier: Arc<Condvar>
+        sound: Arc<SoundNotifier>
     ) -> AutoConnector {
         AutoConnector {
             state,
@@ -45,9 +45,9 @@ impl AutoConnector {
             control_sockets,
             read_repeaters,
             sight_processor,
-            controls,
+            control,
             sqlite,
-            sound_notifier
+            sound
         }
     }
 
@@ -82,7 +82,7 @@ impl AutoConnector {
                     reader.set_control_sockets(self.control_sockets.clone());
                     reader.set_read_repeaters(self.read_repeaters.clone());
                     reader.set_sight_processor(self.sight_processor.clone());
-                    match reader.connect(&self.sqlite.clone(), &self.controls.clone(), self.sound_notifier.clone()) {
+                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), self.sound.clone()) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
@@ -111,7 +111,7 @@ impl AutoConnector {
             }
         }
         println!("All done connecting to readers.");
-        if let Ok(control) = self.controls.lock() {
+        if let Ok(control) = self.control.lock() {
             if control.play_sound {
                 control.sound_board.play_auto_connected_sound(control.volume);
             }

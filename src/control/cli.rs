@@ -2,7 +2,6 @@
 use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Condvar;
 use std::sync::Mutex;
 use std::thread;
 use std::thread::JoinHandle;
@@ -16,6 +15,8 @@ use crate::reader::zebra;
 use crate::util;
 
 use super::sound;
+use super::sound::SoundNotifier;
+
 
 pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<super::Control>>) {
     let mut keepalive: bool = true;
@@ -24,13 +25,12 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
     let mut joiners: Vec<JoinHandle<()>> = Vec::new();
     
     // start a thread to play sounds if we are told we want to
-    let sound_notifier = Arc::new(Condvar::new());
     let ka_mtx = Arc::new(Mutex::new(true));
     let mut sound = sound::Sounds::new(
         controls.clone(),
-        sound_notifier.clone(),
         ka_mtx.clone(),
     );
+    let sound_notifier = sound.get_notifier();
     thread::spawn(move || {
         sound.run();
     });
@@ -306,7 +306,7 @@ fn connect_reader(
     connected: &mut Vec<reader::Reader>,
     joiners: &mut Vec<JoinHandle<()>>,
     controls: &Arc<Mutex<super::Control>>,
-    sound_notifier: Arc<Condvar>
+    sound: Arc<SoundNotifier>
 ) {
     let sqlite = match mtx.lock() {
         Ok(v) => v,
@@ -339,7 +339,7 @@ fn connect_reader(
                     return;
                 }
             };
-            match r.connect(mtx, &controls, sound_notifier) {
+            match r.connect(mtx, &controls, sound) {
                 Ok(j) => {
                     connected.push(r);
                     joiners.push(j);

@@ -1,4 +1,4 @@
-use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard, Condvar}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}, env};
+use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}, env};
 
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
@@ -6,7 +6,7 @@ use socket2::{Socket, Type, Protocol, Domain};
 
 use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound}, results, processor, remote::{self, uploader}};
 
-use super::zero_conf::ZeroConf;
+use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
 pub mod requests;
 pub mod responses;
@@ -154,12 +154,11 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
     let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone()));
 
     // start a thread to play sounds if we are told we want to
-    let sound_notifier = Arc::new(Condvar::new());
     let mut sound = sound::Sounds::new(
         control.clone(),
-        sound_notifier.clone(),
         keepalive.clone()
     );
+    let sound_notifier = sound.get_notifier();
     thread::spawn(move || {
         sound.run();
     });
@@ -216,7 +215,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
                     }
                 };
                 let t_keepalive = keepalive.clone();
-                let t_controls = control.clone();
+                let t_control = control.clone();
                 let t_readers = readers.clone();
                 let t_joiners = joiners.clone();
                 let t_read_repeaters = read_repeaters.clone();
@@ -251,7 +250,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
                                 placed,
                                 t_stream,
                                 t_keepalive,
-                                t_controls,
+                                t_control,
                                 &control_port,
                                 t_readers,
                                 t_joiners,
@@ -355,7 +354,7 @@ fn handle_stream(
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     uploader: Arc<uploader::Uploader>,
     ac_state: Arc<Mutex<auto_connect::State>>,
-    sound_notifier: Arc<Condvar>
+    sound: Arc<SoundNotifier>
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -632,7 +631,7 @@ fn handle_stream(
                                                 sight_processor.clone(),
                                             ) {
                                                 Ok(mut reader) => {
-                                                    match reader.connect(&sqlite.clone(), &control.clone(), sound_notifier.clone()) {
+                                                    match reader.connect(&sqlite.clone(), &control.clone(), sound.clone()) {
                                                         Ok(j) => {
                                                             if let Ok(mut join) = joiners.lock() {
                                                                 join.push(j);
