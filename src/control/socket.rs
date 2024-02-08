@@ -4,7 +4,7 @@ use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{database::{sqlite, Database}, reader::{self, zebra, auto_connect}, objects::{setting, participant, read, event::Event, sighting}, network::api::{self, Api}, control::{SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound}, results, processor, remote::{self, uploader}};
+use crate::{control::{socket::requests::AutoUploadQuery, sound, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting, sighting}, processor, reader::{self, auto_connect, zebra}, remote::{self, uploader}, results, sound_board::Voice};
 
 use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
@@ -475,11 +475,17 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
+                                if let Ok(control) = control.lock() {
+                                    control.sound_board.play_startup_in_progress(control.volume);
+                                }
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
+                        if let Ok(control) = control.lock() {
+                            control.sound_board.play_startup_in_progress(control.volume);
+                        }
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -552,11 +558,17 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
+                                if let Ok(control) = control.lock() {
+                                    control.sound_board.play_startup_in_progress(control.volume);
+                                }
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
+                        if let Ok(control) = control.lock() {
+                            control.sound_board.play_startup_in_progress(control.volume);
+                        }
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -602,11 +614,17 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
+                                if let Ok(control) = control.lock() {
+                                    control.sound_board.play_startup_in_progress(control.volume);
+                                }
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
+                        if let Ok(control) = control.lock() {
+                            control.sound_board.play_startup_in_progress(control.volume);
+                        }
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -668,11 +686,17 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
+                                if let Ok(control) = control.lock() {
+                                    control.sound_board.play_startup_in_progress(control.volume);
+                                }
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
+                        if let Ok(control) = control.lock() {
+                            control.sound_board.play_startup_in_progress(control.volume);
+                        }
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -713,11 +737,17 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
+                                if let Ok(control) = control.lock() {
+                                    control.sound_board.play_startup_in_progress(control.volume);
+                                }
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
+                        if let Ok(control) = control.lock() {
+                            control.sound_board.play_startup_in_progress(control.volume);
+                        }
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -758,11 +788,17 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
+                                if let Ok(control) = control.lock() {
+                                    control.sound_board.play_startup_in_progress(control.volume);
+                                }
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
+                        if let Ok(control) = control.lock() {
+                            control.sound_board.play_startup_in_progress(control.volume);
+                        }
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -803,11 +839,17 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
+                                if let Ok(control) = control.lock() {
+                                    control.sound_board.play_startup_in_progress(control.volume);
+                                }
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
+                        if let Ok(control) = control.lock() {
+                            control.sound_board.play_startup_in_progress(control.volume);
+                        }
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -841,26 +883,57 @@ fn handle_stream(
                         let old_volume = control.volume;
                         let old_play_sound = control.play_sound;
                         let old_voice = control.sound_board.get_voice();
+                        let mut custom_error = false;
                         for setting in settings {
                             match setting.name() {
+                                super::SETTING_VOICE => {
+                                    let new_voice = Voice::from_str(setting.value());
+                                    if new_voice == Voice::Custom && !control.sound_board.custom_available() {
+                                        println!("Custom voice selected but not available.");
+                                        custom_error = true;
+                                    } else {
+                                        if let Ok(sq) = sqlite.lock() {
+                                            match sq.set_setting(&setting) {
+                                                Ok(_) => {
+                                                    if let Ok(new_control) = super::Control::new(&sq) {
+                                                        _ = control.update(new_control);
+                                                        let settings = get_settings(&sq);
+                                                        if let Ok(c_socks) = control_sockets.lock() {
+                                                            for sock in c_socks.iter() {
+                                                                if let Some(sock) = sock {
+                                                                    // we might be writing to other sockets
+                                                                    // so errors here shouldn't close our connection
+                                                                    _ = write_settings(&sock, &settings);
+                                                                }
+                                                            }
+                                                        }
+                                                        
+                                                    } else {
+                                                        let settings = get_settings(&sq);
+                                                        no_error = write_settings(&stream, &settings);
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    println!("Error saving setting. {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                        message: format!("error saving setting: {e}")
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
                                 super::SETTING_CHIP_TYPE |
                                 super::SETTING_PORTAL_NAME |
                                 super::SETTING_READ_WINDOW |
                                 super::SETTING_SIGHTING_PERIOD |
                                 super::SETTING_PLAY_SOUND |
-                                super::SETTING_VOLUME |
-                                super::SETTING_VOICE => {
+                                super::SETTING_VOLUME => {
                                     if let Ok(sq) = sqlite.lock() {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
                                                 if let Ok(new_control) = super::Control::new(&sq) {
-                                                    control.chip_type = new_control.chip_type;
-                                                    control.name = new_control.name;
-                                                    control.sound_board.change_voice(new_control.sound_board.get_voice());
-                                                    control.play_sound = new_control.play_sound;
-                                                    control.volume = new_control.volume;
-                                                    control.read_window = new_control.read_window;
-                                                    control.sighting_period = new_control.sighting_period;
+                                                    _ = control.update(new_control);
                                                     let settings = get_settings(&sq);
                                                     if let Ok(c_socks) = control_sockets.lock() {
                                                         for sock in c_socks.iter() {
@@ -894,7 +967,9 @@ fn handle_stream(
                                 }
                             }
                         }
-                        if old_voice != control.sound_board.get_voice() && control.play_sound  {
+                        if custom_error && control.play_sound {
+                            control.sound_board.play_custom_not_available(control.volume);
+                        } else if old_voice != control.sound_board.get_voice() && control.play_sound  {
                             control.sound_board.play_introduction(control.volume);
                         }
                         if old_play_sound != control.play_sound && control.play_sound  {

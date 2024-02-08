@@ -26,6 +26,31 @@ pub struct Control {
 }
 
 impl Control {
+    pub fn update(&mut self, new_control: Control) -> Result<(), ()> {
+        if self.name != new_control.name {
+            self.name = new_control.name
+        }
+        if self.sighting_period != new_control.sighting_period {
+            self.sighting_period = new_control.sighting_period
+        }
+        if self.read_window != new_control.read_window {
+            self.read_window = new_control.read_window
+        }
+        if self.chip_type != new_control.chip_type {
+            self.chip_type = new_control.chip_type
+        }
+        if self.play_sound != new_control.play_sound {
+            self.play_sound = new_control.play_sound
+        }
+        if self.volume != new_control.volume {
+            self.volume = new_control.volume
+        }
+        if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
+            return self.sound_board.change_voice(new_control.sound_board.get_voice())
+        }
+        Ok(())
+    }
+
     pub fn new(sqlite: &sqlite::SQLite) -> Result<Control, database::DBError> {
         let mut output = Control {
             sighting_period: defaults::DEFAULT_SIGHTING_PERIOD,
@@ -163,7 +188,7 @@ impl Control {
         }
         match sqlite.get_setting(SETTING_VOICE) {
             Ok(s) => {
-                output.sound_board.change_voice(Voice::from_str(s.value()));
+                _ = output.sound_board.change_voice(Voice::from_str(s.value()));
             },
             Err(DBError::NotFound) => {
                 match sqlite.set_setting(&setting::Setting::new(
@@ -171,8 +196,9 @@ impl Control {
                     String::from(Voice::Emily.as_str())
                 )) {
                     Ok(s) => {
-                        output.sound_board.change_voice(Voice::from_str(s.value()));
-                        println!("Voice successfully set as '{}'.", s.value());
+                        if let Ok(_) = output.sound_board.change_voice(Voice::from_str(s.value())){
+                            println!("Voice successfully set as '{}'.", s.value());
+                        }
                     },
                     Err(e) => return Err(e)
                 }
