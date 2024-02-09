@@ -897,17 +897,6 @@ fn handle_stream(
                                                 Ok(_) => {
                                                     if let Ok(new_control) = super::Control::new(&sq) {
                                                         _ = control.update(new_control);
-                                                        let settings = get_settings(&sq);
-                                                        if let Ok(c_socks) = control_sockets.lock() {
-                                                            for sock in c_socks.iter() {
-                                                                if let Some(sock) = sock {
-                                                                    // we might be writing to other sockets
-                                                                    // so errors here shouldn't close our connection
-                                                                    _ = write_settings(&sock, &settings);
-                                                                }
-                                                            }
-                                                        }
-                                                        
                                                     } else {
                                                         let settings = get_settings(&sq);
                                                         no_error = write_settings(&stream, &settings);
@@ -934,16 +923,6 @@ fn handle_stream(
                                             Ok(_) => {
                                                 if let Ok(new_control) = super::Control::new(&sq) {
                                                     _ = control.update(new_control);
-                                                    let settings = get_settings(&sq);
-                                                    if let Ok(c_socks) = control_sockets.lock() {
-                                                        for sock in c_socks.iter() {
-                                                            if let Some(sock) = sock {
-                                                                // we might be writing to other sockets
-                                                                // so errors here shouldn't close our connection
-                                                                _ = write_settings(&sock, &settings);
-                                                            }
-                                                        }
-                                                    }
                                                     
                                                 } else {
                                                     let settings = get_settings(&sq);
@@ -964,6 +943,18 @@ fn handle_stream(
                                     no_error = write_error(&stream, errors::Errors::DatabaseError {
                                         message: format!("'{other}' is not a valid setting")
                                     });
+                                }
+                            }
+                        }
+                        if let Ok(sq) = sqlite.lock() {
+                            let settings = get_settings(&sq);
+                            if let Ok(c_socks) = control_sockets.lock() {
+                                for sock in c_socks.iter() {
+                                    if let Some(sock) = sock {
+                                        // we might be writing to other sockets
+                                        // so errors here shouldn't close our connection
+                                        _ = write_settings(&sock, &settings);
+                                    }
                                 }
                             }
                         }
