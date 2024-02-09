@@ -1,5 +1,7 @@
 use std::{sync::{Arc, Mutex, Condvar}, time::{Duration, Instant}};
 
+use rand::Rng;
+
 use crate::sound_board;
 
 pub struct Sounds {
@@ -66,6 +68,7 @@ impl Sounds {
 
     pub fn run(&mut self) {
         let mut last_sound = Instant::now();
+        let mut separation: u64 = sound_board::BEEP_SEPARATION + rand::thread_rng().gen_range(0..sound_board::BEEP_SEP_RAND_MAX);
         loop {
             if let Ok(ka) = self.keepalive.try_lock() {
                 match *ka {
@@ -82,9 +85,10 @@ impl Sounds {
                         if *beep == true {
                             // always change beep back to false, even if we don't play the sound
                             // if this doesn't happen then it may beep at some point we don't want it to beep
-                            if control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(sound_board::BEEP_SEPARATION) {
+                            if control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(separation) {
                                 control.sound_board.play_sound(control.volume);
                                 last_sound = Instant::now();
+                                separation = sound_board::BEEP_SEPARATION + rand::thread_rng().gen_range(0..sound_board::BEEP_SEP_RAND_MAX);
                             }
                             *beep = false;
                         }

@@ -1,5 +1,7 @@
 use std::{fs::File, io::{BufReader, Cursor}, ops::Deref, path::Path, sync::{Arc, Mutex}};
 
+use rand::Rng;
+
 pub const EMILY_START:                  &'static [u8] = include_bytes!("sounds/emily-started.mp3");
 pub const EMILY_SHUTDOWN:               &'static [u8] = include_bytes!("sounds/emily-shutdown.mp3");
 pub const EMILY_VOLUME_01:              &'static [u8] = include_bytes!("sounds/emily-volume-01.mp3");
@@ -51,8 +53,10 @@ pub const CUSTOM_STARTUP_FINISHED:      &'static str = "./sound/startup-finished
 pub const CUSTOM_STARTUP_IN_PROGRESS:   &'static str = "./sound/startup-in-progress.mp3";
 
 pub const BEEP_FREQUENCY: f32 = 1000.0;
-pub const BEEP_DURATION: u64 = 150;
-pub const BEEP_SEPARATION: u64 = 250;
+pub const BEEP_DURATION: u64 = 75;
+pub const BEEP_RAND_MAX: u64 = 350;
+pub const BEEP_SEPARATION: u64 = 100;
+pub const BEEP_SEP_RAND_MAX: u64 = 450;
 
 trait SliceType: std::io::Read + std::io::Seek {}
 
@@ -352,7 +356,7 @@ impl SoundBoard {
                     // this should be a beep
                     let source = rodio::source::SineWave::new(BEEP_FREQUENCY);
                     sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
+                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION + rand::thread_rng().gen_range(0..BEEP_RAND_MAX)));
                 }
             }
         }
