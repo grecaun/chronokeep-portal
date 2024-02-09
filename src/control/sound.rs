@@ -9,13 +9,23 @@ pub struct Sounds {
 
 pub struct SoundNotifier {
     notifier: Arc<Condvar>,
-    beep: Arc<Mutex<bool>>
+    beep: Arc<Mutex<bool>>,
+    sound_list: Arc<Mutex<Vec<SoundType>>>
+}
+
+pub enum SoundType {
+    Volume,
+    Introduction,
+    StartupFinished,
+    StartupInProgress,
+    CustomNotAvailable
 }
 
 impl SoundNotifier {
     pub fn new() -> SoundNotifier {
         SoundNotifier {
             beep: Arc::new(Mutex::new(false)),
+            sound_list: Arc::new(Mutex::new(Vec::new())),
             notifier: Arc::new(Condvar::new())
         }
     }
@@ -23,6 +33,13 @@ impl SoundNotifier {
     pub fn notify_one(&self) {
         if let Ok(mut val) = self.beep.lock() {
             *val = true;
+        }
+        self.notifier.notify_one()
+    }
+
+    pub fn notify_custom(&self, sound: SoundType) {
+        if let Ok(mut sounds) = self.sound_list.lock() {
+            sounds.push(sound);
         }
         self.notifier.notify_one()
     }
@@ -69,6 +86,22 @@ impl Sounds {
                             }
                             *beep = false;
                         }
+                    }
+                    if let Ok(mut sounds) = self.sound_notifier.sound_list.lock() {
+                        // go through all the custom values, then clear the vec
+                        if control.play_sound == true {
+                            for sound in &*sounds {
+                                match sound {
+                                    SoundType::Volume => control.sound_board.play_volume(control.volume),
+                                    SoundType::Introduction => control.sound_board.play_introduction(control.volume),
+                                    SoundType::StartupFinished => control.sound_board.play_startup_finished(control.volume),
+                                    SoundType::StartupInProgress => control.sound_board.play_startup_in_progress(control.volume),
+                                    SoundType::CustomNotAvailable => control.sound_board.play_custom_not_available(control.volume),
+                                }
+                            }
+                        };
+                        let list = &mut *sounds;
+                        list.clear();
                     }
                 }
             } else {

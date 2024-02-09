@@ -140,7 +140,7 @@ fn main() {
     println!("Goodbye!");
     if let Ok(control) = control.lock() {
         if control.play_sound {
-            control.sound_board.play_close_sound(control.volume);
+            control.sound_board.play_shutdown(control.volume);
         }
     };
 }

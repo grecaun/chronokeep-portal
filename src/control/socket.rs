@@ -4,7 +4,7 @@ use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting, sighting}, processor, reader::{self, auto_connect, zebra}, remote::{self, uploader}, results, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting, sighting}, processor, reader::{self, auto_connect, zebra}, remote::{self, uploader}, results, sound_board::Voice};
 
 use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
@@ -184,7 +184,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
     // play a sound to let the user know we've booted up fully and can accept control connections
     if let Ok(control) = control.lock() {
         if control.play_sound {
-            control.sound_board.play_start_sound(control.volume);
+            control.sound_board.play_started(control.volume);
         }
     }
 
@@ -475,17 +475,13 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
-                                if let Ok(control) = control.lock() {
-                                    control.sound_board.play_startup_in_progress(control.volume);
-                                }
+                                sound.notify_custom(SoundType::StartupInProgress);
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
-                        if let Ok(control) = control.lock() {
-                            control.sound_board.play_startup_in_progress(control.volume);
-                        }
+                        sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -558,17 +554,13 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
-                                if let Ok(control) = control.lock() {
-                                    control.sound_board.play_startup_in_progress(control.volume);
-                                }
+                                sound.notify_custom(SoundType::StartupInProgress);
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
-                        if let Ok(control) = control.lock() {
-                            control.sound_board.play_startup_in_progress(control.volume);
-                        }
+                        sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -614,17 +606,13 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
-                                if let Ok(control) = control.lock() {
-                                    control.sound_board.play_startup_in_progress(control.volume);
-                                }
+                                sound.notify_custom(SoundType::StartupInProgress);
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
-                        if let Ok(control) = control.lock() {
-                            control.sound_board.play_startup_in_progress(control.volume);
-                        }
+                        sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -686,17 +674,13 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
-                                if let Ok(control) = control.lock() {
-                                    control.sound_board.play_startup_in_progress(control.volume);
-                                }
+                                sound.notify_custom(SoundType::StartupInProgress);
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
-                        if let Ok(control) = control.lock() {
-                            control.sound_board.play_startup_in_progress(control.volume);
-                        }
+                        sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -737,17 +721,13 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
-                                if let Ok(control) = control.lock() {
-                                    control.sound_board.play_startup_in_progress(control.volume);
-                                }
+                                sound.notify_custom(SoundType::StartupInProgress);
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
-                        if let Ok(control) = control.lock() {
-                            control.sound_board.play_startup_in_progress(control.volume);
-                        }
+                        sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -788,17 +768,13 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
-                                if let Ok(control) = control.lock() {
-                                    control.sound_board.play_startup_in_progress(control.volume);
-                                }
+                                sound.notify_custom(SoundType::StartupInProgress);
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
-                        if let Ok(control) = control.lock() {
-                            control.sound_board.play_startup_in_progress(control.volume);
-                        }
+                        sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -839,17 +815,13 @@ fn handle_stream(
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
-                                if let Ok(control) = control.lock() {
-                                    control.sound_board.play_startup_in_progress(control.volume);
-                                }
+                                sound.notify_custom(SoundType::StartupInProgress);
                                 no_error = write_error(&stream, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
-                        if let Ok(control) = control.lock() {
-                            control.sound_board.play_startup_in_progress(control.volume);
-                        }
+                        sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
@@ -959,14 +931,12 @@ fn handle_stream(
                             }
                         }
                         if custom_error && control.play_sound {
-                            control.sound_board.play_custom_not_available(control.volume);
+                            sound.notify_custom(SoundType::CustomNotAvailable);
                         } else if old_voice != control.sound_board.get_voice() && control.play_sound  {
-                            control.sound_board.play_introduction(control.volume);
+                            sound.notify_custom(SoundType::Introduction);
                         }
-                        if old_play_sound != control.play_sound && control.play_sound  {
-                            control.sound_board.play_volume(control.volume);
-                        } else if old_volume != control.volume  && control.play_sound {
-                            control.sound_board.play_volume(control.volume);
+                        if (old_play_sound != control.play_sound || old_volume != control.volume) && control.play_sound {
+                            sound.notify_custom(SoundType::Volume);
                         }
                     } else {
                         if let Ok(sq) = sqlite.lock() {

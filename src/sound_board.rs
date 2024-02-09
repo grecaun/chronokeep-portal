@@ -108,7 +108,7 @@ impl SoundBoard {
         return output
     }
 
-    pub fn play_start_sound(&self, volume: f32) {
+    pub fn play_started(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
             if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
                 if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
@@ -136,7 +136,7 @@ impl SoundBoard {
         }
     }
 
-    pub fn play_auto_connected_sound(&self, volume: f32) {
+    pub fn play_startup_finished(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
             if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
                 if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
@@ -164,7 +164,7 @@ impl SoundBoard {
         }
     }
 
-    pub fn play_close_sound(&self, volume: f32) {
+    pub fn play_shutdown(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
             if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
                 if let Ok(sink) = rodio::Sink::try_new(&source_handle) {

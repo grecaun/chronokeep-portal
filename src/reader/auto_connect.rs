@@ -2,7 +2,7 @@ use std::{sync::{Arc, Mutex}, thread::{JoinHandle, self}, net::TcpStream, time::
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, processor, reader::AUTO_CONNECT_TRUE};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, processor, reader::AUTO_CONNECT_TRUE};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 30;
 
@@ -111,11 +111,7 @@ impl AutoConnector {
             }
         }
         println!("All done connecting to readers.");
-        if let Ok(control) = self.control.lock() {
-            if control.play_sound {
-                control.sound_board.play_auto_connected_sound(control.volume);
-            }
-        }
+        self.sound.notify_custom(SoundType::StartupFinished);
         if let Ok(mut state) = self.state.lock() {
             *state = State::Finished
         }
