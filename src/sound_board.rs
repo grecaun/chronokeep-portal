@@ -50,6 +50,10 @@ pub const CUSTOM_INTRODUCTION:          &'static str = "./sound/introduction.mp3
 pub const CUSTOM_STARTUP_FINISHED:      &'static str = "./sound/startup-finished.mp3";
 pub const CUSTOM_STARTUP_IN_PROGRESS:   &'static str = "./sound/startup-in-progress.mp3";
 
+pub const BEEP_FREQUENCY: f32 = 1000.0;
+pub const BEEP_DURATION: u64 = 150;
+pub const BEEP_SEPARATION: u64 = 250;
+
 trait SliceType: std::io::Read + std::io::Seek {}
 
 #[derive(Clone)]
@@ -346,9 +350,9 @@ impl SoundBoard {
                     sink.set_volume(volume);
                 
                     // this should be a beep
-                    let source = rodio::source::SineWave::new(800.0);
+                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY);
                     sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
                 }
             }
         }

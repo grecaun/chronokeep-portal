@@ -1,5 +1,7 @@
 use std::{sync::{Arc, Mutex, Condvar}, time::{Duration, Instant}};
 
+use crate::sound_board;
+
 pub struct Sounds {
     control: Arc<Mutex<super::Control>>,
     keepalive: Arc<Mutex<bool>>,
@@ -80,7 +82,7 @@ impl Sounds {
                         if *beep == true {
                             // always change beep back to false, even if we don't play the sound
                             // if this doesn't happen then it may beep at some point we don't want it to beep
-                            if control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(350) {
+                            if control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(sound_board::BEEP_SEPARATION) {
                                 control.sound_board.play_sound(control.volume);
                                 last_sound = Instant::now();
                             }
