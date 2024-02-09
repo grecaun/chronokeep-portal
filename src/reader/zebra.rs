@@ -70,7 +70,9 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                     }
                     match read(&mut t_stream, buf) {
                         Ok(mut tags) => {
-                            t_sound.notify_one();
+                            if tags.len() > 0 {
+                                t_sound.notify_one();
+                            }
                             match process_tags(&mut read_map, &mut tags, &t_control, &t_sqlite, t_reader_name.as_str()) {
                                 Ok(new_reads) => {
                                     if new_reads.len() > 0 {
