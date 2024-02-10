@@ -6,3 +6,9 @@
 *.pcapng
 *.csv
 /vendor
+/sounds
+*.json
+/scripts/cross-compile.sh
+/scripts/download-sounds.sh
+/scripts/play-sound.sh
+/scripts/temp-test.sh
