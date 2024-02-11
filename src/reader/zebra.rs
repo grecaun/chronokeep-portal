@@ -1,7 +1,7 @@
 use std::{str::{self, FromStr}, net::{TcpStream, SocketAddr, IpAddr}, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
@@ -106,7 +106,9 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                                 let mut updated = false;
                                 if let Ok(mut ant) = t_antennas.lock() {
                                     for ix in 0..16 {
-                                        ant[ix] = data.antennas[ix];
+                                        if data.antennas[ix] != ANTENNA_STATUS_NONE {
+                                            ant[ix] = data.antennas[ix];
+                                        }
                                     }
                                     updated = true;
                                 }
@@ -669,6 +671,17 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;BUFFER_SIZE]) -> Result<ReadDa
                                     Err(_) => (),
                                 }
                             }
+                            llrp::message_types::READER_EVENT_NOTIFICATION => {
+                                match process_reader_event_notification(&buf, cur_ix + 10, &max_ix) {
+                                    Ok(antenna) => {
+                                        if let Some(ant) = antenna {
+                                            output.antennas[ant.0] = ant.1;
+                                            output.antenna_data = true;
+                                        }
+                                    },
+                                    Err(_) => (),
+                                }
+                            }
                             _ => {
                                 //println!("Message Type Found! V: {} - {}", info.version, found_type);
                             },
@@ -698,16 +711,64 @@ pub struct TagData {
     portal_time: u128, // time since 00:00:00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
 }
 
+fn process_reader_event_notification(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<(usize, u8)>, &'static str> {
+    let mut bits = ((buf[start_ix] as u32) << 24) +
+           ((buf[start_ix+1] as u32) << 16) +
+           ((buf[start_ix+2] as u32) << 8) +
+            (buf[start_ix+3] as u32);
+    let mut param_info = match llrp::bit_masks::get_param_type(&bits) {
+        Ok(info) => info,
+        Err(_) => return Err("unable to get parameter info"),
+    };
+    if parameter_types::READER_EVENT_NOTIFICATION_DATA != param_info.kind {
+        return Err("invalid tlv parameter")
+    }
+    let mut param_ix = start_ix + 4;
+    let mut output: Option<(usize, u8)> = None;
+    while param_ix < *max_ix {
+        bits = ((buf[param_ix] as u32) << 24) +
+               ((buf[param_ix+1] as u32) << 16) +
+               ((buf[param_ix+2] as u32) << 8) +
+                (buf[param_ix+3] as u32);
+        param_info = match llrp::bit_masks::get_param_type(&bits) {
+            Ok(info) => info,
+            Err(_) => return Err("unable to get parameter info"),
+        };
+        match param_info.kind {
+            parameter_types::UTC_TIMESTAMP => { },
+            parameter_types::ANTENNA_EVENT => {
+                // bytes 0, 1, 2, 3 are the TLV Parameter information, type and length -- ignore
+                // byte 4 is the connected bit, 0x00 if not connected, 0x01 if connected
+                // bytes 5 and 6 are the antenna number, 0x00 0x01, 6 should be the only one that matters
+                let mut number = ((buf[param_ix+5] as usize) << 8) + (buf[param_ix+6] as usize);
+                if number > MAX_ANTENNAS {
+                    return Err("antenna number greater than the max number of antennas supported")
+                } else if number > 0 {
+                    number -= 1;
+                }
+                output = match buf[param_ix+4] {
+                    0x00 => Some((number, ANTENNA_STATUS_DISCONNECTED)),
+                    _ => Some((number, ANTENNA_STATUS_CONNECTED)),
+                };
+            },
+            _ => { },
+        }
+        param_ix += param_info.length as usize;
+    }
+    Ok(output)
+}
+
 fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<[u8;MAX_ANTENNAS]>, &'static str> {
-    let bits: u32 = ((buf[start_ix] as u32) << 24) +
-                    ((buf[start_ix+1] as u32) << 16) +
-                    ((buf[start_ix+2] as u32) << 8) +
-                    (buf[start_ix+3] as u32);
+    let mut bits: u32;
     let mut param_info: ParamTypeInfo;
     let mut param_ix = start_ix;
     let mut output: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
     let mut antenna_found = false;
     while param_ix < *max_ix {
+        bits = ((buf[param_ix] as u32) << 24) +
+               ((buf[param_ix+1] as u32) << 16) +
+               ((buf[param_ix+2] as u32) << 8) +
+                (buf[param_ix+3] as u32);
         param_info = match llrp::bit_masks::get_param_type(&bits) {
             Ok(info) => info,
             Err(_) => return Err("unable to get parameter info"),
@@ -718,7 +779,13 @@ fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize
                 // byte 4 is the connected bit, 0x00 if not connected, 0x80 if connected
                 // bytes 5 and 6 are the antenna number, 0x00 0x01, 6 should be the only one that matters
                 // bytes 7 and 8 are the antenna gain -- ignore
-                output[((buf[param_ix+5] as usize) << 8) + (buf[param_ix+6] as usize)] = match buf[param_ix+4] {
+                let mut number = ((buf[param_ix+5] as usize) << 8) + (buf[param_ix+6] as usize);
+                if number > MAX_ANTENNAS {
+                    return Err("antenna number greater than the max number of antennas supported")
+                } else if number > 0 {
+                    number -= 1;
+                }
+                output[number] = match buf[param_ix+4] {
                     0x00 => ANTENNA_STATUS_DISCONNECTED,
                     _ => ANTENNA_STATUS_CONNECTED,
                 };
