@@ -6,7 +6,7 @@ pub fn get_reader_capabilities(id: &u32) -> [u8;24] {
         // convert 16 bits to two 8 bit unsigned ints
         ((header & 0xFF00) >> 8) as u8,
         (header & 0x00FF) as u8,
-        // length of 23 (0x18)
+        // length of 24 (0x18)
         0x00, 0x00, 0x00, 0x18,
         // convert id from 32 bits to four bytes
         ((id & 0xFF000000) >> 24) as u8,
@@ -216,8 +216,8 @@ pub fn get_reader_config(id: &u32, ant_id: &u16, config: &u8, gpi_port: &u16, gp
         // convert 16 bits to two 8 bit unsigned ints
         ((header & 0xFF00) >> 8) as u8,
         (header & 0x00FF) as u8,
-        // length 27
-        0x00, 0x00, 0x00, 0x14,
+        // length 20
+        0x00, 0x00, 0x00, 0x11,
         // convert id to 4 bytes
         ((id & 0xFF000000) >> 24) as u8,
         ((id & 0xFF0000) >> 16) as u8,
@@ -255,7 +255,7 @@ pub fn set_keepalive(id: &u32) -> [u8;20] {
         // convert 16 bits to two 8 bit unsigned ints
         ((header & 0xFF00) >> 8) as u8,
         (header & 0x00FF) as u8,
-        // length 27
+        // length 20
         0x00, 0x00, 0x00, 0x14,
         // convert id to 4 bytes
         ((id & 0xFF000000) >> 24) as u8,
@@ -312,7 +312,7 @@ pub fn set_reader_config(id: &u32) -> [u8;41] {
         // convert 16 bits to two 8 bit unsigned ints
         ((header & 0xFF00) >> 8) as u8,
         (header & 0x00FF) as u8,
-        // length 27
+        // length 41
         0x00, 0x00, 0x00, 0x29,
         // convert id to 4 bytes
         ((id & 0xFF000000) >> 24) as u8,

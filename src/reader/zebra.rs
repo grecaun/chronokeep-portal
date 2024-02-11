@@ -1,11 +1,17 @@
 use std::{str::{self, FromStr}, net::{TcpStream, SocketAddr, IpAddr}, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, parameter_types}, objects::read, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, types};
 
 pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
+pub const BUFFER_SIZE: usize = 51200;
+
+struct ReadData {
+    tags: Vec<TagData>,
+    antennas: HashMap<u32, bool>
+}
 
 pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<control::Control>>, sound: Arc<SoundNotifier>) -> Result<JoinHandle<()>, &'static str> {
     let ip_addr = match IpAddr::from_str(&reader.ip_address) {
@@ -44,13 +50,14 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
             let t_control = control.clone();
             let t_connected = reader.connected.clone();
             let t_sound = sound.clone();
+            let t_antennas = reader.arc_antennas.clone();
 
             let t_control_sockets = reader.control_sockets.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
             let mut t_sight_processor = reader.sight_processor.clone();
 
             let output = thread::spawn(move|| {
-                let buf: &mut [u8; 51200] = &mut [0;51200];
+                let buf: &mut [u8; BUFFER_SIZE] = &mut [0;BUFFER_SIZE];
                 match t_stream.set_read_timeout(Some(Duration::from_secs(1))) {
                     Ok(_) => (),
                     Err(e) => {
@@ -69,27 +76,45 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         break;
                     }
                     match read(&mut t_stream, buf) {
-                        Ok(mut tags) => {
-                            if tags.len() > 0 {
+                        Ok(mut data) => { //RIGHTHERE
+                            // process tags if we were told there were some
+                            if data.tags.len() > 0 {
                                 t_sound.notify_one();
-                            }
-                            match process_tags(&mut read_map, &mut tags, &t_control, &t_sqlite, t_reader_name.as_str()) {
-                                Ok(new_reads) => {
-                                    if new_reads.len() > 0 {
-                                        match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
-                                            Ok(_) => {},
-                                            Err(e) => {
-                                                println!("error sending new reads to repeaters: {e}")
+                                match process_tags(&mut read_map, &mut data.tags, &t_control, &t_sqlite, t_reader_name.as_str()) {
+                                    Ok(new_reads) => {
+                                        if new_reads.len() > 0 {
+                                            match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("error sending new reads to repeaters: {e}")
+                                                }
+                                            }
+                                            if let Some(processor) = t_sight_processor {
+                                                processor.notify();
+                                                t_sight_processor = Some(processor);
                                             }
                                         }
-                                        if let Some(processor) = t_sight_processor {
-                                            processor.notify();
-                                            t_sight_processor = Some(processor);
+                                    },
+                                    Err(e) => println!("Error processing tags. {e}"),
+                                };
+                            }
+                            // if antenna data exists then we can update the readers antennas
+                            if !data.antennas.is_empty() {
+                                let mut updated = false;
+                                if let Ok(mut ant) = t_antennas.lock() {
+                                    ant.extend(data.antennas);
+                                    updated = true;
+                                }
+                                // send out notification that we updated the readers
+                                if updated {
+                                    match send_antennas(t_reader_name.as_str(), &t_antennas, &t_control_sockets) {
+                                        Ok(_) => {},
+                                        Err(e) => {
+                                            println!("error sending antennas to control sockets: {e}")
                                         }
                                     }
-                                },
-                                Err(e) => println!("Error processing tags. {e}"),
-                            };
+                                }
+                            }
                         },
                         Err(e) => {
                             match e.kind() {
@@ -295,6 +320,34 @@ fn save_reads(
     }
 }
 
+fn send_antennas(
+    reader_name: &str,
+    antennas: &Arc<Mutex<HashMap<u32, bool>>>,
+    control_sockets: &Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED+1]>>
+) -> Result<(), &'static str> {
+    let mut no_error = true;
+    if let Ok(sockets) = control_sockets.lock() {
+        if let Ok(ant) = antennas.lock() {
+            for ix in 0..MAX_CONNECTED {
+                match &sockets[ix] {
+                    Some(sock) => {
+                        no_error = no_error && socket::write_reader_antennas(sock, reader_name.to_string(), &*ant)
+                    },
+                    None => {}
+                }
+            }
+        } else {
+            return Err("error getting antennas mutex")
+        }
+    } else {
+        return Err("error getting sockets mutex")
+    }
+    if no_error == false {
+        return Err("error occurred writing to one or more sockets")
+    }
+    Ok(())
+}
+
 fn send_new(
     reads: Vec<read::Read>,
     control_sockets: &Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED+1]>>,
@@ -480,7 +533,7 @@ fn finalize(t_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>, reading: &
         }
     }
     let close = requests::close_connection(&fin_id);
-    let buf: &mut [u8; 51200] = &mut [0;51200];
+    let buf: &mut [u8; BUFFER_SIZE] = &mut [0;BUFFER_SIZE];
     match t_stream.write_all(&close) {
         Ok(_) => {
             match read(t_stream, buf) {
@@ -540,16 +593,28 @@ fn send_connect_messages(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u3
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
+    // get antenna properties (config == 2)
+    // this will report back information on the antennas
+    // gpi_port and gpo_port values should be ignored in this query
+    let buf = requests::get_reader_config(&8, &0, &2, &0, &0);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
     if let Ok(mut id) = msg_id.lock() {
-        *id = 7;
+        *id = 8;
     } else {
         return Err("unable to get id lock")
     }
     Ok(())
 }
 
-fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;51200]) -> Result<Vec<TagData>, std::io::Error> {
-    let mut output: Vec<TagData> = Vec::new();
+fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;BUFFER_SIZE]) -> Result<ReadData, std::io::Error> {
+    let mut output = ReadData {
+        tags: Vec::new(),
+        antennas: HashMap::new(),
+    };
     let numread = tcp_stream.read(buf);
     match numread {
         Ok(num) => {
@@ -580,13 +645,21 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;51200]) -> Result<Vec<TagData>
                                 match process_tag_read(&buf, cur_ix + 10, &max_ix) {
                                     Ok(opt_tag) => match opt_tag {
                                         Some(tag) => {
-                                            output.push(tag);
+                                            output.tags.push(tag);
                                         },
                                         None => (),
                                     },
                                     Err(_) => (),
                                 };
                             },
+                            llrp::message_types::GET_READER_CONFIG_RESPONSE => {
+                                match process_reader_config(&buf, cur_ix + 10, &max_ix) {
+                                    Ok(antennas) => {
+                                        output.antennas.extend(antennas);
+                                    },
+                                    Err(_) => (),
+                                }
+                            }
                             _ => {
                                 //println!("Message Type Found! V: {} - {}", info.version, found_type);
                             },
@@ -616,7 +689,51 @@ pub struct TagData {
     portal_time: u128, // time since 00:00:00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
 }
 
-fn process_tag_read(buf: &[u8;51200], start_ix: usize, max_ix: &usize) -> Result<Option<TagData>, &'static str> {
+fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<HashMap<u32, bool>, &'static str> {
+    let bits: u32 = ((buf[start_ix] as u32) << 24) +
+                    ((buf[start_ix+1] as u32) << 16) +
+                    ((buf[start_ix+2] as u32) << 8) +
+                    (buf[start_ix+3] as u32);
+    let mut param_info: ParamTypeInfo;
+    let mut param_ix = start_ix;
+    let mut output: HashMap<u32, bool> = HashMap::new();
+    while param_ix < *max_ix {
+        param_info = match llrp::bit_masks::get_param_type(&bits) {
+            Ok(info) => info,
+            Err(_) => return Err("unable to get parameter info"),
+        };
+        match param_info.kind {
+            parameter_types::ANTENNA_PROPERTIES => {
+                // bytes 0, 1, 2, 3 are the TLV Parameter information, type and length -- ignore
+                // byte 4 is the connected bit, 0x00 if not connected, 0x80 if connected
+                // bytes 5 and 6 are the antenna number, 0x00 0x01, 6 should be the only one that matters
+                // bytes 7 and 8 are the antenna gain -- ignore
+                output.insert(
+                    ((buf[param_ix+5] as u32) << 8) + (buf[param_ix+6] as u32), // antenna number
+                    buf[param_ix+4] == 0x00                                     // connected
+                );
+            },
+            parameter_types::ANTENNA_CONFIGURATION => { },
+            parameter_types::READER_EVENT_NOTIFICATION_SPEC => { },
+            parameter_types::RO_REPORT_SPEC => { },
+            parameter_types::ACCESS_REPORT_SPEC => { },
+            parameter_types::LLRP_CONFIGURATION_STATE_VALUE => { },
+            parameter_types::KEEPALIVE_SPEC => { },
+            parameter_types::GPI_PORT_CURRENT_STATE => { },
+            parameter_types::GPO_WRITE_DATA => { },
+            parameter_types::CUSTOM_PARAMETER => { },
+            parameter_types::LLRP_STATUS => { },
+            parameter_types::IDENTIFICATION => { },
+            other => {
+                println!("unknown parameter type found: {:?}", other);
+            }
+        }
+        param_ix += param_info.length as usize;
+    }
+    Ok(output)
+}
+
+fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<TagData>, &'static str> {
     let bits: u32 = ((buf[start_ix] as u32) << 24) +
                     ((buf[start_ix+1] as u32) << 16) +
                     ((buf[start_ix+2] as u32) << 8) +
@@ -710,7 +827,7 @@ fn process_tag_read(buf: &[u8;51200], start_ix: usize, max_ix: &usize) -> Result
     Ok(Some(data))
 }
 
-fn _process_parameters(buf: &[u8;51200], start_ix: usize, num: &usize) {
+fn _process_parameters(buf: &[u8;BUFFER_SIZE], start_ix: usize, num: &usize) {
     let mut start: usize = start_ix;
     while start < *num {
         let bits: u32 = ((buf[start] as u32) << 24) +

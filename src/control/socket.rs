@@ -1,4 +1,4 @@
-use std::{thread::{JoinHandle, self}, sync::{Mutex, Arc, MutexGuard}, net::{TcpListener, TcpStream, Shutdown, SocketAddr}, io::{Read, ErrorKind, Write}, time::{SystemTime, UNIX_EPOCH, Duration}, env};
+use std::{collections::HashMap, env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
@@ -2052,6 +2052,28 @@ fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
         Ok(_) => true,
         Err(e) => {
             println!("5/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    output
+}
+
+pub fn write_reader_antennas(stream: &TcpStream, reader_name: String, antennas: &HashMap<u32, bool>) -> bool {
+    let output = match serde_json::to_writer(stream, &responses::Responses::ReaderAntennas{
+        reader_name,
+        antennas: antennas.clone()
+    }) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("16/ Something went wrong writing to the socket. {e}");
+            false
+        }
+    };
+    let mut writer = stream;
+    let output = output && match writer.write_all(b"\n") {
+        Ok(_) => true,
+        Err(e) => {
+            println!("16/ Something went wrong writing to the socket. {e}");
             false
         }
     };

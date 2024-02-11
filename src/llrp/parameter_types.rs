@@ -33,7 +33,7 @@ pub const RF_SURVEY_SPEC: u16 = 187;
 pub const RF_SURVEY_SPEC_STOP_TRIGGER: u16 = 188;
 pub const LOOP_SPEC: u16 = 355;
 
-// Access Operation Paramters
+// Access Operation Parameters
 pub const ACCESS_SPEC: u16 = 207;
 pub const ACCESS_SPEC_STOP_TRIGGER: u16 = 208;
 pub const ACCESS_COMMAND: u16 = 209;
@@ -42,6 +42,7 @@ pub const CLIENT_REQUEST_RESPONSE: u16 = 211;
 
 // Configuration Parameters
 pub const LLRP_CONFIGURATION_STATE_VALUE: u16 = 217;
+pub const IDENTIFICATION: u16 = 218;
 pub const GPO_WRITE_DATA: u16 = 219;
 pub const KEEPALIVE_SPEC: u16 = 220;
 pub const ANTENNA_PROPERTIES: u16 = 221;
@@ -188,6 +189,7 @@ pub fn get_parameter_name(kind: u16) -> Option<&'static str> {
         210 => Some("CLIENT_REQUEST_OP_SPEC"),
         211 => Some("CLIENT_REQUEST_RESPONSE"),
         217 => Some("LLRP_CONFIGURATION_STATE_VALUE"),
+        218 => Some("IDENTIFICATION"),
         219 => Some("GPO_WRITE_DATA"),
         220 => Some("KEEPALIVE_SPEC"),
         221 => Some("ANTENNA_PROPERTIES"),

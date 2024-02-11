@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
 
 use crate::{objects::{event::Event, setting, participant::Participant, sighting::Sighting, read}, network::api, remote::uploader};
@@ -9,6 +11,10 @@ use super::errors;
 pub enum Responses {
     Readers {
         readers: Vec<Reader>,
+    },
+    ReaderAntennas{
+        reader_name: String,
+        antennas: HashMap<u32, bool>,
     },
     Error {
         error: errors::Errors,
