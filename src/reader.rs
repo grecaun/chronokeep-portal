@@ -1,6 +1,6 @@
-use std::{collections::HashMap, io::Write, net::TcpStream, sync::{self, Arc, Mutex}, thread::JoinHandle};
+use std::{io::Write, net::TcpStream, sync::{self, Arc, Mutex}, thread::JoinHandle};
 
-use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{control::{self, socket::MAX_CONNECTED, sound::SoundNotifier}, database::{sqlite, DBError}, processor};
 
@@ -14,7 +14,12 @@ pub const READER_KIND_IMPINJ: &str = "IMPINJ";
 pub const AUTO_CONNECT_TRUE: u8 = 1;
 pub const AUTO_CONNECT_FALSE: u8 = 0;
 
-#[derive(Deserialize)]
+pub const MAX_ANTENNAS: usize = 16;
+pub const ANTENNA_STATUS_NONE: u8 = 0;
+pub const ANTENNA_STATUS_DISCONNECTED: u8 = 1;
+pub const ANTENNA_STATUS_CONNECTED: u8 = 2;
+
+#[derive(Serialize, Deserialize)]
 pub struct Reader {
     id: i64,
     nickname: String,
@@ -22,10 +27,9 @@ pub struct Reader {
     ip_address: String,
     port: u16,
     auto_connect: u8,
-    antennas: HashMap<u32, bool>,
 
     #[serde(skip)]
-    pub arc_antennas: Arc<Mutex<HashMap<u32, bool>>>,
+    pub antennas: Arc<Mutex<[u8;MAX_ANTENNAS]>>,
 
     #[serde(skip)]
     pub socket: sync::Mutex<Option<TcpStream>>,
@@ -45,27 +49,6 @@ pub struct Reader {
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     #[serde(skip)]
     sight_processor: Option<Arc<processor::SightingsProcessor>>,
-}
-
-impl Serialize for Reader
-{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer {
-        let mut s = serializer.serialize_struct("Reader", 7)?;
-        s.serialize_field("id", &self.id)?;
-        s.serialize_field("nickname", &self.nickname)?;
-        s.serialize_field("kind", &self.kind)?;
-        s.serialize_field("ip_address", &self.ip_address)?;
-        s.serialize_field("port", &self.port)?;
-        s.serialize_field("auto_connect", &self.auto_connect)?;
-        if let Ok(ant) = self.arc_antennas.lock() {
-            s.serialize_field("antennas", &*ant)?;
-        } else {
-            s.serialize_field("antennas", &self.antennas)?;
-        }
-        s.end()
-    }
 }
 
 impl Reader {
@@ -92,8 +75,7 @@ impl Reader {
             control_sockets: Arc::new(Mutex::new(Default::default())),
             read_repeaters: Arc::new(Mutex::new(Default::default())),
             sight_processor: None,
-            antennas: HashMap::new(),
-            arc_antennas: Arc::new(Mutex::new(HashMap::new())),
+            antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
         }
     }
 
@@ -143,8 +125,7 @@ impl Reader {
                     control_sockets,
                     read_repeaters,
                     sight_processor: Some(sight_processor),
-                    antennas: HashMap::new(),
-                    arc_antennas: Arc::new(Mutex::new(HashMap::new())),
+                    antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
                 })
             },
             READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),

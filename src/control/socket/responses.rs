@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use serde::Serialize;
 
-use crate::{objects::{event::Event, setting, participant::Participant, sighting::Sighting, read}, network::api, remote::uploader};
+use crate::{network::api, objects::{event::Event, participant::Participant, read, setting, sighting::Sighting}, reader::MAX_ANTENNAS, remote::uploader};
 
 use super::errors;
 
@@ -14,7 +12,7 @@ pub enum Responses {
     },
     ReaderAntennas{
         reader_name: String,
-        antennas: HashMap<u32, bool>,
+        antennas: [u8;MAX_ANTENNAS],
     },
     Error {
         error: errors::Errors,
@@ -80,4 +78,5 @@ pub struct Reader {
     pub auto_connect: bool,
     pub reading: Option<bool>,
     pub connected: Option<bool>,
+    pub antennas: [u8;MAX_ANTENNAS],
 }

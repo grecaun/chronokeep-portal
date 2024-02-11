@@ -1,10 +1,10 @@
-use std::{collections::HashMap, env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting, sighting}, processor, reader::{self, auto_connect, zebra}, remote::{self, uploader}, results, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, uploader}, results, sound_board::Voice};
 
 use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
@@ -1969,6 +1969,12 @@ fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool 
 fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_readers: &MutexGuard<Vec<reader::Reader>>, apis: &Vec<Api>, status: uploader::Status) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
+        let mut antennas: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
+        if let Ok(ant) = r.antennas.lock() {
+            for ix in 0..16 {
+                antennas[ix] = ant[ix];
+            };
+        }
         list.push(responses::Reader{
             id: r.id(),
             name: String::from(r.nickname()),
@@ -1978,6 +1984,7 @@ fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_re
             reading: r.is_reading(),
             connected: r.is_connected(),
             auto_connect: r.auto_connect() == reader::AUTO_CONNECT_TRUE,
+            antennas
         })
     };
     let output = match serde_json::to_writer(stream, &responses::Responses::SettingsAll {
@@ -2006,6 +2013,12 @@ fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_re
 pub fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
+        let mut antennas: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
+        if let Ok(ant) = r.antennas.lock() {
+            for ix in 0..16 {
+                antennas[ix] = ant[ix];
+            };
+        }
         list.push(responses::Reader{
             id: r.id(),
             name: String::from(r.nickname()),
@@ -2015,6 +2028,7 @@ pub fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::
             reading: r.is_reading(),
             connected: r.is_connected(),
             auto_connect: r.auto_connect() == reader::AUTO_CONNECT_TRUE,
+            antennas
         })
     };
     let output = match serde_json::to_writer(stream, &responses::Responses::Readers{
@@ -2058,7 +2072,7 @@ fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
     output
 }
 
-pub fn write_reader_antennas(stream: &TcpStream, reader_name: String, antennas: &HashMap<u32, bool>) -> bool {
+pub fn write_reader_antennas(stream: &TcpStream, reader_name: String, antennas: &[u8;MAX_ANTENNAS]) -> bool {
     let output = match serde_json::to_writer(stream, &responses::Responses::ReaderAntennas{
         reader_name,
         antennas: antennas.clone()
@@ -2167,6 +2181,12 @@ fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>)
 fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, sightings: bool, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
+        let mut antennas: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
+        if let Ok(ant) = r.antennas.lock() {
+            for ix in 0..16 {
+                antennas[ix] = ant[ix];
+            };
+        }
         list.push(responses::Reader{
             id: r.id(),
             name: String::from(r.nickname()),
@@ -2176,6 +2196,7 @@ fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, si
             reading: r.is_reading(),
             connected: r.is_connected(),
             auto_connect: r.auto_connect() == reader::AUTO_CONNECT_TRUE,
+            antennas,
         })
     };
     let mut updatable: bool = false;

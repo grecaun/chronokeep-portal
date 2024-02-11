@@ -3,6 +3,8 @@ use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, types};
 
+use super::{ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
+
 pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
@@ -10,7 +12,8 @@ pub const BUFFER_SIZE: usize = 51200;
 
 struct ReadData {
     tags: Vec<TagData>,
-    antennas: HashMap<u32, bool>
+    antenna_data: bool,
+    antennas: [u8;MAX_ANTENNAS]
 }
 
 pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<control::Control>>, sound: Arc<SoundNotifier>) -> Result<JoinHandle<()>, &'static str> {
@@ -50,7 +53,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
             let t_control = control.clone();
             let t_connected = reader.connected.clone();
             let t_sound = sound.clone();
-            let t_antennas = reader.arc_antennas.clone();
+            let t_antennas = reader.antennas.clone();
 
             let t_control_sockets = reader.control_sockets.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
@@ -99,10 +102,12 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                                 };
                             }
                             // if antenna data exists then we can update the readers antennas
-                            if !data.antennas.is_empty() {
+                            if data.antenna_data {
                                 let mut updated = false;
                                 if let Ok(mut ant) = t_antennas.lock() {
-                                    ant.extend(data.antennas);
+                                    for ix in 0..16 {
+                                        ant[ix] = data.antennas[ix];
+                                    }
                                     updated = true;
                                 }
                                 // send out notification that we updated the readers
@@ -322,7 +327,7 @@ fn save_reads(
 
 fn send_antennas(
     reader_name: &str,
-    antennas: &Arc<Mutex<HashMap<u32, bool>>>,
+    antennas: &Arc<Mutex<[u8;MAX_ANTENNAS]>>,
     control_sockets: &Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED+1]>>
 ) -> Result<(), &'static str> {
     let mut no_error = true;
@@ -613,7 +618,8 @@ fn send_connect_messages(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u3
 fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;BUFFER_SIZE]) -> Result<ReadData, std::io::Error> {
     let mut output = ReadData {
         tags: Vec::new(),
-        antennas: HashMap::new(),
+        antenna_data: false,
+        antennas: [0;MAX_ANTENNAS],
     };
     let numread = tcp_stream.read(buf);
     match numread {
@@ -655,7 +661,10 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;BUFFER_SIZE]) -> Result<ReadDa
                             llrp::message_types::GET_READER_CONFIG_RESPONSE => {
                                 match process_reader_config(&buf, cur_ix + 10, &max_ix) {
                                     Ok(antennas) => {
-                                        output.antennas.extend(antennas);
+                                        if let Some(ant) = antennas {
+                                            output.antennas = ant;
+                                            output.antenna_data = true;
+                                        };
                                     },
                                     Err(_) => (),
                                 }
@@ -689,14 +698,15 @@ pub struct TagData {
     portal_time: u128, // time since 00:00:00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
 }
 
-fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<HashMap<u32, bool>, &'static str> {
+fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<[u8;MAX_ANTENNAS]>, &'static str> {
     let bits: u32 = ((buf[start_ix] as u32) << 24) +
                     ((buf[start_ix+1] as u32) << 16) +
                     ((buf[start_ix+2] as u32) << 8) +
                     (buf[start_ix+3] as u32);
     let mut param_info: ParamTypeInfo;
     let mut param_ix = start_ix;
-    let mut output: HashMap<u32, bool> = HashMap::new();
+    let mut output: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
+    let mut antenna_found = false;
     while param_ix < *max_ix {
         param_info = match llrp::bit_masks::get_param_type(&bits) {
             Ok(info) => info,
@@ -708,10 +718,11 @@ fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize
                 // byte 4 is the connected bit, 0x00 if not connected, 0x80 if connected
                 // bytes 5 and 6 are the antenna number, 0x00 0x01, 6 should be the only one that matters
                 // bytes 7 and 8 are the antenna gain -- ignore
-                output.insert(
-                    ((buf[param_ix+5] as u32) << 8) + (buf[param_ix+6] as u32), // antenna number
-                    buf[param_ix+4] == 0x00                                     // connected
-                );
+                output[((buf[param_ix+5] as usize) << 8) + (buf[param_ix+6] as usize)] = match buf[param_ix+4] {
+                    0x00 => ANTENNA_STATUS_DISCONNECTED,
+                    _ => ANTENNA_STATUS_CONNECTED,
+                };
+                antenna_found = true;
             },
             parameter_types::ANTENNA_CONFIGURATION => { },
             parameter_types::READER_EVENT_NOTIFICATION_SPEC => { },
@@ -730,7 +741,10 @@ fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize
         }
         param_ix += param_info.length as usize;
     }
-    Ok(output)
+    if !antenna_found {
+        return Ok(None)
+    }
+    Ok(Some(output))
 }
 
 fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<TagData>, &'static str> {
