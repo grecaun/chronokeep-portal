@@ -680,7 +680,7 @@ impl super::Database for SQLite {
                             WHERE chip_id=?3;",
                     (r.status(), r.uploaded(), r.id())
                 ) {
-                    Ok(val) => count = count + val,
+                    Ok(_) => count += 1,
                     Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
                 }
             }

@@ -152,7 +152,6 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
 
     // create our reads uploader struct for auto uploading if the user wants to
     let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone()));
-
     // start a thread to play sounds if we are told we want to
     let mut sound = sound::Sounds::new(
         control.clone(),
@@ -1329,34 +1328,147 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ApiRemoteManualUpload => {
-                    if let Ok(sq) = sqlite.lock() {
+                    if let Ok(mut sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
                                 let mut found = false;
                                 for api in apis {
                                     if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
                                         found = true;
-                                        if let Ok(sq) = sqlite.lock() {
-                                            let reads = match sq.get_not_uploaded_reads() {
-                                                Ok(it) => it,
-                                                Err(e) => {
-                                                    println!("Error geting reads to upload. {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
-                                                    break;
+                                        println!("Uploading reads to {}", api.nickname());
+                                        let reads = match sq.get_not_uploaded_reads() {
+                                            Ok(it) => it,
+                                            Err(e) => {
+                                                println!("Error geting reads to upload. {e}");
+                                                no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
+                                                break;
+                                            }
+                                        };
+                                        // only upload in chunks of 50
+                                        if reads.len() > 50 {
+                                            // get the total number of full 50 count loops to do
+                                            let num_loops = reads.len() / 50;
+                                            let mut loop_counter = 0;
+                                            let mut upload_count = 0;
+                                            // counter starts at 0, num_loops is at minimum 1
+                                            // after the first loop counter is 1 and should exit if only 50 items
+                                            while loop_counter < num_loops {
+                                                let start_ix = loop_counter * 50;
+                                                let slice = &reads[start_ix..start_ix+50];
+                                                match upload_reads(&http_client, &api, &slice) {
+                                                    Ok(_) => {
+                                                        // the api will report 0 uploaded if nothing was changed, so don't verify the count
+                                                        let mut modified_reads: Vec<read::Read> = Vec::new();
+                                                        for read in slice {
+                                                            modified_reads.push(read::Read::new(
+                                                                read.id(),
+                                                                String::from(read.chip()),
+                                                                read.seconds(),
+                                                                read.milliseconds(),
+                                                                read.reader_seconds(),
+                                                                read.reader_milliseconds(),
+                                                                read.antenna(),
+                                                                String::from(read.reader()),
+                                                                String::from(read.rssi()),
+                                                                read.status(),
+                                                                read::READ_UPLOADED_TRUE
+                                                            ));
+                                                        }
+                                                        match sq.update_reads_status(&modified_reads) {
+                                                            Ok(count) => {
+                                                                println!("{count} reads uploaded and updated.");
+                                                                upload_count += count;
+                                                            },
+                                                            Err(e) => {
+                                                                println!("Error updating uploaded reads: {e}");
+                                                                no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error updating upload reads") });
+                                                            }
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        println!("Error uploading reads: {:?}", e);
+                                                        no_error = write_error(&stream, e);
+                                                    }
                                                 }
-                                            };
-                                            no_error = match upload_reads(&http_client, &api, &reads) {
-                                                Ok(count) => {
-                                                    write_success(&stream, count)
+                                                loop_counter = loop_counter + 1;
+                                            }
+                                            let start_ix = loop_counter * 50;
+                                            let slice = &reads[start_ix..reads.len()];
+                                            match upload_reads(&http_client, &api, &slice) {
+                                                Ok(_) => {
+                                                    // the api will report 0 uploaded if nothing was changed, so don't verify the count
+                                                    let mut modified_reads: Vec<read::Read> = Vec::new();
+                                                    for read in slice {
+                                                        modified_reads.push(read::Read::new(
+                                                            read.id(),
+                                                            String::from(read.chip()),
+                                                            read.seconds(),
+                                                            read.milliseconds(),
+                                                            read.reader_seconds(),
+                                                            read.reader_milliseconds(),
+                                                            read.antenna(),
+                                                            String::from(read.reader()),
+                                                            String::from(read.rssi()),
+                                                            read.status(),
+                                                            read::READ_UPLOADED_TRUE
+                                                        ));
+                                                    }
+                                                    match sq.update_reads_status(&modified_reads) {
+                                                        Ok(updated_count) => {
+                                                            println!("{updated_count} reads uploaded and updated.");
+                                                            upload_count += updated_count;
+                                                        },
+                                                        Err(e) => {
+                                                            println!("Error updating uploaded reads: {e}");
+                                                            no_error = no_error && write_error(&stream, errors::Errors::ServerError { message: String::from("error uploading reads") });
+                                                        }
+                                                    }
                                                 },
                                                 Err(e) => {
                                                     println!("Error uploading reads: {:?}", e);
-                                                    write_error(&stream, e)
+                                                    no_error = no_error && write_error(&stream, e);
                                                 }
                                             }
-                                        } else {
-                                            no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error getting database mutex") })
+                                            no_error = no_error && write_success(&stream, upload_count);
+                                        } else if reads.len() > 0 {
+                                            println!("Less than 50, but more than 0 reads to upload. {}", reads.len());
+                                            match upload_reads(&http_client, &api, &reads) {
+                                                Ok(_) => {
+                                                    // the api will report 0 uploaded if nothing was changed, so don't verify the count
+                                                    let mut modified_reads: Vec<read::Read> = Vec::new();
+                                                    for read in reads {
+                                                        modified_reads.push(read::Read::new(
+                                                            read.id(),
+                                                            String::from(read.chip()),
+                                                            read.seconds(),
+                                                            read.milliseconds(),
+                                                            read.reader_seconds(),
+                                                            read.reader_milliseconds(),
+                                                            read.antenna(),
+                                                            String::from(read.reader()),
+                                                            String::from(read.rssi()),
+                                                            read.status(),
+                                                            read::READ_UPLOADED_TRUE
+                                                        ));
+                                                    }
+                                                    match sq.update_reads_status(&modified_reads) {
+                                                        Ok(udated_count) => {
+                                                            println!("{udated_count} reads uploaded and updated.");
+                                                            no_error = no_error && write_success(&stream, udated_count);
+                                                        },
+                                                        Err(e) => {
+                                                            println!("Error updating uploaded reads: {e}");
+                                                            no_error = no_error && write_error(&stream, errors::Errors::ServerError { message: String::from("error uploading reads") });
+                                                        }
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    println!("Error uploading reads: {:?}", e);
+                                                    no_error = no_error && write_error(&stream, e);
+                                                }
+                                            }
                                         }
+                                        // remote api found, so break the loop looking for it
                                         break;
                                     }
                                 }
