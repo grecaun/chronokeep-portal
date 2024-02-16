@@ -19,10 +19,12 @@ pub struct Read {
     #[serde(skip)]
     id: u64,
     // These fields should be received from the reader.
-    chip: String,
+    identifier: String,
     seconds: u64,
     milliseconds: u32,
+    #[serde(skip)]
     reader_seconds: u64,
+    #[serde(skip)]
     reader_milliseconds: u32,
     antenna: u32,
     reader: String,
@@ -56,7 +58,7 @@ impl Read {
     ) -> Read{
             Read {
                 id,
-                chip,
+                identifier: chip,
                 seconds,
                 milliseconds,
                 reader_seconds,
@@ -72,7 +74,7 @@ impl Read {
     }
 
     pub fn equals(&self, other: &Read) -> bool {
-        self.chip == other.chip &&
+        self.identifier == other.identifier &&
         self.seconds == other.seconds &&
         self.milliseconds == other.milliseconds &&
         self.reader_seconds == other.reader_seconds &&
@@ -88,7 +90,7 @@ impl Read {
     }
 
     pub fn chip(&self) -> &str {
-        &self.chip
+        &self.identifier
     }
 
     pub fn seconds(&self) -> u64 {
