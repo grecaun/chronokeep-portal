@@ -61,7 +61,8 @@ pub enum Responses {
         reads_subscribed: bool,
         sightings_subscribed: bool,
         readers: Vec<Reader>,
-        updatable: bool
+        updatable: bool,
+        auto_upload: uploader::Status,
     },
     Keepalive,
     Disconnect,

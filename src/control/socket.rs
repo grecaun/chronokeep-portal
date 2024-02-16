@@ -4,7 +4,7 @@ use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, uploader}, results, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, uploader::{self, Uploader}}, results, sound_board::Voice};
 
 use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
@@ -152,6 +152,19 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
 
     // create our reads uploader struct for auto uploading if the user wants to
     let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone()));
+    if let Ok(control) = control.lock() {
+        if control.auto_remote == true {
+            println!("Starting auto upload thread.");
+            let t_uploader = uploader.clone();
+            let t_joiner = thread::spawn(move|| {
+                t_uploader.run();
+            });
+            if let Ok(mut j) = joiners.lock() {
+                j.push(t_joiner);
+            }
+        }
+    };
+
     // start a thread to play sounds if we are told we want to
     let mut sound = sound::Sounds::new(
         control.clone(),
@@ -454,7 +467,7 @@ fn handle_stream(
                         repeaters[index] = sightings;
                     }
                     if let Ok(u_readers) = readers.try_lock() {
-                        no_error = write_connection_successful(&mut stream, name, reads, sightings, &u_readers);
+                        no_error = write_connection_successful(&mut stream, name, reads, sightings, &u_readers, &uploader);
                     } else {
                         no_error = write_error(&mut stream, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
                     }
@@ -1519,6 +1532,19 @@ fn handle_stream(
                                     j.push(t_joiner);
                                 }
                             }
+                            if let Ok(sq) = sqlite.lock() {
+                                match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("true"))) {
+                                    Ok(_) => {
+                                        if let Ok(mut control) = control.lock() {
+                                            control.auto_remote = true;
+                                        };
+                                    },
+                                    Err(e) => {
+                                        println!("Error saving auto upload setting: {:?}", e);
+                                        no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error saving auto upload setting") });
+                                    }
+                                }
+                            };
                         }
                         AutoUploadQuery::Stop => {
                             if uploader.running() {
@@ -1526,6 +1552,19 @@ fn handle_stream(
                             } else {
                                 no_error = write_error(&stream, errors::Errors::NotRunning);
                             }
+                            if let Ok(sq) = sqlite.lock() {
+                                match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("false"))) {
+                                    Ok(_) => {
+                                        if let Ok(mut control) = control.lock() {
+                                            control.auto_remote = false;
+                                        };
+                                    },
+                                    Err(e) => {
+                                        println!("Error saving auto upload setting: {:?}", e);
+                                        no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error saving auto upload setting") });
+                                    }
+                                }
+                            };
                         }
                         AutoUploadQuery::Status => {
                             no_error = write_uploader_status(&stream, uploader.status());
@@ -2310,7 +2349,7 @@ fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>)
     output
 }
 
-fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, sightings: bool, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
+fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, sightings: bool, u_readers: &MutexGuard<Vec<reader::Reader>>, uploader: &Arc<Uploader>) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         let mut antennas: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
@@ -2345,6 +2384,7 @@ fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, si
         sightings_subscribed: sightings,
         readers: list,
         updatable: updatable,
+        auto_upload: uploader.status(),
     }) {
         Ok(_) => true,
         Err(e) => {

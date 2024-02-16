@@ -13,6 +13,7 @@ pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
 pub const SETTING_PLAY_SOUND: &str = "SETTING_PLAY_SOUND";
 pub const SETTING_VOLUME: &str = "SETTING_VOLUME";
 pub const SETTING_VOICE: &str = "SETTING_VOICE";
+pub const SETTING_AUTO_REMOTE: &str = "SETTING_AUTO_REMOTE";
 
 
 pub struct Control {
@@ -23,6 +24,7 @@ pub struct Control {
     pub play_sound: bool,
     pub volume: f32,
     pub sound_board: SoundBoard,
+    pub auto_remote: bool,
 }
 
 impl Control {
@@ -45,6 +47,9 @@ impl Control {
         if self.volume != new_control.volume {
             self.volume = new_control.volume
         }
+        if self.auto_remote != new_control.auto_remote {
+            self.auto_remote = new_control.auto_remote
+        }
         if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
             return self.sound_board.change_voice(new_control.sound_board.get_voice())
         }
@@ -60,6 +65,7 @@ impl Control {
             play_sound: defaults::DEFAULT_PLAY_SOUND,
             volume: defaults::DEFAULT_VOLUME,
             sound_board: SoundBoard::new(defaults::DEFAULT_VOICE),
+            auto_remote: defaults::DEFAULT_AUTO_REMOTE,
         };
         match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
             Ok(s) => {
@@ -199,6 +205,28 @@ impl Control {
                         if let Ok(_) = output.sound_board.change_voice(Voice::from_str(s.value())){
                             println!("Voice successfully set as '{}'.", s.value());
                         }
+                    },
+                    Err(e) => return Err(e)
+                }
+            },
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_AUTO_REMOTE) {
+            Ok(s) => {
+                let ar: bool = s.value().eq_ignore_ascii_case("true");
+                output.auto_remote = ar;
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_AUTO_REMOTE),
+                    format!("{}", defaults::DEFAULT_AUTO_REMOTE),
+                )) {
+                    Ok(s) => {
+                        let ar: bool = s.value().parse().unwrap();
+                        output.auto_remote = ar;
+                        println!("Auto remote successfully set to '{}'.", s.value());
                     },
                     Err(e) => return Err(e)
                 }
