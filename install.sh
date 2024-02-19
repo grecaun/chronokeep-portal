@@ -64,9 +64,14 @@ export USER=$(whoami)
 if ! [[ -e ${PORTAL_DEST} ]]; then
     echo "---------- Creating portal directory. ----------"
     echo "------------------------------------------------"
-    sudo mkdir /portal/
+    sudo mkdir ${PORTAL_DEST}
 fi;
-sudo chown $USER:root /portal/
+if ![[ -e ${PORTAL_DEST}logs/ ]]; then
+    echo "----------- Creating logs directory. -----------"
+    echo "------------------------------------------------"
+    sudo mkdir ${PORTAL_DEST}logs/
+fi;
+sudo chown -R $USER:root ${PORTAL_DEST}
 if ! [[ -e ${PORTAL_DEST}run.sh ]]; then
     echo "--------- Creating portal run script. ----------"
     echo "------------------------------------------------"
@@ -74,7 +79,9 @@ if ! [[ -e ${PORTAL_DEST}run.sh ]]; then
     echo | sudo tee -a ${PORTAL_DEST}run.sh
     echo "export PORTAL_UPDATE_SCRIPT=\"${PORTAL_DEST}update.sh\"" | sudo tee -a ${PORTAL_DEST}run.sh
     echo "export PORTAL_DATABASE_PATH=\"${PORTAL_DEST}chronokeep-portal.sqlite\"" | sudo tee -a ${PORTAL_DEST}run.sh
-    echo "${PORTAL_DEST}chronokeep-portal >> ${PORTAL_DEST}portal.log 2>> ${PORTAL_DEST}portal.log" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "now=`date +\"%Y-%m-%d\"`"
+    echo "${PORTAL_DEST}chronokeep-portal | ts '[%Y-%m-%d %H:%M:%S]' >> ${PORTAL_DEST}logs/\${now}-portal.log 2>&1" | sudo tee -a ${PORTAL_DEST}run.sh
     sudo chown $USER:root ${PORTAL_DEST}run.sh
     sudo chmod +x ${PORTAL_DEST}run.sh
 fi;
