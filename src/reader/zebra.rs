@@ -815,11 +815,11 @@ fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize
 }
 
 fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<TagData>, &'static str> {
-    let bits: u32 = ((buf[start_ix] as u32) << 24) +
+    let mut bits: u32 = ((buf[start_ix] as u32) << 24) +
                     ((buf[start_ix+1] as u32) << 16) +
                     ((buf[start_ix+2] as u32) << 8) +
                     (buf[start_ix+3] as u32);
-    let param_info = match llrp::bit_masks::get_param_type(&bits) {
+    let mut param_info = match llrp::bit_masks::get_param_type(&bits) {
         Ok(info) => info,
         Err(_) => return Err("unable to get parameter info"),
     };
@@ -841,18 +841,19 @@ fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> 
     };
     let mut param_ix = start_ix + 4;
     while param_ix < *max_ix {
-        let tv_type = (buf[param_ix] & 0x7F) as u16;
-        match tv_type {
+        bits = ((buf[param_ix] as u32) << 24) +
+               ((buf[param_ix+1] as u32) << 16) +
+               ((buf[param_ix+2] as u32) << 8) +
+                (buf[param_ix+3] as u32);
+        param_info = match llrp::bit_masks::get_param_type(&bits) {
+            Ok(info) => info,
+            Err(_) => return Err("unable to get parameter info"),
+        };
+        match param_info.kind {
             // don't need these next three
-            parameter_types::RO_SPEC_ID => {
-                param_ix = param_ix + 5;
-            },
-            parameter_types::C1G2_PC => {
-                param_ix = param_ix + 3;
-            },
-            parameter_types::C1G2_CRC => {
-                param_ix = param_ix + 3;
-            },
+            parameter_types::RO_SPEC_ID => { },
+            parameter_types::C1G2_PC => { },
+            parameter_types::C1G2_CRC => { },
             // need these
             parameter_types::EPC_96 => {
                 data.tag = ((buf[param_ix+1] as u128) << 88) +
@@ -867,16 +868,13 @@ fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> 
                         ((buf[param_ix+10] as u128) << 16) +
                         ((buf[param_ix+11] as u128) << 8) +
                         (buf[param_ix+12] as u128);
-                param_ix = param_ix + 13;
             },
             parameter_types::ANTENNA_ID => {
                 data.antenna = ((buf[param_ix+1] as u16) << 8) +
                             (buf[param_ix+2] as u16);
-                param_ix = param_ix + 3;
             },
             parameter_types:: PEAK_RSSI => {
                 data.rssi = buf[param_ix+1] as i8;
-                param_ix = param_ix + 2;
             },
             parameter_types::FIRST_SEEN_TIMESTAMP_UTC => {
                 data.first_seen = ((buf[param_ix+1] as u128) << 56) +
@@ -887,7 +885,6 @@ fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> 
                                 ((buf[param_ix+6] as u128) << 16) +
                                 ((buf[param_ix+7] as u128) << 8) +
                                 (buf[param_ix+8] as u128);
-                param_ix = param_ix + 9;
             },
             parameter_types::LAST_SEEN_TIMESTAMP_UTC => {
                 data.last_seen = ((buf[param_ix+1] as u64) << 56) +
@@ -898,12 +895,12 @@ fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> 
                                 ((buf[param_ix+6] as u64) << 16) +
                                 ((buf[param_ix+7] as u64) << 8) +
                                 (buf[param_ix+8] as u64);
-                param_ix = param_ix + 9;
             },
             _ => {
                 println!("Unknown value found.")
             }
         }
+        param_ix += param_info.length as usize;
     }
     Ok(Some(data))
 }
