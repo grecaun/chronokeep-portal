@@ -124,9 +124,9 @@ impl Uploader {
                                 found = true;
                                 match sq.get_not_uploaded_reads() {
                                     Ok(reads) => {
-                                        println!("Attempting to upload {} reads.", reads.len());
                                         // only upload in chunks of 50
                                         if reads.len() > 50 {
+                                            println!("Attempting to upload {} reads.", reads.len());
                                             // get the total number of full 50 count loops to do
                                             let num_loops = reads.len() / 50;
                                             let mut loop_counter = 0;
@@ -212,6 +212,7 @@ impl Uploader {
                                                 }
                                             }
                                         } else if reads.len() > 0 {
+                                            println!("Attempting to upload {} reads.", reads.len());
                                             match socket::upload_reads(&http_client, &api, &reads) {
                                                 Ok(count) => {
                                                     // if we uploaded the correct
