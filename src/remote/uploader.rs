@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Mutex}, thread, time::Duration, net::TcpStream};
+use std::{net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
 
 use serde::Serialize;
 
@@ -78,7 +78,21 @@ impl Uploader {
         if let Ok(mut ka) = self.local_keepalive.lock() {
             *ka = true;
         }
-        let http_client = reqwest::blocking::Client::new();
+        let http_client: reqwest::blocking::Client;
+        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30)).build() {
+            Ok(client) => {
+                http_client = client;
+            },
+            Err(_) => {
+                if let Ok(mut r) = self.status.lock() {
+                    *r = Status::Stopped;
+                    // let everyone know we're stopped
+                    self.update_control_socks();
+                }
+                println!("Unable to get our http client. Auto upload terminating.");
+                return;
+            },
+        }
         // work loop
         loop {
             // exit our loop and terminate if local keep alive is done
@@ -109,6 +123,7 @@ impl Uploader {
                                 found = true;
                                 match sq.get_not_uploaded_reads() {
                                     Ok(reads) => {
+                                        println!("Attempting to upload {} reads.", reads.len());
                                         // only upload in chunks of 50
                                         if reads.len() > 50 {
                                             // get the total number of full 50 count loops to do
@@ -146,7 +161,7 @@ impl Uploader {
                                                                 }
                                                             }
                                                         } else {
-                                                            println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, reads.len());
+                                                            println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, 50);
                                                         }
                                                     },
                                                     Err(e) => {
@@ -188,7 +203,7 @@ impl Uploader {
                                                             }
                                                         }
                                                     } else {
-                                                        println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, reads.len());
+                                                        println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, amt);
                                                     }
                                                 },
                                                 Err(e) => {

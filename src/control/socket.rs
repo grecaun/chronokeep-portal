@@ -1349,7 +1349,8 @@ fn handle_stream(
                                     if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
                                     found = true;
                                     println!("Uploading reads to {}", api.nickname());
-                                        let reads = match sq.get_not_uploaded_reads() {
+                                        // this request will upload all reads regardless of whether or not they've been uploaded previously
+                                        let reads = match sq.get_all_reads() {
                                             Ok(it) => it,
                                             Err(e) => {
                                                 println!("Error geting reads to upload. {e}");
@@ -1447,7 +1448,7 @@ fn handle_stream(
                                                             }
                                                         }
                                                     } else {
-                                                        println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, reads.len());
+                                                        println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, amt);
                                                         no_error = no_error && write_error(&stream, errors::Errors::ServerError { message: format!("{} uploaded, expected to upload {}", count, amt) });
                                                     }
                                                 },

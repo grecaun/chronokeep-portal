@@ -22,9 +22,7 @@ pub struct Read {
     identifier: String,
     seconds: u64,
     milliseconds: u32,
-    #[serde(skip)]
     reader_seconds: u64,
-    #[serde(skip)]
     reader_milliseconds: u32,
     antenna: u32,
     reader: String,
