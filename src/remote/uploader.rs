@@ -79,7 +79,8 @@ impl Uploader {
             *ka = true;
         }
         let http_client: reqwest::blocking::Client;
-        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30)).build() {
+        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30))
+                                    .connect_timeout(Duration::from_secs(30)).build() {
             Ok(client) => {
                 http_client = client;
             },

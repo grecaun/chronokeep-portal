@@ -373,7 +373,9 @@ fn handle_stream(
     let mut buffer = String::new();
     let mut no_error = true;
     let mut last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30)).build().unwrap_or(reqwest::blocking::Client::new());
+    let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30))
+                                .connect_timeout(Duration::from_secs(30)).build()
+                                .unwrap_or(reqwest::blocking::Client::new());
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
