@@ -60,6 +60,12 @@ if [[ $? != 0 ]]; then
     echo "------------------------------------------------"
     sudo apt install alsa-utils -y
 fi;
+echo | ts > /dev/null 2>&1
+if [[ $? != 0 ]]; then
+    echo "------------- Installing moreutils -------------"
+    echo "------------------------------------------------"
+    sudo apt install moreutils -y
+fi;
 export USER=$(whoami)
 if ! [[ -e ${PORTAL_DEST} ]]; then
     echo "---------- Creating portal directory. ----------"
