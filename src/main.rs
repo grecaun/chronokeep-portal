@@ -100,6 +100,7 @@ fn main() {
     println!("Control values retrieved from database.");
     if let Ok(control) = control.lock() {
         println!("Portal is named '{}'.", control.name);
+        println!("Portal version is '{}'", env!("CARGO_PKG_VERSION"));
         println!("Sightings will be ignored if received within {}", util::pretty_time(&u64::from(control.sighting_period)));
         println!("Play sound value set to {}.", control.play_sound);
     }

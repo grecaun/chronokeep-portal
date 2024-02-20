@@ -2165,7 +2165,8 @@ fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_re
         settings: settings.to_vec(),
         readers: list,
         apis: apis.to_vec(),
-        auto_upload: status
+        auto_upload: status,
+        portal_version: env!("CARGO_PKG_VERSION")
     }) {
         Ok(_) => true,
         Err(e) => {
@@ -2388,6 +2389,7 @@ fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, si
         readers: list,
         updatable: updatable,
         auto_upload: uploader.status(),
+        portal_version: env!("CARGO_PKG_VERSION"),
     }) {
         Ok(_) => true,
         Err(e) => {

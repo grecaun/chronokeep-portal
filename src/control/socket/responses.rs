@@ -25,6 +25,7 @@ pub enum Responses {
         readers: Vec<Reader>,
         apis: Vec<api::Api>,
         auto_upload: uploader::Status,
+        portal_version: &'static str,
     },
     ApiList {
         apis: Vec<api::Api>,
@@ -63,6 +64,7 @@ pub enum Responses {
         readers: Vec<Reader>,
         updatable: bool,
         auto_upload: uploader::Status,
+        portal_version: &'static str,
     },
     Keepalive,
     Disconnect,
