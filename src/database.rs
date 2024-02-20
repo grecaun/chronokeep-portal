@@ -1,4 +1,4 @@
-use crate::objects::{setting, participant, read, sighting};
+use crate::objects::{bibchip, participant, read, setting, sighting};
 use crate::network::api;
 use crate::reader;
 use std::fmt;
@@ -65,6 +65,11 @@ pub trait Database {
     fn delete_participants(&self) -> Result<usize, DBError>;
     fn delete_participant(&self, bib: &str) -> Result<usize, DBError>;
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError>;
+    // BibChip information
+    fn add_bibchips(&mut self, bibchips: &Vec<bibchip::BibChip>) -> Result<usize, DBError>;
+    fn delete_all_bibchips(&self) -> Result<usize, DBError>;
+    fn delete_bibchips(&self, bib: &str) -> Result<usize, DBError>;
+    fn get_bibchips(&self) -> Result<Vec<bibchip::BibChip>, DBError>;
     // Sighting information
     fn save_sightings(&mut self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError>;
     fn get_sightings(&self, start: i64, end: i64) -> Result<Vec<sighting::Sighting>, DBError>;

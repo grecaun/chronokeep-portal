@@ -5,6 +5,7 @@ use super::SQLite;
 use crate::database::DBError;
 use crate::database::Database;
 use crate::network::api;
+use crate::objects::bibchip;
 use crate::objects::participant;
 use crate::objects::read;
 use crate::objects::setting;
@@ -996,9 +997,17 @@ fn test_update_reads_status() {
     finalize_tests(unique_path);
 }
 
-fn make_participants() -> Vec<participant::Participant> {
-    let mut output: Vec<participant::Participant> = Vec::new();
-    output.push(participant::Participant::new(
+struct PartsWithBibs {
+    participants: Vec<participant::Participant>,
+    bibchips: Vec<bibchip::BibChip>,
+}
+
+fn make_participants() -> PartsWithBibs {
+    let mut output = PartsWithBibs {
+        participants: Vec::new(),
+        bibchips: Vec::new(),
+    };
+    let mut part = participant::Participant::new(
         0,
         String::from("1005"),
         String::from(""),
@@ -1007,10 +1016,10 @@ fn make_participants() -> Vec<participant::Participant> {
         String::from("F"),
         String::from("0-110"),
         String::from("50k"),
-        String::from("1005"),
-        true)
-    );
-    output.push(participant::Participant::new(
+        true);
+    output.participants.push(part.clone());
+    output.bibchips.push(bibchip::BibChip::new(String::from(part.bib()), String::from(part.bib())));
+    part = participant::Participant::new(
         0,
         String::from("1006"),
         String::from("John"),
@@ -1019,10 +1028,10 @@ fn make_participants() -> Vec<participant::Participant> {
         String::from("M"),
         String::from("0-110"),
         String::from("50k"),
-        String::from("1006"),
-        false)
-    );
-    output.push(participant::Participant::new(
+        false);
+    output.participants.push(part.clone());
+    output.bibchips.push(bibchip::BibChip::new(String::from(part.bib()), String::from(part.bib())));
+    part = participant::Participant::new(
         0,
         String::from("1007"),
         String::from("Jenny"),
@@ -1031,10 +1040,10 @@ fn make_participants() -> Vec<participant::Participant> {
         String::from("F"),
         String::from("0-110"),
         String::from("50k"),
-        String::from("1007"),
-        false)
-    );
-    output.push(participant::Participant::new(
+        false);
+    output.participants.push(part.clone());
+    output.bibchips.push(bibchip::BibChip::new(String::from(part.bib()), String::from(part.bib())));
+    part = participant::Participant::new(
         0,
         String::from("1008"),
         String::from("Jon"),
@@ -1043,10 +1052,10 @@ fn make_participants() -> Vec<participant::Participant> {
         String::from("NB"),
         String::from("0-110"),
         String::from("50k"),
-        String::from("1008"),
-        false)
-    );
-    output.push(participant::Participant::new(
+        false);
+    output.participants.push(part.clone());
+    output.bibchips.push(bibchip::BibChip::new(String::from(part.bib()), String::from(part.bib())));
+    part = participant::Participant::new(
         0,
         String::from("1009"),
         String::from("George"),
@@ -1055,16 +1064,16 @@ fn make_participants() -> Vec<participant::Participant> {
         String::from("U"),
         String::from("0-110"),
         String::from("50k"),
-        String::from("1009"),
-        false)
-    );
+        false);
+    output.participants.push(part.clone());
+    output.bibchips.push(bibchip::BibChip::new(String::from(part.bib()), String::from(part.bib())));
     output
 }
 
 #[test]
 fn test_add_participants() {
     let unique_path = "./test_add_participants.sqlite";
-    let participants = make_participants();
+    let participants = make_participants().participants;
     let mut sqlite = setup_tests(unique_path);
     let result = sqlite.add_participants(&participants);
     assert!(result.is_ok());
@@ -1090,7 +1099,6 @@ fn test_add_participants() {
         String::from("M"),
         String::from("0-110"),
         String::from("50k"),
-        String::from("1006"),
         false
     ));
     let result = sqlite.add_participants(&new_part);
@@ -1098,7 +1106,7 @@ fn test_add_participants() {
     assert_eq!(1, result.unwrap());
     let parts = sqlite.get_participants().unwrap();
     // this should have replaced two entries, bib 1009 and chip 1006
-    assert_eq!(participants.len()-1, parts.len());
+    assert_eq!(participants.len(), parts.len());
     let mut found = false;
     let np = new_part.first().unwrap();
     for p in parts {
@@ -1115,7 +1123,7 @@ fn test_add_participants() {
 #[test]
 fn test_delete_participants() {
     let unique_path = "./test_delete_participants.sqlite";
-    let participants = make_participants();
+    let participants = make_participants().participants;
     let mut sqlite = setup_tests(unique_path);
     _ = sqlite.add_participants(&participants);
     let parts = sqlite.get_participants().unwrap();
@@ -1133,7 +1141,7 @@ fn test_delete_participants() {
 #[test]
 fn test_delete_participant() {
     let unique_path = "./test_delete_participant.sqlite";
-    let participants = make_participants();
+    let participants = make_participants().participants;
     let mut sqlite = setup_tests(unique_path);
     _ = sqlite.add_participants(&participants);
     let parts = sqlite.get_participants().unwrap();
@@ -1162,18 +1170,23 @@ fn test_delete_participant() {
 
 fn make_sightings(sqlite:&mut SQLite) -> Vec<sighting::Sighting> {
     // store all participants in the database
-    let parts = make_participants();
-    _ = sqlite.add_participants(&parts);
+    let partbibchips = make_participants();
+    _ = sqlite.add_participants(&partbibchips.participants);
+    let mut chip_dict = HashMap::<String, String>::new();
+    for bc in partbibchips.bibchips {
+        chip_dict.insert(String::from(bc.bib()), String::from(bc.chip()));
+    }
     // get all the participants so id's are up to date
     let parts = sqlite.get_participants().unwrap();
     // we'll make 5 reads per person for this test
     let mut reads: Vec<read::Read> = Vec::new();
     for p in parts.iter() {
         let vals: [u32; 5] = [0, 1, 2, 3, 4];
+        assert!(chip_dict.contains_key(p.bib()));
         for i in vals {
             reads.push(read::Read::new(
                 0,
-                String::from(p.chip()),
+                String::from(chip_dict[p.bib()].clone()),
                 u64::from(1000 + (i * 30*60)),
                 10 * i,
                 u64::from(1000 + (i * 30*60)) + 10,
@@ -1199,7 +1212,8 @@ fn make_sightings(sqlite:&mut SQLite) -> Vec<sighting::Sighting> {
     }
     let mut output: Vec<sighting::Sighting> = Vec::new();
     for part in parts.iter() {
-        if let Some(preads) = part_reads.get(part.chip()) {
+        let chip = chip_dict[part.bib()].clone();
+        if let Some(preads) = part_reads.get(&*chip) {
             for r in preads {
                 output.push(sighting::Sighting{
                     participant: participant::Participant::new(
@@ -1211,7 +1225,6 @@ fn make_sightings(sqlite:&mut SQLite) -> Vec<sighting::Sighting> {
                         String::from(part.gender()),
                         String::from(part.age_group()),
                         String::from(part.distance()),
-                        String::from(part.chip()),
                         part.anonymous()
                     ),
                     read: read::Read::new(
@@ -1254,7 +1267,6 @@ fn test_save_sightings() {
             String::from("M"),
             String::from("0-110"),
             String::from("Half Marathon"),
-            String::from("202201001"),
             false
         ),
         read: read::Read::new(

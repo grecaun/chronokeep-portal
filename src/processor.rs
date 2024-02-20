@@ -1,6 +1,6 @@
 use std::{sync::{Arc, Mutex, Condvar}, net::TcpStream, collections::HashMap, str::FromStr};
 
-use crate::{control::{socket::{MAX_CONNECTED, self}, SETTING_SIGHTING_PERIOD}, database::{sqlite, Database}, objects::{read::{self}, participant, sighting}, defaults::DEFAULT_SIGHTING_PERIOD};
+use crate::{control::{socket::{self, MAX_CONNECTED}, SETTING_SIGHTING_PERIOD}, database::{sqlite, Database}, defaults::DEFAULT_SIGHTING_PERIOD, objects::{bibchip, participant, read, sighting}};
 
 pub struct SightingsProcessor {
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
@@ -85,6 +85,7 @@ impl SightingsProcessor {
                     loop {
                         let reads: Vec<read::Read>;
                         let parts: Vec<participant::Participant>;
+                        let bibchips: Vec<bibchip::BibChip>;
                         if let Ok(sq) = self.sqlite.lock() {
                             reads = match sq.get_useful_reads() {
                                 Ok(r) => r,
@@ -100,6 +101,13 @@ impl SightingsProcessor {
                                     break 'main;
                                 }
                             };
+                            bibchips = match sq.get_bibchips() {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    println!("error getting bibchips: {e}");
+                                    break 'main;
+                                }
+                            };
                         } else {
                             println!("error getting sqlite database lock");
                             break 'main;
@@ -111,10 +119,15 @@ impl SightingsProcessor {
                         let mut bib_chip_map: HashMap<String, String> = HashMap::new();
                         // make a map of participants based upon their chip
                         let mut part_map: HashMap<String, participant::Participant> = HashMap::new();
+                        // update the bibchip map separately from the participants map
+                        for bc in bibchips {
+                            bib_chip_map.insert(String::from(bc.bib()), String::from(bc.chip()));
+                        }
                         for part in parts {
-                            bib_chip_map.insert(String::from(part.bib()), String::from(part.chip()));
-                            let chip = String::from(part.chip());
-                            part_map.insert(chip, part);
+                            // verify we actually have a bib -> chip association
+                            if !bib_chip_map.contains_key(part.bib()) {
+                                part_map.insert(bib_chip_map[part.bib()].clone(), part);
+                            }
                         }
                         for read in reads {
                             if read.status() == read::READ_STATUS_UNUSED {
@@ -173,6 +186,7 @@ impl SightingsProcessor {
                         // these vecs need to be added to the database
                         let mut upd_reads: Vec<read::Read> = Vec::new();
                         let mut upd_parts: Vec<participant::Participant> = Vec::new();
+                        let mut upd_bibchips: Vec<bibchip::BibChip> = Vec::new();
                         let mut sightings: Vec<sighting::Sighting> = Vec::new();
                         for mut read in unused {
                             // if the identifier type is a bib we need to get the chip from our bibChipMap by
@@ -200,9 +214,9 @@ impl SightingsProcessor {
                                     String::from("U"),
                                     String::from("0-110"),
                                     String::from("Unknown"),
-                                    chip.clone(),
                                     false
                                 );
+                                upd_bibchips.push(bibchip::BibChip::new(String::from(&chip), String::from(&chip)));
                                 upd_parts.push(new_part.clone());
                                 part_map.insert(chip.clone(), new_part);
                             }
@@ -255,6 +269,13 @@ impl SightingsProcessor {
                                         break 'main;
                                     }
                                 }
+                                match sq.add_bibchips(&upd_bibchips) {
+                                    Ok(_) => (),
+                                    Err(e) => {
+                                        println!("error adding bibchips: {e}");
+                                        break 'main;
+                                    }
+                                }
                                 let participants = match sq.get_participants() {
                                     Ok(p) => p,
                                     Err(e) => {
@@ -262,10 +283,23 @@ impl SightingsProcessor {
                                         break 'main;
                                     }
                                 };
+                                let bibchips = match sq.get_bibchips() {
+                                    Ok(b) => b,
+                                    Err(e) => {
+                                        println!("error getting bibchips: {e}");
+                                        break 'main;
+                                    }
+                                };
+                                // update the bib_chip_map
+                                for bc in bibchips {
+                                    bib_chip_map.insert(String::from(bc.bib()), String::from(bc.chip()));
+                                }
                                 // update part map so we have id's for any participants we added
                                 for part in participants {
-                                    let chip = String::from(part.chip());
-                                    part_map.insert(chip, part);
+                                    // verify we actually have a bib -> chip association
+                                    if !bib_chip_map.contains_key(part.bib()) {
+                                        part_map.insert(bib_chip_map[part.bib()].clone(), part);
+                                    }
                                 }
                                 // update all the sightings
                                 let tmp_sightings = Vec::from(sightings);

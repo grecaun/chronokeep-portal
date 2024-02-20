@@ -11,7 +11,6 @@ pub struct Participant {
     gender: String,
     age_group: String,
     distance: String,
-    chip: String,
     anonymous: bool,
 }
 
@@ -25,7 +24,6 @@ impl Participant {
         gender: String,
         age_group: String,
         distance: String,
-        chip: String,
         anonymous: bool,
     ) -> Participant {
         Participant {
@@ -37,7 +35,6 @@ impl Participant {
             gender,
             age_group,
             distance,
-            chip,
             anonymous,
         }
     }
@@ -50,7 +47,6 @@ impl Participant {
         self.gender == other.gender &&
         self.age_group == other.age_group &&
         self.distance == other.distance &&
-        self.chip == other.chip &&
         self.anonymous == other.anonymous
     }
 
@@ -84,10 +80,6 @@ impl Participant {
 
     pub fn distance(&self) -> &str {
         &self.distance
-    }
-
-    pub fn chip(&self) -> &str {
-        &self.chip
     }
 
     pub fn anonymous(&self) -> bool {

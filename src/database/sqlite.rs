@@ -1,4 +1,4 @@
-use crate::objects::{setting, participant, read, sighting};
+use crate::objects::{bibchip, setting, participant, read, sighting};
 use crate::network::api;
 use crate::database::DBError;
 use crate::reader;
@@ -125,10 +125,13 @@ impl SQLite {
                     gender VARCHAR(10) NOT NULL DEFAULT 'u',
                     age_group VARCHAR(100) NOT NULL,
                     distance VARCHAR(75) NOT NULL,
-                    part_chip VARCHAR(100) NOT NULL UNIQUE,
                     anonymous SMALLINT NOT NULL DEFAULT 0,
-                    UNIQUE (bib) ON CONFLICT REPLACE,
-                    UNIQUE (part_chip) ON CONFLICT REPLACE
+                    UNIQUE (bib) ON CONFLICT REPLACE
+                );",
+                "CREATE TABLE IF NOT EXISTS bibchip (
+                    chip VARCHAR(100),
+                    bib VARCHAR(50),
+                    UNIQUE (bib, chip) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS readers (
                     reader_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -706,9 +709,8 @@ impl super::Database for SQLite {
                         gender,
                         age_group,
                         distance,
-                        part_chip,
                         anonymous
-                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
                     (
                         p.bib(),
                         p.first(),
@@ -717,7 +719,6 @@ impl super::Database for SQLite {
                         p.gender(),
                         p.age_group(),
                         p.distance(),
-                        p.chip(),
                         p.anonymous()
                     )
                 ) {
@@ -733,6 +734,13 @@ impl super::Database for SQLite {
     }
 
     fn delete_participants(&self) -> Result<usize, DBError> {
+        match self.conn.execute(
+            "DELETE FROM bibchip;", 
+            []
+        ) {
+            Ok(_) => {},
+            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+        }
         match self.delete_sightings() {
             Ok(_) => (),
             Err(e) => return Err(e)
@@ -748,6 +756,13 @@ impl super::Database for SQLite {
 
     fn delete_participant(&self, bib: &str) -> Result<usize, DBError> {
         match self.conn.execute(
+            "DELETE FROM bibchip WHERE bib=?1;", 
+            [bib]
+        ) {
+            Ok(_) => {},
+            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+        }
+        match self.conn.execute(
             "DELETE FROM participants WHERE bib=?1;",
             [bib]
         ) {
@@ -757,7 +772,7 @@ impl super::Database for SQLite {
     }
 
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT part_id, bib, first, last, age, gender, age_group, distance, part_chip, anonymous FROM participants;") {
+        let mut stmt = match self.conn.prepare("SELECT part_id, bib, first, last, age, gender, age_group, distance, anonymous FROM participants;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -774,7 +789,6 @@ impl super::Database for SQLite {
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
-                    row.get(9)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -792,6 +806,81 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
+    // BibChips
+    fn add_bibchips(&mut self, bibchips: &Vec<bibchip::BibChip>) -> Result<usize, DBError> {
+        let mut count = 0;
+        if let Ok(tx) = self.conn.transaction() {
+            for b in bibchips {
+                match tx.execute(
+                    "INSERT INTO bibchip (
+                        bib,
+                        chip
+                    ) VALUES (?1, ?2)",
+                    (
+                        b.bib(),
+                        b.chip()
+                    )
+                ) {
+                    Ok(_) => count = count + 1,
+                    Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
+                }
+            }
+            if let Err(e) = tx.commit() {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+        }
+        Ok(count)
+    }
+
+    fn delete_all_bibchips(&self) -> Result<usize, DBError> {
+        match self.conn.execute(
+            "DELETE FROM bibchip;", 
+            []
+        ) {
+            Ok(num) => return Ok(num),
+            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+        }
+    }
+
+    fn delete_bibchips(&self, bib: &str) -> Result<usize, DBError> {
+        match self.conn.execute(
+            "DELETE FROM bibchip WHERE bib=?1;", 
+            [bib]
+        ) {
+            Ok(num) => return Ok(num),
+            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
+        }
+    }
+
+    fn get_bibchips(&self) -> Result<Vec<bibchip::BibChip>, DBError> {
+        let mut stmt = match self.conn.prepare("SELECT bib, chip FROM bibchip;") {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
+        };
+        let results = match stmt.query_map(
+            [],
+            |row| {
+                Ok(bibchip::BibChip::new(
+                    row.get(0)?,
+                    row.get(1)?,
+                ))
+            }) {
+                Ok(b) => b,
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            };
+        let mut output: Vec<bibchip::BibChip> = Vec::new();
+        for row in results {
+            match row {
+                Ok(b) => {
+                    output.push(b);
+                },
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            }
+        }
+        return Ok(output)
+    }
+
+    // Sightings
     fn save_sightings(&mut self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError> {
         if let Ok(tx) = self.conn.transaction() {
             let mut count = 0;
@@ -826,7 +915,7 @@ impl super::Database for SQLite {
                 gender,
                 age_group,
                 distance,
-                part_chip,
+                chip,
                 anonymous,
                 chip_id,
                 seconds,
@@ -857,8 +946,7 @@ impl super::Database for SQLite {
                         row.get(5)?,
                         row.get(6)?,
                         row.get(7)?,
-                        row.get(8)?,
-                        row.get(9)?,
+                        row.get(9)?
                     ),
                     read: read::Read::new(
                         row.get(10)?,
@@ -900,7 +988,7 @@ impl super::Database for SQLite {
                 gender,
                 age_group,
                 distance,
-                part_chip,
+                chip,
                 anonymous,
                 chip_id,
                 seconds,
@@ -929,7 +1017,6 @@ impl super::Database for SQLite {
                         row.get(5)?,
                         row.get(6)?,
                         row.get(7)?,
-                        row.get(8)?,
                         row.get(9)?,
                     ),
                     read: read::Read::new(
