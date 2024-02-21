@@ -13,7 +13,7 @@ mod tests;
 const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 
 const DATABASE_VERSION_SETTING: &str = "PORTAL_DATABASE_VERSION";
-const DATABASE_VERSION: u16 = 2;
+const DATABASE_VERSION: u16 = 3;
 
 const DATABASE_PATH_ENV: &str = "PORTAL_DATABASE_PATH";
 
@@ -62,15 +62,14 @@ impl SQLite {
 
     fn update(&mut self, old_version: u16, new_version: u16) -> Result<(), DBError> {
         if old_version < new_version {
-            match old_version {
-                1 => {
-                    if let Err(e) = self.update_from_v1() {
-                        return Err(e)
-                    }
-                    return Ok(())
+            if old_version < 2 {
+                if let Err(e) = self.update_to_v2() {
+                    return Err(e)
                 }
-                _ => {
-                    return Err(DBError::InvalidVersionError(String::from("invalid version specified for upgrade")))
+            }
+            if old_version < 3 {
+                if let Err(e) = self.update_to_v3() {
+                    return Err(e)
                 }
             }
         } else if new_version < old_version {
@@ -79,7 +78,36 @@ impl SQLite {
         return Ok(())
     }
 
-    fn update_from_v1(&mut self) -> Result<(), DBError> {
+    fn update_to_v3(&mut self) -> Result<(), DBError> {
+        if let Ok(tx) = self.conn.transaction() {
+            let updates = [
+                "CREATE TABLE IF NOT EXISTS bibchip (
+                    chip VARCHAR(100),
+                    bib VARCHAR(50),
+                    UNIQUE (bib, chip) ON CONFLICT REPLACE
+                );",
+                "ALTER TABLE participants DROP COLUMN part_chip;"
+            ];
+            for table in updates {
+                if let Err(e) = tx.execute(table, ()) {
+                    return Err(DBError::DataInsertionError(e.to_string()))
+                }
+            }
+            if let Err(e) = tx.execute(
+                "INSERT INTO settings (setting, value) VALUES (?1, ?2);",
+                (DATABASE_VERSION_SETTING, "3")
+            ) {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            if let Err(e) = tx.commit() {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            return Ok(())
+        }
+        return Err(DBError::ConnectionError(String::from("unable to start transaction")))
+    }
+
+    fn update_to_v2(&mut self) -> Result<(), DBError> {
         if let Ok(tx) = self.conn.transaction() {
             let updates = [
                 "ALTER TABLE chip_reads ADD COLUMN reader_seconds BIGINT NOT NULL DEFAULT 0;",

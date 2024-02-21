@@ -1168,6 +1168,118 @@ fn test_delete_participant() {
     finalize_tests(unique_path);
 }
 
+#[test]
+fn test_add_bibchips() {
+    let unique_path = "./test_add_bibchips.sqlite";
+    let bibchips = make_participants().bibchips;
+    let mut sqlite = setup_tests(unique_path);
+    let result = sqlite.add_bibchips(&bibchips);
+    assert!(result.is_ok());
+    assert_eq!(bibchips.len(), result.unwrap());
+    let bcs = sqlite.get_bibchips().unwrap();
+    for outer in bibchips.iter() {
+        let mut found = false;
+        for inner in bcs.iter() {
+            if outer.equals(&inner) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found)
+    }
+    // test chip collision
+    let new_bc = vec!(bibchip::BibChip::new(
+        String::from("100"),
+        String::from("1005")
+    ));
+    let result = sqlite.add_bibchips(&new_bc);
+    assert!(result.is_ok());
+    assert_eq!(1, result.unwrap());
+    let bcs = sqlite.get_bibchips().unwrap();
+    let mut found = false;
+    let nb = new_bc.first().unwrap();
+    for b in bcs {
+        if b.equals(&nb) {
+            found = true;
+            break;
+        }
+    }
+    assert!(found);
+    // test multiple chips per bib
+    let new_bc = vec!(bibchip::BibChip::new(
+        String::from("1005"),
+        String::from("1000000005")
+    ));
+    let result = sqlite.add_bibchips(&new_bc);
+    assert!(result.is_ok());
+    assert_eq!(1, result.unwrap());
+    let bcs = sqlite.get_bibchips().unwrap();
+    let mut count = 0;
+    let nb = new_bc.first().unwrap();
+    for b in bcs {
+        if b.bib() == nb.bib() {
+            count += 1;
+        }
+    }
+    assert_eq!(2, count);
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_delete_all_bibchips() {
+    let unique_path = "./test_delete_all_bibchips.sqlite";
+    let bibchips = make_participants().bibchips;
+    let mut sqlite = setup_tests(unique_path);
+    let _ = sqlite.add_bibchips(&bibchips);
+    let result = sqlite.delete_all_bibchips();
+    assert!(result.is_ok());
+    assert_eq!(bibchips.len(), result.unwrap());
+    let bcs = sqlite.get_bibchips().unwrap();
+    assert_eq!(0, bcs.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_delete_bibchips() {
+    let unique_path = "./test_delete_bibchips.sqlite";
+    let bibchips = make_participants().bibchips;
+    let mut sqlite = setup_tests(unique_path);
+    let _ = sqlite.add_bibchips(&bibchips);
+    let result = sqlite.delete_bibchips(bibchips.first().unwrap().bib());
+    assert!(result.is_ok());
+    assert_eq!(1, result.unwrap());
+    let bcs = sqlite.get_bibchips().unwrap();
+    assert_eq!(bibchips.len() - 1, bcs.len());
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
+#[test]
+fn test_get_bibchips() {
+    let unique_path = "./test_get_bibchips.sqlite";
+    let bibchips = make_participants().bibchips;
+    let mut sqlite = setup_tests(unique_path);
+    let _ = sqlite.add_bibchips(&bibchips);
+    let result = sqlite.get_bibchips();
+    assert!(result.is_ok());
+    let bcs = result.unwrap();
+    assert_eq!(bibchips.len(), bcs.len());
+    for outer in bibchips.iter() {
+        let mut found = false;
+        for inner in bcs.iter() {
+            if outer.equals(inner) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found);
+    }
+    drop(sqlite);
+    finalize_tests(unique_path);
+}
+
 fn make_sightings(sqlite:&mut SQLite) -> Vec<sighting::Sighting> {
     // store all participants in the database
     let partbibchips = make_participants();
