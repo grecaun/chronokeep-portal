@@ -129,6 +129,14 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
         println!("Unable to get joiners lock.");
     }
 
+    // Reset reads status on load and re-process sightings.
+    if let Ok(sq) = sqlite.lock() {
+        if let Err(e) = sq.reset_reads_status() {
+            println!("Error trying to reset reads statuses: {e}");
+        };
+    }
+    sight_processor.notify();
+
     // Get all known readers so we can work on them later.
     match sqlite.lock() {
         Ok(sq) => {
