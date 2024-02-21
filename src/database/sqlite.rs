@@ -86,7 +86,22 @@ impl SQLite {
                     bib VARCHAR(50),
                     UNIQUE (bib, chip) ON CONFLICT REPLACE
                 );",
-                "ALTER TABLE participants DROP COLUMN part_chip;"
+                "CREATE TABLE IF NOT EXISTS participants_new (
+                    part_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bib VARCHAR(50) NOT NULL,
+                    first VARCHAR(50) NOT NULL,
+                    last VARCHAR(75) NOT NULL,
+                    age INTEGER NOT NULL DEFAULT 0,
+                    gender VARCHAR(10) NOT NULL DEFAULT 'u',
+                    age_group VARCHAR(100) NOT NULL,
+                    distance VARCHAR(75) NOT NULL,
+                    anonymous SMALLINT NOT NULL DEFAULT 0,
+                    UNIQUE (bib) ON CONFLICT REPLACE
+                );",
+                "INSERT INTO bibchip SELECT bib, part_chip FROM participants;",
+                "INSERT INTO participants_new SELECT part_id, bib, first, last, age, gender, age_group, distance, anonymous FROM participants;",
+                "DROP TABLE participants;",
+                "ALTER TABLE participants_new RENAME TO participants;"
             ];
             for table in updates {
                 if let Err(e) = tx.execute(table, ()) {
