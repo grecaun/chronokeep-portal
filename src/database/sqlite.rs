@@ -82,8 +82,8 @@ impl SQLite {
         if let Ok(tx) = self.conn.transaction() {
             let updates = [
                 "CREATE TABLE IF NOT EXISTS bibchip (
-                    chip VARCHAR(100),
                     bib VARCHAR(50),
+                    chip VARCHAR(100),
                     UNIQUE (bib, chip) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS participants_new (
