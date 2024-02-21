@@ -4,7 +4,7 @@ use chrono::{Utc, Local, TimeZone};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{event::Event, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, uploader::{self, Uploader}}, results, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, uploader::{self, Uploader}}, results, sound_board::Voice};
 
 use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
@@ -1764,9 +1764,25 @@ fn handle_stream(
                 },
                 requests::Request::ParticipantsAdd { participants } => {
                     if let Ok(mut sq) = sqlite.lock() {
-                        match sq.add_participants(&participants) {
-                            Ok(num) => {
-                                no_error = write_success(&stream, num);
+                        let mut parts: Vec<participant::Participant> = Vec::new();
+                        let mut bibchips: Vec<bibchip::BibChip> = Vec::new();
+                        for p in participants {
+                            parts.push(p.get_participant());
+                            bibchips.push(p.get_bibchip());
+                        }
+                        match sq.add_participants(&parts) {
+                            Ok(_) => {
+                                match sq.add_bibchips(&bibchips) {
+                                    Ok(num) => {
+                                        no_error = write_success(&stream, num);
+                                    },
+                                    Err(e) => {
+                                        println!("Error adding bibchips. {e}");
+                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            message: format!("error adding bibchips: {e}")
+                                        });
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error adding participants. {e}");
