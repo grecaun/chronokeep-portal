@@ -125,7 +125,7 @@ impl SightingsProcessor {
                         }
                         for part in parts {
                             // verify we actually have a bib -> chip association
-                            if !bib_chip_map.contains_key(part.bib()) {
+                            if bib_chip_map.contains_key(part.bib()) {
                                 part_map.insert(bib_chip_map[part.bib()].clone(), part);
                             }
                         }
@@ -297,7 +297,7 @@ impl SightingsProcessor {
                                 // update part map so we have id's for any participants we added
                                 for part in participants {
                                     // verify we actually have a bib -> chip association
-                                    if !bib_chip_map.contains_key(part.bib()) {
+                                    if bib_chip_map.contains_key(part.bib()) {
                                         part_map.insert(bib_chip_map[part.bib()].clone(), part);
                                     }
                                 }
