@@ -329,6 +329,13 @@ impl SightingsProcessor {
                                     break 'main;
                                 }
                             }
+                            let bibchips = match sq.get_bibchips() {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    println!("error getting bibchips: {e}");
+                                    break 'main;
+                                }
+                            };
                             // send sightings
                             if let Ok(sockets) = self.control_sockets.lock() {
                                 if let Ok(repeaters) = self.sighting_repeaters.lock() {
@@ -337,7 +344,7 @@ impl SightingsProcessor {
                                             Some(sock) => {
                                                 if repeaters[ix] == true {
                                                     println!("Sending sightings to subscribed socket {ix}.");
-                                                    socket::write_sightings(&sock, &sightings);
+                                                    socket::write_sightings(&sock, &sightings, &bibchips);
                                                 }
                                             },
                                             None => ()

@@ -84,7 +84,8 @@ impl SQLite {
                 "CREATE TABLE IF NOT EXISTS bibchip (
                     bib VARCHAR(50),
                     chip VARCHAR(100),
-                    UNIQUE (bib, chip) ON CONFLICT REPLACE
+                    UNIQUE (bib, chip) ON CONFLICT REPLACE,
+                    UNIQUE (chip) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS participants_new (
                     part_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,7 +175,8 @@ impl SQLite {
                 "CREATE TABLE IF NOT EXISTS bibchip (
                     chip VARCHAR(100),
                     bib VARCHAR(50),
-                    UNIQUE (bib, chip) ON CONFLICT REPLACE
+                    UNIQUE (bib, chip) ON CONFLICT REPLACE,
+                    UNIQUE (chip) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS readers (
                     reader_id INTEGER PRIMARY KEY AUTOINCREMENT,

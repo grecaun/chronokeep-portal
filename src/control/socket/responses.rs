@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{network::api, objects::{event::Event, participant::Participant, read, setting, sighting::Sighting}, reader::MAX_ANTENNAS, remote::uploader};
+use crate::{network::api, objects::{bibchip, event::Event, participant::Participant, read, setting, sighting::Sighting}, reader::MAX_ANTENNAS, remote::uploader};
 
 use super::errors;
 
@@ -45,6 +45,7 @@ pub enum Responses {
     },
     Sightings {
         list: Vec<Sighting>,
+        bib_chips: Vec<bibchip::BibChip>,
     },
     Events {
         events: Vec<Event>,

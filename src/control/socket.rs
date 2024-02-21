@@ -1917,13 +1917,23 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_sightings(start_seconds, end_seconds) {
                             Ok(sightings) => {
-                                no_error = write_sightings(&stream, &sightings)
+                                match sq.get_bibchips() {
+                                    Ok(bibchips) => {
+                                        no_error = write_sightings(&stream, &sightings, &bibchips);
+                                    },
+                                    Err(e) => {
+                                        println!("Error getting bibchips. {e}");
+                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            message: format!("error getting bibchips: {e}")
+                                        });
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error getting sightings. {e}");
                                 no_error = write_error(&stream, errors::Errors::DatabaseError {
                                     message: format!("error getting sightings: {e}")
-                                })
+                                });
                             }
                         }
                     }
@@ -1932,7 +1942,17 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_all_sightings() {
                             Ok(sightings) => {
-                                no_error = write_sightings(&stream, &sightings)
+                                match sq.get_bibchips() {
+                                    Ok(bibchips) => {
+                                        no_error = write_sightings(&stream, &sightings, &bibchips);
+                                    },
+                                    Err(e) => {
+                                        println!("Error getting bibchips. {e}");
+                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            message: format!("error getting bibchips: {e}")
+                                        });
+                                    }
+                                }
                             },
                             Err(e) => {
                                 println!("Error getting sightings. {e}");
@@ -2361,9 +2381,10 @@ pub fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
     output
 }
 
-pub fn write_sightings(stream: &TcpStream, sightings: &Vec<sighting::Sighting>) -> bool {
+pub fn write_sightings(stream: &TcpStream, sightings: &Vec<sighting::Sighting>, bibchips: &Vec<bibchip::BibChip>) -> bool {
     let output = match serde_json::to_writer(stream, &responses::Responses::Sightings {
-        list: sightings.to_vec()
+        list: sightings.to_vec(),
+        bib_chips: bibchips.to_vec()
     }) {
         Ok(_) => true,
         Err(e) => {
