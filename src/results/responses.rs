@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 
-use crate::objects::{event_year, event, participant};
+use crate::{control::socket::requests, objects::{event, event_year}};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GetEventsResponse {
@@ -15,5 +15,5 @@ pub struct GetEventResponse {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GetParticipantsResponse {
-    pub participants: Vec<participant::Participant>
+    pub participants: Vec<requests::RequestParticipant>
 }

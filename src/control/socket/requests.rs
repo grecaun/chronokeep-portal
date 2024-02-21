@@ -125,7 +125,7 @@ pub enum AutoUploadQuery {
     Status,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all="snake_case")]
 pub struct RequestParticipant {
     bib: String,

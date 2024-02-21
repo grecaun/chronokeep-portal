@@ -1672,8 +1672,26 @@ fn handle_stream(
                                                 }
                                             }
                                             // if participant deletion was successful, add new participants
-                                            match sq.add_participants(&new_parts) {
-                                                Ok(_) => { },
+                                            // first translate into participants and bibchips
+                                            let mut parts: Vec<participant::Participant> = Vec::new();
+                                            let mut bibchips: Vec<bibchip::BibChip> = Vec::new();
+                                            for p in &new_parts {
+                                                parts.push(p.get_participant());
+                                                bibchips.push(p.get_bibchip());
+                                            }
+                                            match sq.add_participants(&parts) {
+                                                Ok(_) => {
+                                                    match sq.add_bibchips(&bibchips) {
+                                                        Ok(_) => {},
+                                                        Err(e) => {
+                                                            println!("error adding bibchips: {e}");
+                                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                                message: format!("error adding bibchips: {e}")
+                                                            });
+                                                            break;
+                                                        }
+                                                    }
+                                                },
                                                 Err(e) => {
                                                     println!("error adding participants: {e}");
                                                     no_error = write_error(&stream, errors::Errors::DatabaseError {
@@ -2638,7 +2656,7 @@ fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: Stri
     Ok(output)
 }
 
-fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: String, year: String) -> Result<Vec<participant::Participant>, errors::Errors> {
+fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: String, year: String) -> Result<Vec<requests::RequestParticipant>, errors::Errors> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}participants"))
         .headers(construct_headers(api.token()))
