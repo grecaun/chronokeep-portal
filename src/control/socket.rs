@@ -1006,6 +1006,35 @@ fn handle_stream(
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
                 },
+                requests::Request::Restart => {
+                    if let Ok(mut ka) = keepalive.lock() {
+                        println!("Starting program stop sequence.");
+                        *ka = false;
+                    }
+                    if let Ok(control) = control.lock() {
+                        if control.play_sound {
+                            control.sound_board.play_shutdown(control.volume);
+                        }
+                    }
+                    println!("Sending restart command if on Linux.");
+                    match std::env::consts::OS {
+                        "linux" => {
+                            match std::process::Command::new("sudo").arg("systemctl").arg("restart").arg("portal").spawn() {
+                                Ok(_) => {
+                                    println!("Restart command sent to OS successfully.");
+                                },
+                                Err(e) => {
+                                    println!("Error sending restart command: {e}");
+                                }
+                            }
+                        },
+                        other => {
+                            println!("Restart not supported on this platform ({other})");
+                        }
+                    }
+                    // connect to ensure the spawning thread will exit the accept call
+                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_apis() {
