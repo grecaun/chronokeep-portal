@@ -9,6 +9,7 @@ pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 pub const BUFFER_SIZE: usize = 51200;
+pub const TAG_LIMIT: usize = 3000;
 
 struct ReadData {
     tags: Vec<TagData>,
@@ -159,6 +160,14 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                     }
                     if count % 100 == 0 {
                         println!("Count is at {}", count);
+                    }
+                    if count > TAG_LIMIT {
+                        match send_purge_tags(&mut t_stream, &msg_id) {
+                            Ok(_) => {},
+                            Err(e) => {
+                                println!("Error sending purge tag message. {e}");
+                            }
+                        }
                     }
                     /*
                         End of reading loop
@@ -566,6 +575,22 @@ fn finalize(t_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>, reading: &
         },
         Err(e) => println!("Error closing connection. {e}"),
     }
+}
+
+fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    // purge tags
+    let buf = requests::purge_tags(&4);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
 }
 
 fn send_connect_messages(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
