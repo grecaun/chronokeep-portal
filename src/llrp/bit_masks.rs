@@ -17,17 +17,8 @@ pub struct MsgTypeInfo {
 
 pub fn get_msg_type(buf: &[u8]) -> Result<MsgTypeInfo, &'static str> {
     let bits: u16 = (u16::from(buf[0]) << 8) + u16::from(buf[1]);
-    let mut length: u32 = 0;
-    for i in 0..4 {
-        length = (length << 8) + u32::from(buf[2+i])
-    }
-    let mut id: u32 = 0;
-    for i in 0..4 {
-        id = (id << 8) + u32::from(buf[6+i])
-    }
-    //if (bits & RESERVED) != 0 {
-    //    return Err("invalid reserved field")
-    //}
+    let length: u32 = u32::from_be_bytes([buf[2], buf[3], buf[4], buf[5]]);
+    let id: u32 = u32::from_be_bytes([buf[6], buf[7], buf[8], buf[9]]);
     let vers = ( bits & VERSION ) >> 10;
     //if vers != 1 && vers != 2 {
     //    return Err("invalid version specified")

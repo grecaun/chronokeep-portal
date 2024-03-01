@@ -678,6 +678,7 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;BUFFER_SIZE]) -> Result<ReadDa
                         let max_ix = cur_ix + info.length as usize;
                         // error if we're going to go over max buffer length
                         if max_ix > num {
+                            println!("overflow error -- max_ix {max_ix} num {num} length {} kind {} version {}", info.length, info.kind, info.version);
                             return Err(std::io::Error::new(ErrorKind::InvalidData, "overflow error"))
                         }
                         match info.kind {
