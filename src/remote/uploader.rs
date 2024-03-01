@@ -95,6 +95,7 @@ impl Uploader {
                 return;
             },
         }
+        let mut error = false;
         // work loop
         loop {
             // exit our loop and terminate if local keep alive is done
@@ -157,7 +158,9 @@ impl Uploader {
                                                                 ));
                                                             }
                                                             match sq.update_reads_status(&modified_reads) {
-                                                                Ok(_) => {},
+                                                                Ok(_) => {
+                                                                    error = false;
+                                                                },
                                                                 Err(e) => {
                                                                     println!("Error updating uploaded reads: {e}");
                                                                 }
@@ -167,7 +170,10 @@ impl Uploader {
                                                         }
                                                     },
                                                     Err(e) => {
-                                                        println!("Error uploading reads: {:?}", e);
+                                                        if error != true {
+                                                            println!("Error uploading reads: {:?}", e);
+                                                            error = true;
+                                                        }
                                                     }
                                                 }
                                                 loop_counter = loop_counter + 1;
@@ -199,9 +205,14 @@ impl Uploader {
                                                             ));
                                                         }
                                                         match sq.update_reads_status(&modified_reads) {
-                                                            Ok(_) => { },
+                                                            Ok(_) => {
+                                                                error = false;
+                                                            },
                                                             Err(e) => {
-                                                                println!("Error updating uploaded reads: {e}");
+                                                                if error != true {
+                                                                    println!("Error updating uploaded reads: {e}");
+                                                                    error = true;
+                                                                }
                                                             }
                                                         }
                                                     } else {
@@ -209,7 +220,10 @@ impl Uploader {
                                                     }
                                                 },
                                                 Err(e) => {
-                                                    println!("Error uploading reads: {:?}", e);
+                                                    if error != true {
+                                                        println!("Error uploading reads: {:?}", e);
+                                                        error = true;
+                                                    }
                                                 }
                                             }
                                         } else if reads.len() > 0 {
@@ -235,7 +249,9 @@ impl Uploader {
                                                             ));
                                                         }
                                                         match sq.update_reads_status(&modified_reads) {
-                                                            Ok(_) => { },
+                                                            Ok(_) => {
+                                                                error = false;
+                                                            },
                                                             Err(e) => {
                                                                 println!("Error updating uploaded reads: {e}");
                                                             }
@@ -245,13 +261,16 @@ impl Uploader {
                                                     }
                                                 },
                                                 Err(e) => {
-                                                    println!("Error uploading reads: {:?}", e);
+                                                    if error != true {
+                                                        println!("Error uploading reads: {:?}", e);
+                                                        error = true;
+                                                    }
                                                 }
                                             }
                                         }
                                     },
                                     Err(e) => {
-                                        println!("Error uploading reads: {e}");
+                                        println!("Error getting reads to upload: {e}");
                                     }
                                 }
                                 // should only be one REMOTE or REMOTE_SELF type of API in the database
