@@ -911,6 +911,7 @@ fn handle_stream(
                                 super::SETTING_READ_WINDOW |
                                 super::SETTING_SIGHTING_PERIOD |
                                 super::SETTING_PLAY_SOUND |
+                                super::SETTING_UPLOAD_INTERVAL |
                                 super::SETTING_VOLUME => {
                                     if let Ok(sq) = sqlite.lock() {
                                         match sq.set_setting(&setting) {
@@ -2197,6 +2198,7 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
         super::SETTING_PLAY_SOUND,
         super::SETTING_VOLUME,
         super::SETTING_VOICE,
+        super::SETTING_UPLOAD_INTERVAL,
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {
