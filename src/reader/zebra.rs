@@ -9,7 +9,7 @@ pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 pub const BUFFER_SIZE: usize = 51200;
-pub const TAG_LIMIT: usize = 3000;
+pub const TAG_LIMIT: usize = 2000000; // 2 million tags - FX9600 read ~5.5 million before stopping
 
 struct ReadData {
     tags: Vec<TagData>,
@@ -70,6 +70,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                 }
                 let mut read_map: HashMap<u128, (u128, TagData)> = HashMap::new();
                 let mut count: usize = 0;
+                let mut purge_count: usize = 0;
                 loop {
                     /*
                         Start of reading loop
@@ -162,6 +163,8 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         println!("Count is at {}", count);
                     }
                     if count > TAG_LIMIT {
+                        purge_count += 1;
+                        println!("Purging tags. This is purge number {purge_count}.");
                         match send_purge_tags(&mut t_stream, &msg_id) {
                             Ok(_) => {},
                             Err(e) => {
