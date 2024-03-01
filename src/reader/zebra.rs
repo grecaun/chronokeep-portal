@@ -166,7 +166,9 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         purge_count += 1;
                         println!("Purging tags. This is purge number {purge_count}.");
                         match send_purge_tags(&mut t_stream, &msg_id) {
-                            Ok(_) => {},
+                            Ok(_) => {
+                                count = 0;
+                            },
                             Err(e) => {
                                 println!("Error sending purge tag message. {e}");
                             }
