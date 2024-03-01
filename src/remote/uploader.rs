@@ -2,9 +2,7 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
 
 use serde::Serialize;
 
-use crate::{database::{sqlite, Database}, control::socket::{self, MAX_CONNECTED, write_uploader_status}, network::api, objects::read};
-
-pub const AUTO_UPLOAD_PAUSE: u64 = 5;
+use crate::{control::{socket::{self, write_uploader_status, MAX_CONNECTED}, Control}, database::{sqlite, Database}, defaults, network::api, objects::read};
 
 #[derive(Clone, PartialEq, Serialize, Debug)]
 pub enum Status {
@@ -19,21 +17,24 @@ pub struct Uploader {
     local_keepalive: Arc<Mutex<bool>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     status: Arc<Mutex<Status>>,
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>
+    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    control: Arc<Mutex<Control>>
 }
 
 impl Uploader {
     pub fn new(
         keepalive: Arc<Mutex<bool>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
-        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>
+        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        control: Arc<Mutex<Control>>
     ) -> Uploader {
         Uploader {
             server_keepalive: keepalive,
             local_keepalive: Arc::new(Mutex::new(false)),
             sqlite,
             status: Arc::new(Mutex::new(Status::Stopped)),
-            control_sockets
+            control_sockets,
+            control
         }
     }
 
@@ -268,8 +269,12 @@ impl Uploader {
                     }
                 }
             }
+            let mut upload_pause: u64 = defaults::DEFAULT_UPLOAD_INTERVAL;
+            if let Ok(control) = self.control.lock() {
+                upload_pause = control.upload_interval;
+            }
             // sleep for AUTO_UPLOAD_PAUSE seconds
-            thread::sleep(Duration::from_secs(AUTO_UPLOAD_PAUSE));
+            thread::sleep(Duration::from_secs(upload_pause));
         }
         if let Ok(mut r) = self.status.lock() {
             *r = Status::Stopped;

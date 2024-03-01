@@ -159,7 +159,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
     }
 
     // create our reads uploader struct for auto uploading if the user wants to
-    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone()));
+    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone(), control.clone()));
     if let Ok(control) = control.lock() {
         if control.auto_remote == true {
             println!("Starting auto upload thread.");
