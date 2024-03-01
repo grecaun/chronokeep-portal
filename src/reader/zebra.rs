@@ -8,8 +8,9 @@ use super::{ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS}
 pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
-pub const BUFFER_SIZE: usize = 65536;
+pub const BUFFER_SIZE: usize = 61440;
 pub const LEFTOVER_BUFFER_SIZE: usize = 4096;
+pub const COMBINED_BUFFER_SIZE: usize = 65536;
 pub const TAG_LIMIT: usize = 2000000; // 2 million tags - FX9600 read ~5.5 million before stopping
 
 struct ReadData {
@@ -17,7 +18,7 @@ struct ReadData {
     antenna_data: bool,
     antennas: [u8;MAX_ANTENNAS],
     leftover_num: usize,
-    leftover_buffer: [u8;LEFTOVER_BUFFER_SIZE],
+    leftover_buffer: [u8; LEFTOVER_BUFFER_SIZE],
 }
 
 pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<control::Control>>, sound: Arc<SoundNotifier>) -> Result<JoinHandle<()>, &'static str> {
@@ -65,7 +66,8 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
 
             let output = thread::spawn(move|| {
                 let buf: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
-                let leftover_buffer: &mut [u8] = &mut [0; LEFTOVER_BUFFER_SIZE];
+                let combined_buffer: &mut [u8; COMBINED_BUFFER_SIZE] = &mut [0; COMBINED_BUFFER_SIZE];
+                let leftover_buffer: &mut [u8; LEFTOVER_BUFFER_SIZE] = &mut [0; LEFTOVER_BUFFER_SIZE];
                 let mut leftover_num: usize = 0;
                 match t_stream.set_read_timeout(Some(Duration::from_secs(1))) {
                     Ok(_) => (),
@@ -89,7 +91,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         // unable to grab mutex...
                         break;
                     }
-                    match read(&mut t_stream, buf, leftover_buffer, leftover_num) {
+                    match read(&mut t_stream, buf, leftover_buffer, leftover_num, combined_buffer) {
                         Ok(mut data) => {
                             // update our leftover buffer and number of leftover bytes
                             leftover_num = data.leftover_num;
@@ -573,11 +575,12 @@ fn finalize(t_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>, reading: &
     }
     let close = requests::close_connection(&fin_id);
     let buf: &mut [u8; BUFFER_SIZE] = &mut [0;BUFFER_SIZE];
-    let leftover_buffer: &mut [u8] = &mut [0; LEFTOVER_BUFFER_SIZE];
+    let combined_buffer: &mut [u8; COMBINED_BUFFER_SIZE] = &mut [0; COMBINED_BUFFER_SIZE];
+    let leftover_buffer: [u8; LEFTOVER_BUFFER_SIZE] = [0; LEFTOVER_BUFFER_SIZE];
     let leftover_num: usize = 0;
     match t_stream.write_all(&close) {
         Ok(_) => {
-            match read(t_stream, buf, leftover_buffer, leftover_num) {
+            match read(t_stream, buf, &leftover_buffer, leftover_num, combined_buffer) {
                 Ok(_) => (),
                 Err(e) => {
                     match e.kind() {
@@ -670,30 +673,27 @@ fn send_connect_messages(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u3
 fn read(
     tcp_stream: &mut TcpStream,
     buf: &mut [u8;BUFFER_SIZE],
-    leftover_buffer: &mut [u8],
-    leftover_num: usize
+    leftover_buffer: &[u8; LEFTOVER_BUFFER_SIZE],
+    leftover_num: usize,
+    combined_buffer: &mut [u8; COMBINED_BUFFER_SIZE]
 ) -> Result<ReadData, std::io::Error> {
     let mut output = ReadData {
         tags: Vec::new(),
         antenna_data: false,
         antennas: [0;MAX_ANTENNAS],
         leftover_num: 0,
-        leftover_buffer: [0;LEFTOVER_BUFFER_SIZE],
+        leftover_buffer: *leftover_buffer,
     };
-    let (one, two) = buf.split_at_mut(leftover_num);
-    let mut start_ix = 0;
-    while start_ix < leftover_num {
-        one[start_ix] = leftover_buffer[start_ix];
-        start_ix += 1;
-    };
-    let numread = tcp_stream.read(two);
+    let numread = tcp_stream.read(buf);
     match numread {
         Ok(num) => {
             let combined_num = num + leftover_num;
+            combined_buffer[..leftover_num].copy_from_slice(&leftover_buffer[..leftover_num]);
+            combined_buffer[leftover_num..combined_num].copy_from_slice(&buf[..num]);
             let mut cur_ix = 0;
             // message could contain multiple messages, so process them all
             while cur_ix < combined_num {
-                let msg_type = llrp::bit_masks::get_msg_type(&buf[cur_ix..(cur_ix + 10)]);
+                let msg_type = llrp::bit_masks::get_msg_type(&combined_buffer[cur_ix..(cur_ix + 10)]);
                 match msg_type {
                     Ok(info) => {
                         let max_ix = cur_ix + info.length as usize;
@@ -704,7 +704,7 @@ fn read(
                             let mut start_ix = 0;
                             output.leftover_num = combined_num - cur_ix;
                             while start_ix < output.leftover_num {
-                                output.leftover_buffer[start_ix] = buf[cur_ix + start_ix];
+                                output.leftover_buffer[start_ix] = combined_buffer[cur_ix + start_ix];
                                 start_ix += 1;
                             }
                             break;
@@ -718,7 +718,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::RO_ACCESS_REPORT => {
-                                match process_tag_read(&buf, cur_ix + 10, &max_ix) {
+                                match process_tag_read(&combined_buffer, cur_ix + 10, &max_ix) {
                                     Ok(opt_tag) => match opt_tag {
                                         Some(tag) => {
                                             output.tags.push(tag);
@@ -729,7 +729,7 @@ fn read(
                                 };
                             },
                             llrp::message_types::GET_READER_CONFIG_RESPONSE => {
-                                match process_reader_config(&buf, cur_ix + 10, &max_ix) {
+                                match process_reader_config(&combined_buffer, cur_ix + 10, &max_ix) {
                                     Ok(antennas) => {
                                         if let Some(ant) = antennas {
                                             output.antennas = ant;
@@ -740,7 +740,7 @@ fn read(
                                 }
                             }
                             llrp::message_types::READER_EVENT_NOTIFICATION => {
-                                match process_reader_event_notification(&buf, cur_ix + 10, &max_ix) {
+                                match process_reader_event_notification(&combined_buffer, cur_ix + 10, &max_ix) {
                                     Ok(antenna) => {
                                         if let Some(ant) = antenna {
                                             output.antennas[ant.0] = ant.1;
@@ -779,7 +779,7 @@ pub struct TagData {
     portal_time: u128, // time since 00:00:00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
 }
 
-fn process_reader_event_notification(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<(usize, u8)>, &'static str> {
+fn process_reader_event_notification(buf: &[u8;COMBINED_BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<(usize, u8)>, &'static str> {
     let mut bits = ((buf[start_ix] as u32) << 24) +
            ((buf[start_ix+1] as u32) << 16) +
            ((buf[start_ix+2] as u32) << 8) +
@@ -826,7 +826,7 @@ fn process_reader_event_notification(buf: &[u8;BUFFER_SIZE], start_ix: usize, ma
     Ok(output)
 }
 
-fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<[u8;MAX_ANTENNAS]>, &'static str> {
+fn process_reader_config(buf: &[u8;COMBINED_BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<[u8;MAX_ANTENNAS]>, &'static str> {
     let mut bits: u32;
     let mut param_info: ParamTypeInfo;
     let mut param_ix = start_ix;
@@ -882,7 +882,7 @@ fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize
     Ok(Some(output))
 }
 
-fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<TagData>, &'static str> {
+fn process_tag_read(buf: &[u8;COMBINED_BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<TagData>, &'static str> {
     let mut bits: u32 = ((buf[start_ix] as u32) << 24) +
                     ((buf[start_ix+1] as u32) << 16) +
                     ((buf[start_ix+2] as u32) << 8) +
