@@ -167,9 +167,6 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                             }
                         }
                     }
-                    if count % 100 == 0 {
-                        println!("Count is at {}", count);
-                    }
                     if count > TAG_LIMIT {
                         purge_count += 1;
                         println!("Purging tags. This is purge number {purge_count}.");
