@@ -392,7 +392,7 @@ fn send_new(
                 match &sockets[ix] {
                     Some(sock) => {
                         if repeaters[ix] == true {
-                            println!("Sending reads to subscribed socket {ix}.");
+                            //println!("Sending reads to subscribed socket {ix}.");
                             no_error = no_error && socket::write_reads(&sock, &reads);
                         }
                     },
