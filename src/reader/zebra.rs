@@ -84,7 +84,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         break;
                     }
                     match read(&mut t_stream, buf) {
-                        Ok(mut data) => { //RIGHTHERE
+                        Ok(mut data) => {
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
                                 t_sound.notify_one();
@@ -519,7 +519,9 @@ fn process_tags(
         // upload reads to database
         if let Ok(mut db) = sqlite.lock() {
             match db.save_reads(&reads) {
-                Ok(n) => println!("Successfully saved {n} reads."),
+                Ok(_) => { 
+                    //println!("Successfully saved {n} reads.")
+                },
                 Err(_) => return Err("something went wrong saving reads"),
             }
         } else {
@@ -670,13 +672,9 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;BUFFER_SIZE]) -> Result<ReadDa
                     Ok(info) => {
                         let max_ix = cur_ix + info.length as usize;
                         // error if we're going to go over max buffer length
-                        if max_ix > num {
+                        if max_ix > BUFFER_SIZE {
                             return Err(std::io::Error::new(ErrorKind::InvalidData, "overflow error"))
                         }
-                        /*let found_type = match llrp::message_types::get_message_name(info.kind) {
-                            Some(found) => found,
-                            _ => "UNKNOWN",
-                        }; // */
                         match info.kind {
                             llrp::message_types::KEEPALIVE => {
                                 let response = requests::keepalive_ack(&info.id);
@@ -933,7 +931,7 @@ fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> 
                                 (buf[param_ix+8] as u64);
             },
             _ => {
-                println!("Unknown value found.")
+                //println!("Unknown value found.")
             }
         }
         param_ix += param_info.length as usize;

@@ -25,13 +25,13 @@ pub fn get_msg_type(buf: &[u8]) -> Result<MsgTypeInfo, &'static str> {
     for i in 0..4 {
         id = (id << 8) + u32::from(buf[6+i])
     }
-    if (bits & RESERVED) != 0 {
-        return Err("invalid reserved field")
-    }
+    //if (bits & RESERVED) != 0 {
+    //    return Err("invalid reserved field")
+    //}
     let vers = ( bits & VERSION ) >> 10;
-    if vers != 1 && vers != 2 {
-        return Err("invalid version specified")
-    }
+    //if vers != 1 && vers != 2 {
+    //    return Err("invalid version specified")
+    //}
     Ok(MsgTypeInfo {
         version: vers,
         kind: bits & MSG_TYPE,
