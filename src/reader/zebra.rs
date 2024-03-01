@@ -68,7 +68,11 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                     }
                 }
                 let mut read_map: HashMap<u128, (u128, TagData)> = HashMap::new();
+                let mut count: usize = 0;
                 loop {
+                    /*
+                        Start of reading loop
+                     */
                     if let Ok(keepalive) = t_mutex.lock() {
                         // check if we've been told to quit
                         if *keepalive == false {
@@ -83,6 +87,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
                                 t_sound.notify_one();
+                                count += data.tags.len();
                                 match process_tags(&mut read_map, &mut data.tags, &t_control, &t_sqlite, t_reader_name.as_str()) {
                                     Ok(new_reads) => {
                                         if new_reads.len() > 0 {
@@ -152,6 +157,12 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                             }
                         }
                     }
+                    if count % 100 == 0 {
+                        println!("Count is at {}", count);
+                    }
+                    /*
+                        End of reading loop
+                     */
                 }
                 stop(&mut t_stream, &reading, &t_reader_name, &msg_id);
                 finalize(&mut t_stream, &msg_id, &reading);
