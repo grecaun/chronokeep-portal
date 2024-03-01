@@ -95,7 +95,12 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                         Ok(mut data) => {
                             // update our leftover buffer and number of leftover bytes
                             leftover_num = data.leftover_num;
-                            leftover_buffer[..leftover_num].copy_from_slice(&data.leftover_buffer[..leftover_num]);
+                            let mut start_ix = 0;
+                            while start_ix < leftover_num {
+                                leftover_buffer[start_ix] = data.leftover_buffer[start_ix];
+                                start_ix += 1;
+                            }
+                            //leftover_buffer[..leftover_num].copy_from_slice(&data.leftover_buffer[..leftover_num]);
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
                                 t_sound.notify_one();
@@ -687,9 +692,18 @@ fn read(
     let numread = tcp_stream.read(buf);
     match numread {
         Ok(num) => {
+            let mut start_ix = leftover_num;
+            while start_ix < leftover_num {
+                combined_buffer[start_ix] = leftover_buffer[start_ix];
+                start_ix += 1;
+            }
+            let mut buf_ix = 0;
+            while buf_ix < num {
+                combined_buffer[start_ix] = buf[buf_ix];
+                start_ix += 1;
+                buf_ix += 1;
+            }
             let combined_num = num + leftover_num;
-            combined_buffer[..leftover_num].copy_from_slice(&leftover_buffer[..leftover_num]);
-            combined_buffer[leftover_num..combined_num].copy_from_slice(&buf[..num]);
             let mut cur_ix = 0;
             // message could contain multiple messages, so process them all
             while cur_ix < combined_num {
