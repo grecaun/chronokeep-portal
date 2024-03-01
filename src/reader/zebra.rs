@@ -8,7 +8,7 @@ use super::{ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS}
 pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
-pub const BUFFER_SIZE: usize = 51200;
+pub const BUFFER_SIZE: usize = 524288;
 pub const TAG_LIMIT: usize = 2000000; // 2 million tags - FX9600 read ~5.5 million before stopping
 
 struct ReadData {
@@ -677,7 +677,7 @@ fn read(tcp_stream: &mut TcpStream, buf: &mut [u8;BUFFER_SIZE]) -> Result<ReadDa
                     Ok(info) => {
                         let max_ix = cur_ix + info.length as usize;
                         // error if we're going to go over max buffer length
-                        if max_ix > BUFFER_SIZE {
+                        if max_ix > num {
                             return Err(std::io::Error::new(ErrorKind::InvalidData, "overflow error"))
                         }
                         match info.kind {
