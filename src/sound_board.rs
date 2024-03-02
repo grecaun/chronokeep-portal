@@ -55,8 +55,8 @@ pub const CUSTOM_STARTUP_IN_PROGRESS:   &'static str = "./sound/startup-in-progr
 pub const BEEP_FREQUENCY: f32 = 1000.0;
 pub const BEEP_DURATION: u64 = 75; //75
 pub const BEEP_RAND_MAX: u64 = 350; //350
-pub const BEEP_SEPARATION: u64 = 0; //100
-pub const BEEP_SEP_RAND_MAX: u64 = 1; //450
+pub const BEEP_SEPARATION: u64 = 50; //50
+pub const BEEP_SEP_RAND_MAX: u64 = 450; //450
 
 trait SliceType: std::io::Read + std::io::Seek {}
 
