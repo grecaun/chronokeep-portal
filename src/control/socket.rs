@@ -2142,51 +2142,92 @@ fn get_available_port() -> u16 {
     }
 }
 
-fn write_error(stream: &TcpStream, error: errors::Errors) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Error{
+fn write_error(
+    stream: &TcpStream,
+    error: errors::Errors
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Error{
         error,
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("1/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("1/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("1/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("1/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-fn write_time(stream: &TcpStream) -> bool {
+fn write_time(
+    stream: &TcpStream
+) -> bool {
     let time = Utc::now();
     let utc = time.naive_utc();
     let local = Local.from_utc_datetime(&utc).format("%Y-%m-%d %H:%M:%S").to_string();
     let utc = utc.format("%Y-%m-%d %H:%M:%S").to_string();
-    let output = match serde_json::to_writer(stream, &responses::Responses::Time{
+    match serde_json::to_writer(stream, &responses::Responses::Time{
         local,
         utc,
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("2/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("2/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("2/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("2/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
 fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
@@ -2212,28 +2253,55 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
     settings
 }
 
-fn write_settings(stream: &TcpStream, settings: &Vec<setting::Setting>) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Settings{
+fn write_settings(
+    stream: &TcpStream,
+    settings: &Vec<setting::Setting>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Settings{
         settings: settings.to_vec(),
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("3/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("3/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("3/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("3/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_readers: &MutexGuard<Vec<reader::Reader>>, apis: &Vec<Api>, status: uploader::Status) -> bool {
+fn write_all_settings(
+    stream: &TcpStream,
+    settings: &Vec<setting::Setting>,
+    u_readers: &MutexGuard<Vec<reader::Reader>>,
+    apis: &Vec<Api>,
+    status: uploader::Status
+) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         let mut antennas: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
@@ -2254,31 +2322,52 @@ fn write_all_settings(stream: &TcpStream, settings: &Vec<setting::Setting>, u_re
             antennas
         })
     };
-    let output = match serde_json::to_writer(stream, &responses::Responses::SettingsAll {
+    match serde_json::to_writer(stream, &responses::Responses::SettingsAll {
         settings: settings.to_vec(),
         readers: list,
         apis: apis.to_vec(),
         auto_upload: status,
         portal_version: env!("CARGO_PKG_VERSION")
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("4/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+            println!("16/ Something went wrong writing to the socket. {e}");
+            return false;
         }
+    }
+}
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("4/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("16/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::Reader>>) -> bool {
+pub fn write_reader_list(
+    stream: &TcpStream,
+    u_readers: &MutexGuard<Vec<reader::Reader>>
+) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         let mut antennas: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
@@ -2299,155 +2388,308 @@ pub fn write_reader_list(stream: &TcpStream, u_readers: &MutexGuard<Vec<reader::
             antennas
         })
     };
-    let output = match serde_json::to_writer(stream, &responses::Responses::Readers{
+    match serde_json::to_writer(stream, &responses::Responses::Readers{
         readers: list,
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
             println!("4/ Something went wrong writing to the socket. {e}");
-            false
+            return false;
         }
+    }
+}
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("4/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("4/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-fn write_api_list(stream: &TcpStream, apis: &Vec<api::Api>) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::ApiList{
+fn write_api_list(
+    stream: &TcpStream,
+    apis: &Vec<api::Api>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::ApiList{
         apis: apis.to_vec()
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("5/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("5/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("5/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("5/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_reader_antennas(stream: &TcpStream, reader_name: String, antennas: &[u8;MAX_ANTENNAS]) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::ReaderAntennas{
+pub fn write_reader_antennas(
+    stream: &TcpStream,
+    reader_name: String,
+    antennas: &[u8;MAX_ANTENNAS]
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::ReaderAntennas{
         reader_name,
         antennas: antennas.clone()
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("16/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("16/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("16/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("13/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_reads(stream: &TcpStream, reads: &Vec<read::Read>) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Reads{
+pub fn write_reads(
+    stream: &TcpStream,
+    reads: &Vec<read::Read>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Reads{
         list: reads.to_vec(),
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("6/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("6/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("6/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("6/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_sightings(stream: &TcpStream, sightings: &Vec<sighting::Sighting>, bibchips: &Vec<bibchip::BibChip>) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Sightings {
+pub fn write_sightings(
+    stream: &TcpStream,
+    sightings: &Vec<sighting::Sighting>,
+    bibchips: &Vec<bibchip::BibChip>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Sightings {
         list: sightings.to_vec(),
         bib_chips: bibchips.to_vec()
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("14/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("14/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("14/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("14/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-fn write_success(stream: &TcpStream, count: usize) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Success {
+fn write_success(
+    stream: &TcpStream,
+    count: usize
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Success {
         count
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("7/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("7/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("7/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("7/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-fn write_participants(stream: &TcpStream, parts: &Vec<participant::Participant>) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Participants {
+fn write_participants(
+    stream: &TcpStream,
+    parts: &Vec<participant::Participant>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Participants {
         participants: parts.to_vec(),
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("8/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("8/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("8/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("8/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, sightings: bool, u_readers: &MutexGuard<Vec<reader::Reader>>, uploader: &Arc<Uploader>) -> bool {
+fn write_connection_successful(
+    stream: &TcpStream,
+    name: String,
+    reads: bool,
+    sightings: bool,
+    u_readers: &MutexGuard<Vec<reader::Reader>>,
+    uploader: &Arc<Uploader>
+) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
         let mut antennas: [u8;MAX_ANTENNAS] = [0;MAX_ANTENNAS];
@@ -2474,7 +2716,7 @@ fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, si
             updatable = true;
         }
     }
-    let output = match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
+    match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
         name,
         kind: String::from(CONNECTION_TYPE),
         version: CONNECTION_VERS,
@@ -2485,120 +2727,241 @@ fn write_connection_successful(stream: &TcpStream, name: String, reads: bool, si
         auto_upload: uploader.status(),
         portal_version: env!("CARGO_PKG_VERSION"),
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("9/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("9/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("9/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("9/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_keepalive(stream: &TcpStream) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Keepalive) {
-        Ok(_) => true,
+pub fn write_keepalive(
+    stream: &TcpStream
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Keepalive) {
+        Ok(_) => {},
         Err(e) => {
-            println!("10/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("10/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("10/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("10/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_disconnect(stream: &TcpStream) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Disconnect) {
-        Ok(_) => true,
+pub fn write_disconnect(
+    stream: &TcpStream
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Disconnect) {
+        Ok(_) => {},
         Err(e) => {
-            println!("11/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("11/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("11/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("11/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_event_list(stream: &TcpStream, events: Vec<Event>) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::Events {
+pub fn write_event_list(
+    stream: &TcpStream,
+    events: Vec<Event>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Events {
         events
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("12/ Something went wrong writing to the socket. {e}");
-            false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("12/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("12/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("12/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_event_years(stream: &TcpStream, years: Vec<String>) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::EventYears { years }) {
-        Ok(_) => true,
+pub fn write_event_years(
+    stream: &TcpStream,
+    years: Vec<String>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::EventYears { years }) {
+        Ok(_) => {},
         Err(e) => {
-            println!("13/ Something went wrong writing to the socket. {e}");
-            return false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("13/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("13/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("13/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
-pub fn write_uploader_status(stream: &TcpStream, status: uploader::Status) -> bool {
-    let output = match serde_json::to_writer(stream, &responses::Responses::ReadAutoUpload {
+pub fn write_uploader_status(
+    stream: &TcpStream,
+    status: uploader::Status
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::ReadAutoUpload {
         status
     }) {
-        Ok(_) => true,
+        Ok(_) => {},
         Err(e) => {
-            println!("15/ Something went wrong writing to the socket. {e}");
-            return false
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("15/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
     let mut writer = stream;
-    let output = output && match writer.write_all(b"\n") {
-        Ok(_) => true,
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
         Err(e) => {
-            println!("15/ Something went wrong writing to the socket. {e}");
-            false
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("15/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
         }
     };
-    output
+    true
 }
 
 fn construct_headers(key: &str) -> HeaderMap {
@@ -2608,7 +2971,11 @@ fn construct_headers(key: &str) -> HeaderMap {
     headers
 }
 
-pub fn upload_reads(http_client: &reqwest::blocking::Client, api: &Api, reads: &[read::Read]) -> Result<usize, errors::Errors> {
+pub fn upload_reads(
+    http_client: &reqwest::blocking::Client,
+    api: &Api,
+    reads: &[read::Read]
+) -> Result<usize, errors::Errors> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}reads/add"))
         .headers(construct_headers(api.token()))
@@ -2641,7 +3008,10 @@ pub fn upload_reads(http_client: &reqwest::blocking::Client, api: &Api, reads: &
     Ok(output)
 }
 
-fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<Event>, errors::Errors> {
+fn get_events(
+    http_client: &reqwest::blocking::Client,
+    api: Api
+) -> Result<Vec<Event>, errors::Errors> {
     let url = api.uri();
     let response = match http_client.get(format!("{url}event/all"))
         .headers(construct_headers(api.token()))
@@ -2675,7 +3045,11 @@ fn get_events(http_client: &reqwest::blocking::Client, api: Api) -> Result<Vec<E
     Ok(output)
 }
 
-fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: String) -> Result<Vec<String>, errors::Errors> {
+fn get_event_years(
+    http_client: &reqwest::blocking::Client,
+    api: Api,
+    slug: String
+) -> Result<Vec<String>, errors::Errors> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}event"))
         .headers(construct_headers(api.token()))
@@ -2716,7 +3090,12 @@ fn get_event_years(http_client: &reqwest::blocking::Client, api: Api, slug: Stri
     Ok(output)
 }
 
-fn get_participants(http_client: &reqwest::blocking::Client,  api: Api, slug: String, year: String) -> Result<Vec<requests::RequestParticipant>, errors::Errors> {
+fn get_participants(
+    http_client: &reqwest::blocking::Client,
+    api: Api,
+    slug: String,
+    year: String
+) -> Result<Vec<requests::RequestParticipant>, errors::Errors> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}participants"))
         .headers(construct_headers(api.token()))

@@ -1,4 +1,4 @@
-use std::{str::{self, FromStr}, net::{TcpStream, SocketAddr, IpAddr}, thread::{self, JoinHandle}, sync::{self, Arc, Mutex}, io::Read, io::{Write, ErrorKind}, collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, reader::ANTENNA_STATUS_NONE, types};
@@ -9,7 +9,8 @@ pub mod requests;
 
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 pub const BUFFER_SIZE: usize = 65536;
-pub const TAG_LIMIT: usize = 2000000; // 2 million tags - FX9600 read ~5.5 million before stopping
+// FX7500 stops around 750k -> 900k tags, FX9600 stops around 5.5 million tags
+pub const TAG_LIMIT: usize = 500000;
 
 struct ReadData {
     tags: Vec<TagData>,
