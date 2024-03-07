@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::{network::api, objects::{bibchip, event::Event, participant::Participant, read, setting, sighting::Sighting}, reader::MAX_ANTENNAS, remote::uploader};
 
-use super::errors;
+use super::{errors, notifications};
 
 #[derive(Serialize, Debug)]
 #[serde(tag="command", rename_all="snake_case")]
@@ -16,6 +16,10 @@ pub enum Responses {
     },
     Error {
         error: errors::Errors,
+    },
+    Notification {
+        notification: notifications::Notification,
+        time: String,
     },
     Settings {
         settings: Vec<setting::Setting>,

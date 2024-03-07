@@ -11,6 +11,7 @@ use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 pub mod requests;
 pub mod responses;
 pub mod errors;
+pub mod notifications;
 
 pub const MAX_CONNECTED: usize = 4;
 pub const CONNECTION_TYPE: &str = "chrono_portal";
@@ -2085,6 +2086,23 @@ fn handle_stream(
                         }
                     }
                 },
+                requests::Request::SetNoficiation { notification } => {
+                    if let Ok(sock) = stream.local_addr() {
+                        println!("sock found");
+                        if sock.ip().is_loopback() {
+                            println!("sock is loopback");
+                            let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+                            if let Ok(c_socks) = control_sockets.lock() {
+                                println!("notifying connected sockets");
+                                for sock in c_socks.iter() {
+                                    if let Some(s) = sock {
+                                        _ = write_notification(&s, &notification, &time);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 _ => {
                     println!("Unknown command received - line was {:?}", single_line);
                     no_error = write_error(&stream, errors::Errors::UnknownCommand)
@@ -2118,10 +2136,14 @@ fn handle_stream(
     println!("Closing socket for index {index}.");
     // unsubscribe to notifications
     if let Ok(mut repeaters) = read_repeaters.lock() {
-        repeaters[index] = false;
+        if index < MAX_CONNECTED {
+            repeaters[index] = false;
+        }
     }
     if let Ok(mut repeaters) = sighting_repeaters.lock() {
-        repeaters[index] = false;
+        if index < MAX_CONNECTED {
+            repeaters[index] = false;
+        }
     }
     write_disconnect(&stream);
     _ = stream.shutdown(Shutdown::Both);
@@ -2140,6 +2162,50 @@ fn get_available_port() -> u16 {
         Some(port) => port,
         None => 0
     }
+}
+
+fn write_notification(
+    stream: &TcpStream,
+    notification: &notifications::Notification,
+    time: &String
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::Notification {
+        notification: notification.clone(),
+        time: String::from(time)
+    }) {
+        Ok(_) => {},
+        Err(e) => {
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("17/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
+        }
+    };
+    let mut writer = stream;
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
+        Err(e) => {
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("17/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
+        }
+    };
+    true
 }
 
 fn write_error(

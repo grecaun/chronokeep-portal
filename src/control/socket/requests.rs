@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{network::api, objects::{bibchip, participant, read, setting::Setting}};
 
+use super::notifications;
+
 #[derive(Deserialize, Debug)]
 #[serde(tag="command", rename_all="snake_case")]
 pub enum Request {
@@ -116,6 +118,9 @@ pub enum Request {
     },
     // Request to update the software.
     Update,
+    SetNoficiation {
+        notification: notifications::Notification,
+    },
 }
 
 #[derive(Deserialize, Debug)]
