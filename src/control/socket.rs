@@ -2086,7 +2086,7 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::SetNoficiation { notification } => {
+                requests::Request::SetNoficiation { kind: notification } => {
                     if let Ok(sock) = stream.local_addr() {
                         println!("sock found");
                         if sock.ip().is_loopback() {
@@ -2170,7 +2170,7 @@ fn write_notification(
     time: &String
 ) -> bool {
     match serde_json::to_writer(stream, &responses::Responses::Notification {
-        notification: notification.clone(),
+        kind: notification.clone(),
         time: String::from(time)
     }) {
         Ok(_) => {},

@@ -18,7 +18,7 @@ pub enum Responses {
         error: errors::Errors,
     },
     Notification {
-        notification: notifications::Notification,
+        kind: notifications::Notification,
         time: String,
     },
     Settings {
