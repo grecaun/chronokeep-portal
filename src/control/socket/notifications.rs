@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(tag="notification_type", rename_all="SCREAMING_SNAKE_CASE")]
+#[serde(rename_all="SCREAMING_SNAKE_CASE")]
 pub enum Notification {
     UpsDisconnected,
     UpsConnected,
