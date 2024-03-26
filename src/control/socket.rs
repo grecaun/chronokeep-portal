@@ -327,6 +327,30 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
         }
     };
     println!("Finished control thread shutdown.");
+    let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(30)).build()
+        .unwrap_or(reqwest::blocking::Client::new());
+    if let Ok(sq) = sqlite.lock() {
+        match sq.get_apis() {
+            Ok(apis) => {
+                for api in apis {
+                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                        //println!("Uploading notification ({}) to {}", notification, api.nickname());
+                        match save_remote_notification(&http_client, &api, &Notification::ShuttingDown) {
+                            Ok(()) => {},
+                            Err(e) => {
+                                println!("Error trying to send notification to remote api: {:?}", e);
+                            }
+                        }
+                        break;
+                    }
+                }
+            },
+            Err(e) => {
+                println!("Error trying to get apis: {e}");
+            }
+        }
+    }
 }
 
 fn find_json_end(buffer: &String) -> usize {
@@ -1059,7 +1083,7 @@ fn handle_stream(
                         api::API_TYPE_CHRONOKEEP_REMOTE |
                         api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
                             if let Ok(sq) = sqlite.lock() {
-                                let t_uri = match kind.as_str() {
+                                let mut t_uri = match kind.as_str() {
                                     api::API_TYPE_CHRONOKEEP_REMOTE => {
                                         String::from(api::API_URI_CHRONOKEEP_REMOTE)
                                     },
@@ -1067,6 +1091,9 @@ fn handle_stream(
                                         uri
                                     }
                                 };
+                                if !t_uri.ends_with("/") {
+                                    t_uri = format!("{t_uri}/")
+                                }
                                 match sq.get_apis() {
                                     Ok(apis) => {
                                         let mut remote_exists = false;
@@ -1131,7 +1158,7 @@ fn handle_stream(
                         api::API_TYPE_CHRONOKEEP_RESULTS |
                         api::API_TYPE_CHRONOKEEP_RESULTS_SELF => {
                             if let Ok(sq) = sqlite.lock() {
-                                let t_uri = match kind.as_str() {
+                                let mut t_uri = match kind.as_str() {
                                     api::API_TYPE_CHRONOKEEP_RESULTS => {
                                         String::from(api::API_URI_CHRONOKEEP_RESULTS)
                                     },
@@ -1139,6 +1166,9 @@ fn handle_stream(
                                         uri
                                     }
                                 };
+                                if !t_uri.ends_with("/") {
+                                    t_uri = format!("{t_uri}/")
+                                }
                                 match sq.save_api(&api::Api::new(
                                     id,
                                     name,
@@ -1239,7 +1269,24 @@ fn handle_stream(
                                 let mut error_saving = false;
                                 // check if we have any errors saving apis
                                 for api in list {
-                                    match sq.save_api(&api) {
+                                    let mut t_uri = match api.kind() {
+                                        api::API_TYPE_CHRONOKEEP_RESULTS => {
+                                            String::from(api::API_URI_CHRONOKEEP_RESULTS)
+                                        },
+                                        _ => {
+                                            String::from(api.uri())
+                                        }
+                                    };
+                                    if !t_uri.ends_with("/") {
+                                        t_uri = format!("{t_uri}/")
+                                    }
+                                    match sq.save_api(&api::Api::new(
+                                        api.id(),
+                                        String::from(api.nickname()),
+                                        String::from(api.kind()),
+                                        String::from(api.token()),
+                                        t_uri
+                                    )) {
                                         Ok(_) => { },
                                         Err(_) => {
                                             error_saving = true;
@@ -2169,27 +2216,6 @@ fn handle_stream(
         }
     }
     write_disconnect(&stream);
-    if let Ok(sq) = sqlite.lock() {
-        match sq.get_apis() {
-            Ok(apis) => {
-                for api in apis {
-                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                        //println!("Uploading notification ({}) to {}", notification, api.nickname());
-                        match save_remote_notification(&http_client, &api, &Notification::ShuttingDown) {
-                            Ok(()) => {},
-                            Err(e) => {
-                                println!("Error trying to send notification to remote api: {:?}", e);
-                            }
-                        }
-                        break;
-                    }
-                }
-            },
-            Err(e) => {
-                println!("Error trying to get apis: {e}");
-            }
-        }
-    }
     _ = stream.shutdown(Shutdown::Both);
     if let Ok(mut c_socks) = control_sockets.lock() {
         c_socks[index] = None;

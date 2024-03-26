@@ -4,7 +4,7 @@ use crate::control::socket::notifications::Notification;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RemoteNotification {
-    #[serde(alias = "type")]
+    #[serde(alias="type", rename="type")]
     pub kind: Notification,
     pub when: String
 }
