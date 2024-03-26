@@ -6,3 +6,4 @@ pub mod read;
 pub mod event;
 pub mod event_year;
 pub mod backup;
+pub mod notification;

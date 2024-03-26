@@ -1,10 +1,12 @@
 use std::{env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
-use chrono::{Utc, Local, TimeZone};
+use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, uploader::{self, Uploader}}, results, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, uploader::{self, Uploader}}, results, sound_board::Voice};
+
+use self::notifications::Notification;
 
 use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
@@ -2088,15 +2090,36 @@ fn handle_stream(
                 },
                 requests::Request::SetNoficiation { kind: notification } => {
                     if let Ok(sock) = stream.local_addr() {
-                        println!("sock found");
+                        //println!("sock found");
                         if sock.ip().is_loopback() {
-                            println!("sock is loopback");
+                            //println!("sock is loopback");
                             let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
                             if let Ok(c_socks) = control_sockets.lock() {
                                 println!("notifying connected sockets");
                                 for sock in c_socks.iter() {
                                     if let Some(s) = sock {
                                         _ = write_notification(&s, &notification, &time);
+                                    }
+                                }
+                            }
+                            if let Ok(sq) = sqlite.lock() {
+                                match sq.get_apis() {
+                                    Ok(apis) => {
+                                        for api in apis {
+                                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                                //println!("Uploading notification ({}) to {}", notification, api.nickname());
+                                                match save_remote_notification(&http_client, &api, &notification) {
+                                                    Ok(()) => {},
+                                                    Err(e) => {
+                                                        println!("Error trying to send notification to remote api: {:?}", e);
+                                                    }
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        println!("Error trying to get apis: {e}");
                                     }
                                 }
                             }
@@ -2146,6 +2169,27 @@ fn handle_stream(
         }
     }
     write_disconnect(&stream);
+    if let Ok(sq) = sqlite.lock() {
+        match sq.get_apis() {
+            Ok(apis) => {
+                for api in apis {
+                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                        //println!("Uploading notification ({}) to {}", notification, api.nickname());
+                        match save_remote_notification(&http_client, &api, &Notification::ShuttingDown) {
+                            Ok(()) => {},
+                            Err(e) => {
+                                println!("Error trying to send notification to remote api: {:?}", e);
+                            }
+                        }
+                        break;
+                    }
+                }
+            },
+            Err(e) => {
+                println!("Error trying to get apis: {e}");
+            }
+        }
+    }
     _ = stream.shutdown(Shutdown::Both);
     if let Ok(mut c_socks) = control_sockets.lock() {
         c_socks[index] = None;
@@ -3035,6 +3079,36 @@ fn construct_headers(key: &str) -> HeaderMap {
     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
     headers.insert(AUTHORIZATION, format!("Bearer {key}").parse().unwrap());
     headers
+}
+
+pub fn save_remote_notification(
+    http_client: &reqwest::blocking::Client,
+    api: &Api,
+    notification: &Notification
+) -> Result<(), errors::Errors> {
+    let url = api.uri();
+    let response = match http_client.post(format!("{url}notifications/save"))
+        .headers(construct_headers(api.token()))
+        .json(&remote::requests::SaveNotificationRequest {
+            notification: RemoteNotification {
+                kind: notification.clone(),
+                when: Utc::now().naive_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+            }
+        })
+        .send() {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("error trying to talk to api: {e}");
+                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
+            }
+        };
+        match response.status() {
+            reqwest::StatusCode::OK | reqwest::StatusCode::NO_CONTENT => {},
+            default => {
+                return Err(errors::Errors::ServerError { message: format!("invalid status code returned: {default}") })
+            },
+        }
+        Ok(())
 }
 
 pub fn upload_reads(

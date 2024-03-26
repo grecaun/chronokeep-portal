@@ -1,8 +1,13 @@
 use serde::Serialize;
 
-use crate::objects::read;
+use crate::objects::{notification::RemoteNotification, read};
 
 #[derive(Serialize, Debug, Clone)]
 pub struct UploadReadsRequest {
-    pub(crate) reads: Vec<read::Read>
+    pub reads: Vec<read::Read>
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct SaveNotificationRequest {
+    pub notification: RemoteNotification
 }
