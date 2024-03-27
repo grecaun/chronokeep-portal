@@ -1,6 +1,7 @@
 use std::{fs::File, io::{BufReader, Cursor}, ops::Deref, path::Path, sync::{Arc, Mutex}};
 
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 pub const EMILY_START:                  &'static [u8] = include_bytes!("sounds/emily-started.mp3");
 pub const EMILY_SHUTDOWN:               &'static [u8] = include_bytes!("sounds/emily-shutdown.mp3");
@@ -363,7 +364,7 @@ impl SoundBoard {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub enum Voice {
     Emily,
     Michael,

@@ -330,24 +330,28 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
     let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(30)).build()
         .unwrap_or(reqwest::blocking::Client::new());
-    if let Ok(sq) = sqlite.lock() {
-        match sq.get_apis() {
-            Ok(apis) => {
-                for api in apis {
-                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                        //println!("Uploading notification ({}) to {}", notification, api.nickname());
-                        match save_remote_notification(&http_client, &api, &Notification::ShuttingDown) {
-                            Ok(()) => {},
-                            Err(e) => {
-                                println!("Error trying to send notification to remote api: {:?}", e);
+    if let Ok(control) = control.lock() {
+        if control.auto_remote {
+            if let Ok(sq) = sqlite.lock() {
+                match sq.get_apis() {
+                    Ok(apis) => {
+                        for api in apis {
+                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                //println!("Uploading notification ({}) to {}", notification, api.nickname());
+                                match save_remote_notification(&http_client, &api, &Notification::ShuttingDown) {
+                                    Ok(()) => {},
+                                    Err(e) => {
+                                        println!("Error trying to send notification to remote api: {:?}", e);
+                                    }
+                                }
+                                break;
                             }
                         }
-                        break;
+                    },
+                    Err(e) => {
+                        println!("Error trying to get apis: {e}");
                     }
                 }
-            },
-            Err(e) => {
-                println!("Error trying to get apis: {e}");
             }
         }
     }
@@ -2149,24 +2153,28 @@ fn handle_stream(
                                     }
                                 }
                             }
-                            if let Ok(sq) = sqlite.lock() {
-                                match sq.get_apis() {
-                                    Ok(apis) => {
-                                        for api in apis {
-                                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                                //println!("Uploading notification ({}) to {}", notification, api.nickname());
-                                                match save_remote_notification(&http_client, &api, &notification) {
-                                                    Ok(()) => {},
-                                                    Err(e) => {
-                                                        println!("Error trying to send notification to remote api: {:?}", e);
+                            if let Ok(control) = control.lock() {
+                                if control.auto_remote {
+                                    if let Ok(sq) = sqlite.lock() {
+                                        match sq.get_apis() {
+                                            Ok(apis) => {
+                                                for api in apis {
+                                                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                                        //println!("Uploading notification ({}) to {}", notification, api.nickname());
+                                                        match save_remote_notification(&http_client, &api, &notification) {
+                                                            Ok(()) => {},
+                                                            Err(e) => {
+                                                                println!("Error trying to send notification to remote api: {:?}", e);
+                                                            }
+                                                        }
+                                                        break;
                                                     }
                                                 }
-                                                break;
+                                            },
+                                            Err(e) => {
+                                                println!("Error trying to get apis: {e}");
                                             }
                                         }
-                                    },
-                                    Err(e) => {
-                                        println!("Error trying to get apis: {e}");
                                     }
                                 }
                             }

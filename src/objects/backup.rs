@@ -2,7 +2,7 @@ use std::{path::Path, fs::File, io::Read};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{reader, network::api};
+use crate::{network::api, reader, sound_board::Voice};
 
 pub const BACKUP_FILE_PATH: &str = "./portal_backup.json";
 
@@ -14,6 +14,10 @@ pub struct Backup {
     pub read_window: u8,
     pub chip_type: String,
     pub play_sound: bool,
+    pub volume: f32,
+    pub voice: Voice,
+    pub auto_remote: bool,
+    pub upload_interval: u64,
 
     pub readers: Vec<reader::Reader>,
     pub api: Vec<api::Api>,

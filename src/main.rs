@@ -91,6 +91,51 @@ fn main() {
                         println!("error saving chip type {e}");
                     }
                 }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_PLAY_SOUND),
+                    val.play_sound.to_string()
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving chip type {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_VOLUME),
+                    val.volume.to_string()
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving chip type {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_VOICE),
+                    String::from(val.voice.as_str())
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving chip type {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_AUTO_REMOTE),
+                    val.auto_remote.to_string()
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving chip type {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_UPLOAD_INTERVAL),
+                    val.upload_interval.to_string()
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving chip type {e}");
+                    }
+                }
             },
             Err(_) => (),
         };
@@ -133,6 +178,10 @@ fn main() {
             read_window: control.read_window,
             chip_type: control.chip_type,
             play_sound: control.play_sound,
+            volume: control.volume,
+            voice: control.sound_board.get_voice(),
+            auto_remote: control.auto_remote,
+            upload_interval: control.upload_interval,
             readers,
             api
         };
