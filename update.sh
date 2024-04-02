@@ -7,7 +7,7 @@ UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-porta
 PORTAL_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal/releases/latest'
 QUIT_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal-quit/releases/latest'
 
-VERSION=5
+VERSION=6
 
 # Check OS type & architecture
 OS=$(uname)
@@ -119,21 +119,21 @@ CURRENT_PORTAL_MINOR=`echo ${CURRENT_PORTAL} | cut -d '.' -f 2`
 CURRENT_PORTAL_PATCH=`echo ${CURRENT_PORTAL} | cut -d '.' -f 3`
 # If the latest version has a higher major version, update.
 if [[ ${LATEST_PORTAL_VERSION_MAJOR} -gt ${CURRENT_PORTAL_MAJOR} ]] ||
-        [[ ${LATEST_PORTAL_VERSION_MAJOR} -eq ${CURRENT_PORTAL_MAJOR} && ${LATEST_PORTAL_VERSION_MINOR} -gt ${CURRENT_PORTAL_MINOR} ]] ||
-        [[ ${LATEST_PORTAL_VERSION_MAJOR} -eq ${CURRENT_PORTAL_major} && ${LATEST_PORTAL_VERSION_MINOR} -eq ${CURRENT_PORTAL_MINOR} && ${LATEST_PORTAL_VERSION_PATCH} -gt ${CURRENT_PORTAL_PATCH} ]]; then
-        echo "---- New version found! Updating Portal now ----"
-        echo "------------------------------------------------"
-        DOWNLOAD_URL=`curl ${PORTAL_REPO_URL} 2>&1 | grep browser_download_url | grep ${TARGET} | sed -e "s/[\",]//g" | sed -e "s/browser_download_url://"`
-        curl -L ${DOWNLOAD_URL} -o ${DEST}release-portal.tar.gz
-        gunzip ${DEST}release-portal.tar.gz
-        tar -xf ${DEST}release-portal.tar -C ${DEST}
-        rm ${DEST}release-portal.tar
-        sudo systemctl restart ${SERVICE_NAME}
-        echo "------------ Portal update complete. -----------"
-        echo "------------------------------------------------"
+    [[ ${LATEST_PORTAL_VERSION_MAJOR} -eq ${CURRENT_PORTAL_MAJOR} && ${LATEST_PORTAL_VERSION_MINOR} -gt ${CURRENT_PORTAL_MINOR} ]] ||
+    [[ ${LATEST_PORTAL_VERSION_MAJOR} -eq ${CURRENT_PORTAL_MAJOR} && ${LATEST_PORTAL_VERSION_MINOR} -eq ${CURRENT_PORTAL_MINOR} && ${LATEST_PORTAL_VERSION_PATCH} -gt ${CURRENT_PORTAL_PATCH} ]]; then
+    echo "---- New version found! Updating Portal now ----"
+    echo "------------------------------------------------"
+    DOWNLOAD_URL=`curl ${PORTAL_REPO_URL} 2>&1 | grep browser_download_url | grep ${TARGET} | sed -e "s/[\",]//g" | sed -e "s/browser_download_url://"`
+    curl -L ${DOWNLOAD_URL} -o ${DEST}release-portal.tar.gz
+    gunzip ${DEST}release-portal.tar.gz
+    tar -xf ${DEST}release-portal.tar -C ${DEST}
+    rm ${DEST}release-portal.tar
+    sudo systemctl restart ${SERVICE_NAME}
+    echo "------------ Portal update complete. -----------"
+    echo "------------------------------------------------"
 else
-        echo "---------- Portal already up to date. ----------"
-        echo "------------------------------------------------"
+    echo "---------- Portal already up to date. ----------"
+    echo "------------------------------------------------"
 fi
 
 # Check if our Quit software is up to date as well.
@@ -156,20 +156,20 @@ CURRENT_QUIT_MINOR=`echo ${CURRENT_QUIT} | cut -d '.' -f 2`
 CURRENT_QUIT_PATCH=`echo ${CURRENT_QUIT} | cut -d '.' -f 3`
 # If the latest version has a higher major version, update.
 if [[ ${LATEST_QUIT_VERSION_MAJOR} -gt ${CURRENT_QUIT_MAJOR} ]] ||
-        [[ ${LATEST_QUIT_VERSION_MAJOR} -eq ${CURRENT_QUIT_MAJOR} && ${LATEST_QUIT_VERSION_MINOR} -gt ${CURRENT_QUIT_MINOR} ]] ||
-        [[ ${LATEST_QUIT_VERSION_MAJOR} -eq ${CURRENT_QUIT_major} && ${LATEST_QUIT_VERSION_MINOR} -eq ${CURRENT_QUIT_MINOR} && ${LATEST_QUIT_VERSION_PATCH} -gt ${CURRENT_QUIT_PATCH} ]]; then
-        echo "- New version found! Updating Portal Quit now. -"
-        echo "------------------------------------------------"
-        DOWNLOAD_URL=`curl ${QUIT_REPO_URL} 2>&1 | grep browser_download_url | grep ${TARGET} | sed -e "s/[\",]//g" | sed -e "s/browser_download_url://"`
-        curl -L ${DOWNLOAD_URL} -o ${DEST}release-portal-quit.tar.gz
-        gunzip ${DEST}release-portal-quit.tar.gz
-        tar -xf ${DEST}release-portal-quit.tar -C ${DEST}
-        rm ${DEST}release-portal-quit.tar
-        echo "--------- Portal Quit update complete. ---------"
-        echo "------------------------------------------------"
+    [[ ${LATEST_QUIT_VERSION_MAJOR} -eq ${CURRENT_QUIT_MAJOR} && ${LATEST_QUIT_VERSION_MINOR} -gt ${CURRENT_QUIT_MINOR} ]] ||
+    [[ ${LATEST_QUIT_VERSION_MAJOR} -eq ${CURRENT_QUIT_MAJOR} && ${LATEST_QUIT_VERSION_MINOR} -eq ${CURRENT_QUIT_MINOR} && ${LATEST_QUIT_VERSION_PATCH} -gt ${CURRENT_QUIT_PATCH} ]]; then
+    echo "- New version found! Updating Portal Quit now. -"
+    echo "------------------------------------------------"
+    DOWNLOAD_URL=`curl ${QUIT_REPO_URL} 2>&1 | grep browser_download_url | grep ${TARGET} | sed -e "s/[\",]//g" | sed -e "s/browser_download_url://"`
+    curl -L ${DOWNLOAD_URL} -o ${DEST}release-portal-quit.tar.gz
+    gunzip ${DEST}release-portal-quit.tar.gz
+    tar -xf ${DEST}release-portal-quit.tar -C ${DEST}
+    rm ${DEST}release-portal-quit.tar
+    echo "--------- Portal Quit update complete. ---------"
+    echo "------------------------------------------------"
 else
-        echo "-------- Portal Quit already up to date. -------"
-        echo "------------------------------------------------"
+    echo "-------- Portal Quit already up to date. -------"
+    echo "------------------------------------------------"
 fi
 echo "------------- Update is finished! --------------"
 echo "------------------------------------------------"
