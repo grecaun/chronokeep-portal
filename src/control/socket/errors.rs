@@ -33,4 +33,7 @@ pub enum Errors {
     NoRemoteApi,
     StartingUp,
     InvalidRead,
+    NotAllowed {
+        message: String,
+    },
 }

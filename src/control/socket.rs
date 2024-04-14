@@ -2087,29 +2087,44 @@ fn handle_stream(
                     no_error = write_time(&stream);
                 },
                 requests::Request::TimeSet { time } => {
-                    match std::env::consts::OS {
-                        "linux" => {
-                            match std::process::Command::new("sudo").arg("date").arg(format!("--set={time}")).status() {
-                                Ok(_) => {
-                                    match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
-                                        Ok(_) => {
-                                            no_error = write_time(&stream)
-                                        },
-                                        Err(e) => {
-                                            println!("error setting time: {e}");
-                                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    println!("error setting time: {e}");
-                                    no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
+                    let mut allowed = true;
+                    if let Ok(readers) = readers.lock() {
+                        for reader in readers.iter() {
+                            if let Some(val) = reader.is_connected() {
+                                if val {
+                                    println!("User attempted to set the time while a reader is connected.");
+                                    no_error = write_error(&stream, errors::Errors::NotAllowed { message: format!("setting time not allowed with a reader connected") });
+                                    allowed = false;
+                                    break;
                                 }
                             }
-                        },
-                        other => {
-                            println!("not supported on this platform ({other})");
-                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
+                        }
+                    }
+                    if allowed {
+                        match std::env::consts::OS {
+                            "linux" => {
+                                match std::process::Command::new("sudo").arg("date").arg(format!("--set={time}")).status() {
+                                    Ok(_) => {
+                                        match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
+                                            Ok(_) => {
+                                                no_error = write_time(&stream)
+                                            },
+                                            Err(e) => {
+                                                println!("error setting time: {e}");
+                                                no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        println!("error setting time: {e}");
+                                        no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
+                                    }
+                                }
+                            },
+                            other => {
+                                println!("not supported on this platform ({other})");
+                                no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
+                            }
                         }
                     }
                 },
