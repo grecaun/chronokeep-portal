@@ -10,6 +10,7 @@ use crate::database::Database;
 use crate::database::sqlite;
 use crate::network::api;
 use crate::objects::setting;
+use crate::processor;
 use crate::reader::{self, Reader};
 use crate::reader::zebra;
 use crate::util;
@@ -34,6 +35,12 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
     thread::spawn(move || {
         sound.run();
     });
+
+    // start a thread to save reads from a reader so we don't tie up the readers when auto uploading
+    let read_saver = Arc::new(processor::ReadSaver::new(
+        sqlite.clone(),
+        Arc::new(Mutex::new(true))
+    ));
 
     while keepalive {
         // read standard in
@@ -77,7 +84,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
                             let id = add_reader(parts[2], parts[3].to_lowercase().as_str(), parts[4], port, &sq);
                             drop(sq);
                             if id > 0 {
-                                connect_reader(id, &sqlite.clone(), &mut connected, &mut joiners, &controls.clone(), sound_notifier.clone());
+                                connect_reader(id, &sqlite.clone(), &mut connected, &mut joiners, &controls.clone(), &read_saver.clone(), sound_notifier.clone());
                             }
                             continue
                         }
@@ -86,7 +93,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
                             continue
                         }
                         if let Ok(id) = i64::from_str(parts[2]) {
-                            connect_reader(id, &sqlite.clone(), &mut connected, &mut joiners, &controls.clone(), sound_notifier.clone());
+                            connect_reader(id, &sqlite.clone(), &mut connected, &mut joiners, &controls.clone(), &read_saver.clone(), sound_notifier.clone());
                         } else {
                             println!("Invalid reader number.");
                         }
@@ -306,6 +313,7 @@ fn connect_reader(
     connected: &mut Vec<reader::Reader>,
     joiners: &mut Vec<JoinHandle<()>>,
     controls: &Arc<Mutex<super::Control>>,
+    read_saver: &Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>
 ) {
     let sqlite = match mtx.lock() {
@@ -339,7 +347,7 @@ fn connect_reader(
                     return;
                 }
             };
-            match r.connect(mtx, &controls, sound) {
+            match r.connect(mtx, &controls, &read_saver, sound) {
                 Ok(j) => {
                     connected.push(r);
                     joiners.push(j);

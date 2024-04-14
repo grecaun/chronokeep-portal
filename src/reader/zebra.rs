@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, reader::ANTENNA_STATUS_NONE, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
@@ -20,7 +20,13 @@ struct ReadData {
     leftover_buffer: [u8;BUFFER_SIZE],
 }
 
-pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<control::Control>>, sound: Arc<SoundNotifier>) -> Result<JoinHandle<()>, &'static str> {
+pub fn connect(
+    reader: &mut super::Reader,
+    sqlite: &Arc<Mutex<sqlite::SQLite>>,
+    control: &Arc<Mutex<control::Control>>,
+    read_saver: &Arc<processor::ReadSaver>,
+    sound: Arc<SoundNotifier>
+) -> Result<JoinHandle<()>, &'static str> {
     let ip_addr = match IpAddr::from_str(&reader.ip_address) {
         Ok(addr) => addr,
         Err(e) => {
@@ -58,6 +64,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
             let t_connected = reader.connected.clone();
             let t_sound = sound.clone();
             let t_antennas = reader.antennas.clone();
+            let t_read_saver = read_saver.clone();
 
             let t_control_sockets = reader.control_sockets.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
@@ -98,7 +105,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                             if data.tags.len() > 0 {
                                 t_sound.notify_one();
                                 count += data.tags.len();
-                                match process_tags(&mut read_map, &mut data.tags, &t_control, &t_sqlite, t_reader_name.as_str()) {
+                                match process_tags(&mut read_map, &mut data.tags, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                     Ok(new_reads) => {
                                         if new_reads.len() > 0 {
                                             match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -145,7 +152,7 @@ pub fn connect(reader: &mut super::Reader, sqlite: &Arc<Mutex<sqlite::SQLite>>, 
                                 }
                                 // TimedOut == Windows, WouldBlock == Linux
                                 ErrorKind::TimedOut | ErrorKind::WouldBlock => {
-                                    match process_tags(&mut read_map, &mut Vec::new(), &t_control, &t_sqlite, t_reader_name.as_str()) {
+                                    match process_tags(&mut read_map, &mut Vec::new(), &t_control, &t_read_saver, t_reader_name.as_str()) {
                                         Ok(new_reads) => {
                                             if new_reads.len() > 0 {
                                                 match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -343,6 +350,7 @@ fn save_reads(
         ));
     }
     if reads.len() > 0 {
+        
         match sqlite.lock() {
             Ok(mut db) => {
                 match db.save_reads(&reads) {
@@ -420,7 +428,7 @@ fn process_tags(
     map: &mut HashMap<u128, (u128, TagData)>,
     tags: &mut Vec<TagData>,
     control: &Arc<Mutex<control::Control>>,
-    sqlite: &Arc<Mutex<sqlite::SQLite>>,
+    read_saver: &Arc<processor::ReadSaver>,
     r_name: &str
 ) -> Result<Vec<read::Read>, &'static str> {
     let since_epoch = match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -530,15 +538,8 @@ fn process_tags(
     }
     if reads.len() > 0 {
         // upload reads to database
-        if let Ok(mut db) = sqlite.lock() {
-            match db.save_reads(&reads) {
-                Ok(_) => { 
-                    //println!("Successfully saved {n} reads.")
-                },
-                Err(_) => return Err("something went wrong saving reads"),
-            }
-        } else {
-            return Err("unable to get database lock")
+        if let Err(_) = read_saver.save_reads(&reads) {
+            println!("something went wrong saving reads");
         }
     }
     Ok(reads)

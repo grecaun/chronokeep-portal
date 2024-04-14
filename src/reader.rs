@@ -260,10 +260,16 @@ impl Reader {
         output
     }
 
-    pub fn connect(&mut self, sqlite: &Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<control::Control>>, sound: Arc<SoundNotifier>) -> Result<JoinHandle<()>, &'static str> {
+    pub fn connect(
+        &mut self,
+        sqlite: &Arc<Mutex<sqlite::SQLite>>,
+        control: &Arc<Mutex<control::Control>>,
+        read_saver: &Arc<processor::ReadSaver>,
+        sound: Arc<SoundNotifier>
+    ) -> Result<JoinHandle<()>, &'static str> {
         match self.kind.as_str() {
             READER_KIND_ZEBRA => {
-                zebra::connect(self, sqlite, control, sound)
+                zebra::connect(self, sqlite, control, read_saver, sound)
             }
             _ => {
                 Err("reader type not supported")

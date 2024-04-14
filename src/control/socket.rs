@@ -186,6 +186,22 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
         sound.run();
     });
 
+    // start a thread to save reads from a reader so we don't tie up the readers when auto uploading
+    let read_saver = Arc::new(processor::ReadSaver::new(
+        sqlite.clone(),
+        keepalive.clone()
+    ));
+    let z_read_saver = read_saver.clone();
+    let rs_joiner = thread::spawn(move|| {
+        z_read_saver.start();
+    });
+
+    if let Ok(mut j) = joiners.lock() {
+        j.push(rs_joiner);
+    } else {
+        println!("Unable to get joiners lock.");
+    }
+
     // create the auto connector for automatically connecting to readers
     let ac_state = Arc::new(Mutex::new(auto_connect::State::Unknown));
     let mut auto_connector = auto_connect::AutoConnector::new(
@@ -197,6 +213,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
         sight_processor.clone(),
         control.clone(),
         sqlite.clone(),
+        read_saver.clone(),
         sound_notifier.clone()
     );
     // start a thread to automatically connect to readers
@@ -249,6 +266,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
                 let t_uploader = uploader.clone();
                 let t_ac_state = ac_state.clone();
                 let t_sound_notifier = sound_notifier.clone();
+                let t_read_saver = read_saver.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -284,6 +302,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
                                 t_sqlite,
                                 t_uploader,
                                 t_ac_state,
+                                t_read_saver,
                                 t_sound_notifier
                             );
                         });
@@ -405,6 +424,7 @@ fn handle_stream(
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     uploader: Arc<uploader::Uploader>,
     ac_state: Arc<Mutex<auto_connect::State>>,
+    read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>
 ) {
     println!("Starting control loop for index {index}");
@@ -690,7 +710,7 @@ fn handle_stream(
                                                 sight_processor.clone(),
                                             ) {
                                                 Ok(mut reader) => {
-                                                    match reader.connect(&sqlite.clone(), &control.clone(), sound.clone()) {
+                                                    match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone()) {
                                                         Ok(j) => {
                                                             if let Ok(mut join) = joiners.lock() {
                                                                 join.push(j);
