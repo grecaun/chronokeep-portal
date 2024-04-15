@@ -459,16 +459,22 @@ impl ReadSaver {
             ) {
                 Ok(_) => {
                     // save reads if they exist
+                    let mut tmp_reads = Vec::<read::Read>::new();
                     if let Ok(mut reads) = self.reads.lock() {
-                        if reads.len() > 0 {
-                            if let Ok(mut db) = self.sqlite.lock() {
-                                match db.save_reads(&reads) {
-                                    Ok(num) => {
-                                        println!("Saved {num} reads.");
-                                        reads.clear();
-                                    },
-                                    Err(e) => println!("Error saving reads. {e}"),
-                                }
+                        tmp_reads.append(&mut reads);
+                    }
+                    if tmp_reads.len() > 0 {
+                        if let Ok(mut db) = self.sqlite.lock() {
+                            match db.save_reads(&tmp_reads) {
+                                Ok(num) => {
+                                    println!("Saved {num} reads.");
+                                },
+                                Err(e) => {
+                                    println!("Error saving reads. {e}");
+                                    if let Ok(mut reads) = self.reads.lock() {
+                                        reads.append(&mut tmp_reads);
+                                    }
+                                },
                             }
                         }
                     }
