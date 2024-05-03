@@ -466,8 +466,8 @@ impl ReadSaver {
                     if tmp_reads.len() > 0 {
                         if let Ok(mut db) = self.sqlite.lock() {
                             match db.save_reads(&tmp_reads) {
-                                Ok(num) => {
-                                    println!("Saved {num} reads.");
+                                Ok(_num) => {
+                                    //println!("Saved {num} reads.");
                                 },
                                 Err(e) => {
                                     println!("Error saving reads. {e}");
@@ -497,8 +497,8 @@ impl ReadSaver {
             if reads.len() > 0 {
                 if let Ok(mut db) = self.sqlite.lock() {
                     match db.save_reads(&reads) {
-                        Ok(num) => {
-                            println!("Saved {num} reads.");
+                        Ok(_num) => {
+                            //println!("Saved {num} reads.");
                             reads.clear();
                         },
                         Err(e) => println!("Error saving reads. {e}"),

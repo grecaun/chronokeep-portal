@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, processor, reader::AUTO_CONNECT_TRUE};
 
-pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 60;
+pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 40;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum State {

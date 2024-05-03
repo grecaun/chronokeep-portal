@@ -16,8 +16,8 @@ struct ReadData {
     tags: Vec<TagData>,
     antenna_data: bool,
     antennas: [u8;MAX_ANTENNAS],
-    leftover_num: usize,
-    leftover_buffer: [u8;BUFFER_SIZE],
+    //leftover_num: usize,
+    //leftover_buffer: [u8;BUFFER_SIZE],
 }
 
 pub fn connect(
@@ -73,7 +73,7 @@ pub fn connect(
             let output = thread::spawn(move|| {
                 let buf: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
                 let leftover_buffer: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
-                let mut leftover_num: usize = 0;
+                let leftover_num: &mut usize = &mut 0;
                 match t_stream.set_read_timeout(Some(Duration::from_secs(1))) {
                     Ok(_) => (),
                     Err(e) => {
@@ -97,15 +97,16 @@ pub fn connect(
                         break;
                     }
                     match read(&mut t_stream, buf, leftover_buffer, leftover_num) {
-                        Ok(mut data) => {
+                        Ok(data) => {
                             // update our leftover buffer and number of leftover bytes
-                            leftover_num = data.leftover_num;
-                            leftover_buffer[..leftover_num].copy_from_slice(&data.leftover_buffer[..leftover_num]);
+                            //leftover_num = data.leftover_num.clone();
+                            //leftover_buffer[..leftover_num].copy_from_slice(&data.leftover_buffer[..leftover_num]);
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
                                 t_sound.notify_one();
                                 count += data.tags.len();
-                                match process_tags(&mut read_map, &mut data.tags, &t_control, &t_read_saver, t_reader_name.as_str()) {
+                                let mut tags = data.tags;
+                                match process_tags(&mut read_map, &mut tags, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                     Ok(new_reads) => {
                                         if new_reads.len() > 0 {
                                             match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -146,6 +147,7 @@ pub fn connect(
                             }
                         },
                         Err(e) => {
+                            *leftover_num = 0;
                             match e.kind() {
                                 ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
                                     break;
@@ -354,7 +356,9 @@ fn save_reads(
         match sqlite.lock() {
             Ok(mut db) => {
                 match db.save_reads(&reads) {
-                    Ok(num) => println!("Saved {num} reads."),
+                    Ok(_num) => {
+                        //println!("Saved {_num} reads.")
+                    },
                     Err(e) => println!("Error saving reads. {e}"),
                 }
             },
@@ -578,7 +582,7 @@ fn finalize(t_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>, reading: &
     let close = requests::close_connection(&fin_id);
     let buf: &mut [u8; BUFFER_SIZE] = &mut [0;BUFFER_SIZE];
     let leftover_buffer: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
-    let leftover_num: usize = 0;
+    let leftover_num: &mut usize = &mut 0;
     match t_stream.write_all(&close) {
         Ok(_) => {
             match read(t_stream, buf, leftover_buffer, leftover_num) {
@@ -675,70 +679,74 @@ fn read(
     tcp_stream: &mut TcpStream,
     buf: &mut [u8;BUFFER_SIZE],
     leftover_buffer: &mut [u8;BUFFER_SIZE],
-    leftover_num: usize
+    leftover_num: &mut usize
 ) -> Result<ReadData, std::io::Error> {
     let mut output = ReadData {
         tags: Vec::new(),
         antenna_data: false,
         antennas: [0;MAX_ANTENNAS],
-        leftover_num: 0,
-        leftover_buffer: *leftover_buffer,
     };
     let numread = tcp_stream.read(buf);
     match numread {
         Ok(num) => {
             let mut cur_ix = 0;
             // process leftovers
-            if let Ok(leftover_type) = llrp::bit_masks::get_msg_type(leftover_buffer) {
-                cur_ix = (leftover_type.length as usize) - leftover_num;
-                leftover_buffer[leftover_num..(leftover_num+cur_ix)].copy_from_slice(&buf[..cur_ix]);
-                let max_ix = leftover_type.length as usize;
-                match leftover_type.kind {
-                    llrp::message_types::KEEPALIVE => {
-                        let response = requests::keepalive_ack(&leftover_type.id);
-                        match tcp_stream.write_all(&response) {
-                            Ok(_) => (),
-                            Err(e) => println!("Error responding to keepalive. {e}"),
-                        }
-                    },
-                    llrp::message_types::RO_ACCESS_REPORT => {
-                        match process_tag_read(&leftover_buffer, 10, &max_ix) {
-                            Ok(opt_tag) => match opt_tag {
-                                Some(tag) => {
-                                    output.tags.push(tag);
-                                },
-                                None => (),
-                            },
-                            Err(_) => (),
-                        };
-                    },
-                    llrp::message_types::GET_READER_CONFIG_RESPONSE => {
-                        match process_reader_config(&leftover_buffer, 10, &max_ix) {
-                            Ok(antennas) => {
-                                if let Some(ant) = antennas {
-                                    output.antennas = ant;
-                                    output.antenna_data = true;
-                                };
-                            },
-                            Err(_) => (),
-                        }
-                    }
-                    llrp::message_types::READER_EVENT_NOTIFICATION => {
-                        match process_reader_event_notification(&leftover_buffer, 10, &max_ix) {
-                            Ok(antenna) => {
-                                if let Some(ant) = antenna {
-                                    output.antennas[ant.0] = ant.1;
-                                    output.antenna_data = true;
+            if *leftover_num > 0 {
+                if let Ok(leftover_type) = llrp::bit_masks::get_msg_type(leftover_buffer) {
+                    cur_ix = (leftover_type.length as usize) - *leftover_num;
+                    // only copy over bytes if they'll fit in the buffer, otherwise ignore the leftover data
+                    if *leftover_num + cur_ix <= BUFFER_SIZE {
+                        leftover_buffer[*leftover_num..(*leftover_num+cur_ix)].copy_from_slice(&buf[..cur_ix]);
+                        let max_ix = leftover_type.length as usize;
+                        match leftover_type.kind {
+                            llrp::message_types::KEEPALIVE => {
+                                let response = requests::keepalive_ack(&leftover_type.id);
+                                match tcp_stream.write_all(&response) {
+                                    Ok(_) => (),
+                                    Err(e) => println!("Error responding to keepalive. {e}"),
                                 }
                             },
-                            Err(_) => (),
+                            llrp::message_types::RO_ACCESS_REPORT => {
+                                match process_tag_read(leftover_buffer, 10, &max_ix) {
+                                    Ok(opt_tag) => match opt_tag {
+                                        Some(tag) => {
+                                            output.tags.push(tag);
+                                        },
+                                        None => (),
+                                    },
+                                    Err(_) => (),
+                                };
+                            },
+                            llrp::message_types::GET_READER_CONFIG_RESPONSE => {
+                                match process_reader_config(leftover_buffer, 10, &max_ix) {
+                                    Ok(antennas) => {
+                                        if let Some(ant) = antennas {
+                                            output.antennas = ant;
+                                            output.antenna_data = true;
+                                        };
+                                    },
+                                    Err(_) => (),
+                                }
+                            }
+                            llrp::message_types::READER_EVENT_NOTIFICATION => {
+                                match process_reader_event_notification(leftover_buffer, 10, &max_ix) {
+                                    Ok(antenna) => {
+                                        if let Some(ant) = antenna {
+                                            output.antennas[ant.0] = ant.1;
+                                            output.antenna_data = true;
+                                        }
+                                    },
+                                    Err(_) => (),
+                                }
+                            }
+                            _ => {
+                                //println!("Message Type Found! V: {} - {}", info.version, found_type);
+                            },
                         }
                     }
-                    _ => {
-                        //println!("Message Type Found! V: {} - {}", info.version, found_type);
-                    },
                 }
             }
+            *leftover_num = 0;
             // message could contain multiple messages, so process them all
             while cur_ix < num {
                 let msg_type = llrp::bit_masks::get_msg_type(&buf[cur_ix..(cur_ix + 10)]);
@@ -749,8 +757,8 @@ fn read(
                         if max_ix > num {
                             //println!("overflow error -- max_ix {max_ix} num {num} length {} kind {} version {}", info.length, info.kind, info.version);\
                             // copy what we have to the start of the buffer
-                            output.leftover_num = num - cur_ix;
-                            output.leftover_buffer[..output.leftover_num].copy_from_slice(&buf[cur_ix..num]);
+                            *leftover_num = num - cur_ix;
+                            leftover_buffer[..*leftover_num].copy_from_slice(&buf[cur_ix..num]);
                             break;
                         }
                         match info.kind {
