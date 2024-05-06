@@ -16,8 +16,6 @@ struct ReadData {
     tags: Vec<TagData>,
     antenna_data: bool,
     antennas: [u8;MAX_ANTENNAS],
-    //leftover_num: usize,
-    //leftover_buffer: [u8;BUFFER_SIZE],
 }
 
 pub fn connect(
@@ -98,9 +96,6 @@ pub fn connect(
                     }
                     match read(&mut t_stream, buf, leftover_buffer, leftover_num) {
                         Ok(data) => {
-                            // update our leftover buffer and number of leftover bytes
-                            //leftover_num = data.leftover_num.clone();
-                            //leftover_buffer[..leftover_num].copy_from_slice(&data.leftover_buffer[..leftover_num]);
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
                                 t_sound.notify_one();
