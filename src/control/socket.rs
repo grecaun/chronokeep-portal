@@ -335,16 +335,6 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<supe
     println!("Stopping sightings processor.");
     sight_processor.stop();
     sight_processor.notify();
-    println!("Joining all threads.");
-    if let Ok(mut joiners) = joiners.lock() {
-        while joiners.len() > 0 {
-            let cur_thread = joiners.remove(0);
-            match cur_thread.join() {
-                Ok(_) => (),
-                Err(e) => println!("Join failed. {:?}", e),
-            }
-        }
-    };
     println!("Finished control thread shutdown.");
     let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(30)).build()
