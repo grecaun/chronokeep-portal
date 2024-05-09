@@ -687,10 +687,17 @@ fn read(
             let mut cur_ix = 0;
             // process leftovers
             if *leftover_num > 0 {
+                if *leftover_num < 4 {
+                    let mut copy_amount = 4;
+                    if num < 4 {
+                        copy_amount = num
+                    }
+                    leftover_buffer[*leftover_num..(*leftover_num+copy_amount)].copy_from_slice(&buf[..copy_amount])
+                }
                 if let Ok(leftover_type) = llrp::bit_masks::get_msg_type(leftover_buffer) {
                     cur_ix = (leftover_type.length as usize) - *leftover_num;
                     // only copy over bytes if they'll fit in the buffer, otherwise ignore the leftover data
-                    if *leftover_num + cur_ix <= BUFFER_SIZE {
+                    if (*leftover_num + cur_ix) <= BUFFER_SIZE && cur_ix <= num {
                         leftover_buffer[*leftover_num..(*leftover_num+cur_ix)].copy_from_slice(&buf[..cur_ix]);
                         let max_ix = leftover_type.length as usize;
                         match leftover_type.kind {
