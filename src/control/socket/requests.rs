@@ -80,6 +80,9 @@ pub enum Request {
     ReaderStop {
         id: i64,
     },
+    ReaderStartAll,
+    ReaderStopAll,
+    ReaderGetAll,
     // Reads related requests
     ReadsAdd {
         read: read::Read

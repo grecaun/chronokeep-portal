@@ -888,6 +888,116 @@ fn handle_stream(
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                 },
+                requests::Request::ReaderStartAll => {
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(mut u_readers) = readers.lock() {
+                                    // make sure to iterate through the vec in reverse so we don't have some weird loop issues
+                                    for ix in (0..u_readers.len()).rev() {
+                                        let mut reader = u_readers.remove(ix);
+                                        if reader.is_connected() != Some(true) {
+                                            reader.set_control_sockets(control_sockets.clone());
+                                            reader.set_read_repeaters(read_repeaters.clone());
+                                            reader.set_sight_processor(sight_processor.clone());
+                                            match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone()) {
+                                                Ok(j) => {
+                                                    if let Ok(mut join) = joiners.lock() {
+                                                        join.push(j);
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    println!("Error connecting to reader: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                        message: format!("error connecting to reader: {e}")
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        if reader.is_reading() != Some(true) {
+                                            match reader.initialize() {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("Error connecting to reader: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                        message: format!("error connecting to reader: {e}")
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        u_readers.push(reader);
+                                    }
+                                    if let Ok(c_socks) = control_sockets.lock() {
+                                        for sock in c_socks.iter() {
+                                            if let Some(sock) = sock {
+                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                            }
+                                        }
+                                    } else {
+                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
+                                    }
+                                }
+                            },
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                sound.notify_custom(SoundType::StartupInProgress);
+                                no_error = write_error(&stream, errors::Errors::StartingUp);
+                            }
+                        }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        sound.notify_custom(SoundType::StartupInProgress);
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                    }
+                },
+                requests::Request::ReaderStopAll => {
+                    if let Ok(ac) = ac_state.lock() {
+                        match *ac {
+                            auto_connect::State::Finished |
+                            auto_connect::State::Unknown => {
+                                if let Ok(mut u_readers) = readers.lock() {
+                                    for ix in (0..u_readers.len()).rev() {
+                                        let mut reader = u_readers.remove(ix);
+                                        match reader.disconnect() {
+                                            Ok(_) => {},
+                                            Err(e) => {
+                                                println!("Error connecting to reader: {e}");
+                                                no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                    message: format!("error discconnecting reader: {e}")
+                                                });
+                                            }
+                                        }
+                                        u_readers.push(reader);
+                                    }
+                                    if let Ok(c_socks) = control_sockets.lock() {
+                                        for sock in c_socks.iter() {
+                                            if let Some(sock) = sock {
+                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                            }
+                                        }
+                                    } else {
+                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
+                                    }
+                                }
+                            },
+                            _ => {
+                                println!("Auto connect is working right now.");
+                                sound.notify_custom(SoundType::StartupInProgress);
+                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                            },
+                        }
+                    } else {
+                        println!("Auto connect is working right now.");
+                        sound.notify_custom(SoundType::StartupInProgress);
+                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                    }
+                },
+                requests::Request::ReaderGetAll => {
+                    if let Ok(u_readers) = readers.lock() {
+                        no_error = write_reader_list(&stream, &u_readers) && no_error;
+                    }
+                }
                 requests::Request::SettingsGet => {
                     if let Ok(sq) = sqlite.lock() {
                         no_error = write_settings(&stream, &get_settings(&sq));
