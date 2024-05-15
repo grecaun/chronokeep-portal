@@ -7,7 +7,7 @@ pub struct Participant {
     bib: String,
     first: String,
     last: String,
-    age: u16,
+    birthdate: String,
     gender: String,
     age_group: String,
     distance: String,
@@ -20,7 +20,7 @@ impl Participant {
         bib: String,
         first: String,
         last: String,
-        age: u16,
+        birthdate: String,
         gender: String,
         age_group: String,
         distance: String,
@@ -31,7 +31,7 @@ impl Participant {
             bib,
             first,
             last,
-            age,
+            birthdate,
             gender,
             age_group,
             distance,
@@ -43,7 +43,7 @@ impl Participant {
         self.bib == other.bib &&
         self.first == other.first &&
         self.last == other.last &&
-        self.age == other.age &&
+        self.birthdate == other.birthdate &&
         self.gender == other.gender &&
         self.age_group == other.age_group &&
         self.distance == other.distance &&
@@ -66,8 +66,8 @@ impl Participant {
         &self.last
     }
 
-    pub fn age(&self) -> u16 {
-        self.age
+    pub fn birthdate(&self) -> &str {
+        &self.birthdate
     }
 
     pub fn gender(&self) -> &str {

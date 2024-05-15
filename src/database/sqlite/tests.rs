@@ -1012,7 +1012,7 @@ fn make_participants() -> PartsWithBibs {
         String::from("1005"),
         String::from(""),
         String::from(""),
-        50,
+        String::from("1/1/1975"),
         String::from("F"),
         String::from("0-110"),
         String::from("50k"),
@@ -1024,7 +1024,7 @@ fn make_participants() -> PartsWithBibs {
         String::from("1006"),
         String::from("John"),
         String::from("Smith"),
-        22,
+        String::from("1/1/2002"),
         String::from("M"),
         String::from("0-110"),
         String::from("50k"),
@@ -1036,7 +1036,7 @@ fn make_participants() -> PartsWithBibs {
         String::from("1007"),
         String::from("Jenny"),
         String::from("Appfelsauce"),
-        34,
+        String::from("1/1/1990"),
         String::from("F"),
         String::from("0-110"),
         String::from("50k"),
@@ -1048,7 +1048,7 @@ fn make_participants() -> PartsWithBibs {
         String::from("1008"),
         String::from("Jon"),
         String::from("Johnson"),
-        20,
+        String::from("1/1/2004"),
         String::from("NB"),
         String::from("0-110"),
         String::from("50k"),
@@ -1060,7 +1060,7 @@ fn make_participants() -> PartsWithBibs {
         String::from("1009"),
         String::from("George"),
         String::from("Analabousch"),
-        65,
+        String::from("1/1/1959"),
         String::from("U"),
         String::from("0-110"),
         String::from("50k"),
@@ -1095,7 +1095,7 @@ fn test_add_participants() {
         String::from("1009"),
         String::from("Updated First"),
         String::from("Updated Last"),
-        3,
+        String::from("1/1/2021"),
         String::from("M"),
         String::from("0-110"),
         String::from("50k"),
@@ -1207,8 +1207,8 @@ fn test_add_bibchips() {
     assert!(found);
     // test multiple chips per bib
     let new_bc = vec!(bibchip::BibChip::new(
-        String::from("1005"),
-        String::from("1000000005")
+        String::from("1006"),
+        String::from("1000000006")
     ));
     let result = sqlite.add_bibchips(&new_bc);
     assert!(result.is_ok());
@@ -1333,7 +1333,7 @@ fn make_sightings(sqlite:&mut SQLite) -> Vec<sighting::Sighting> {
                         String::from(part.bib()),
                         String::from(part.first()),
                         String::from(part.last()),
-                        part.age(),
+                        String::from(part.birthdate()),
                         String::from(part.gender()),
                         String::from(part.age_group()),
                         String::from(part.distance()),
@@ -1375,7 +1375,7 @@ fn test_save_sightings() {
             String::from("100"),
             String::from("John"),
             String::from("Smith"),
-            10,
+            String::from("1/1/2014"),
             String::from("M"),
             String::from("0-110"),
             String::from("Half Marathon"),

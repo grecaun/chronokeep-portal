@@ -13,7 +13,7 @@ mod tests;
 const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 
 const DATABASE_VERSION_SETTING: &str = "PORTAL_DATABASE_VERSION";
-const DATABASE_VERSION: u16 = 3;
+const DATABASE_VERSION: u16 = 4;
 
 const DATABASE_PATH_ENV: &str = "PORTAL_DATABASE_PATH";
 
@@ -72,10 +72,40 @@ impl SQLite {
                     return Err(e)
                 }
             }
+            if old_version < 4 {
+                if let Err(e) = self.update_to_v4() {
+                    return Err(e)
+                }
+            }
         } else if new_version < old_version {
             return Err(DBError::DatabaseTooNew(String::from("database version is newer than our known version")))
         }
         return Ok(())
+    }
+
+    fn update_to_v4(&mut self) -> Result<(), DBError> {
+        if let Ok(tx) = self.conn.transaction() {
+            let updates = [
+                "ALTER TABLE participants DROP COLUMN age;",
+                "ALTER TABLE participants ADD COLUMN birthdate VARCHAR(50) NOT NULL DEFAULT '';",
+            ];
+            for table in updates {
+                if let Err(e) = tx.execute(table, ()) {
+                    return Err(DBError::DataInsertionError(e.to_string()))
+                }
+            }
+            if let Err(e) = tx.execute(
+                "INSERT INTO settings (setting, value) VALUES (?1, ?2);",
+                (DATABASE_VERSION_SETTING, "4")
+            ) {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            if let Err(e) = tx.commit() {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            return Ok(())
+        }
+        Err(DBError::ConnectionError(String::from("unable to start transaction")))
     }
 
     fn update_to_v3(&mut self) -> Result<(), DBError> {
@@ -120,7 +150,7 @@ impl SQLite {
             }
             return Ok(())
         }
-        return Err(DBError::ConnectionError(String::from("unable to start transaction")))
+        Err(DBError::ConnectionError(String::from("unable to start transaction")))
     }
 
     fn update_to_v2(&mut self) -> Result<(), DBError> {
@@ -145,7 +175,7 @@ impl SQLite {
             }
             return Ok(())
         }
-        return Err(DBError::ConnectionError(String::from("unable to start transaction")))
+        Err(DBError::ConnectionError(String::from("unable to start transaction")))
     }
 
     fn make_tables(&mut self) -> Result<(), DBError> {
@@ -165,7 +195,7 @@ impl SQLite {
                     bib VARCHAR(50) NOT NULL,
                     first VARCHAR(50) NOT NULL,
                     last VARCHAR(75) NOT NULL,
-                    age INTEGER NOT NULL DEFAULT 0,
+                    birthdate VARCHAR(50) NOT NULL DEFAULT '',
                     gender VARCHAR(10) NOT NULL DEFAULT 'u',
                     age_group VARCHAR(100) NOT NULL,
                     distance VARCHAR(75) NOT NULL,
@@ -175,7 +205,6 @@ impl SQLite {
                 "CREATE TABLE IF NOT EXISTS bibchip (
                     chip VARCHAR(100),
                     bib VARCHAR(50),
-                    UNIQUE (bib, chip) ON CONFLICT REPLACE,
                     UNIQUE (chip) ON CONFLICT REPLACE
                 );",
                 "CREATE TABLE IF NOT EXISTS readers (
@@ -223,7 +252,7 @@ impl SQLite {
             }
             return Ok(())
         }
-        return Err(DBError::ConnectionError(String::from("unable to start transaction")))
+        Err(DBError::ConnectionError(String::from("unable to start transaction")))
     }
 }
 
@@ -750,7 +779,7 @@ impl super::Database for SQLite {
                         bib,
                         first,
                         last,
-                        age,
+                        birthdate,
                         gender,
                         age_group,
                         distance,
@@ -760,7 +789,7 @@ impl super::Database for SQLite {
                         p.bib(),
                         p.first(),
                         p.last(),
-                        p.age(),
+                        p.birthdate(),
                         p.gender(),
                         p.age_group(),
                         p.distance(),
@@ -817,7 +846,7 @@ impl super::Database for SQLite {
     }
 
     fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT part_id, bib, first, last, age, gender, age_group, distance, anonymous FROM participants;") {
+        let mut stmt = match self.conn.prepare("SELECT part_id, bib, first, last, birthdate, gender, age_group, distance, anonymous FROM participants;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -956,7 +985,7 @@ impl super::Database for SQLite {
                 bib,
                 first,
                 last,
-                age,
+                birthdate,
                 gender,
                 age_group,
                 distance,
@@ -1029,7 +1058,7 @@ impl super::Database for SQLite {
                 bib,
                 first,
                 last,
-                age,
+                birthdate,
                 gender,
                 age_group,
                 distance,

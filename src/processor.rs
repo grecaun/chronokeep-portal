@@ -210,7 +210,7 @@ impl SightingsProcessor {
                                     chip.clone(),
                                     String::from("J"),
                                     String::from("Doe"),
-                                    0,
+                                    String::from("1/1/1900"),
                                     String::from("U"),
                                     String::from("0-110"),
                                     String::from("Unknown"),

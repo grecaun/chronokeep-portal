@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{network::api, objects::{bibchip, participant, read, setting::Setting}};
+use crate::{network::api, objects::{bibchip::BibChip, participant, read, setting::Setting}};
 
 use super::notifications;
 
@@ -54,6 +54,12 @@ pub enum Request {
     ParticipantsRemove,
     ParticipantsAdd {
         participants: Vec<RequestParticipant>,
+    },
+    // BibChip related requests
+    BibChipsGet,
+    BibChipsRemove,
+    BibChipsAdd {
+        bib_chips: Vec<BibChip>,
     },
     // Reader related requests
     ReaderAdd {
@@ -137,15 +143,18 @@ pub enum AutoUploadQuery {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all="snake_case")]
 pub struct RequestParticipant {
+    id: String,
     bib: String,
     first: String,
     last: String,
-    age: u16,
+    birthdate: String,
     gender: String,
     age_group: String,
     distance: String,
     anonymous: bool,
-    chip: String,
+    sms_enabled: bool,
+    mobile: String,
+    apparel: String,
 }
 
 impl RequestParticipant {
@@ -155,18 +164,11 @@ impl RequestParticipant {
             self.bib.clone(),
             self.first.clone(),
             self.last.clone(),
-            self.age,
+            self.birthdate.clone(),
             self.gender.clone(),
             self.age_group.clone(),
             self.distance.clone(),
             self.anonymous
-        )
-    }
-
-    pub fn get_bibchip(&self) -> bibchip::BibChip {
-        return bibchip::BibChip::new(
-            self.bib.clone(),
-            self.chip.clone()
         )
     }
 }

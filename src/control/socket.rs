@@ -1737,12 +1737,22 @@ fn handle_stream(
                                     if api.id() == api_id {
                                         if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
                                             // try to get the participants from the API
-                                            let new_parts = match get_participants(&http_client, api, event_slug, event_year) {
+                                            let new_parts = match get_participants(&http_client, &api, &event_slug, &event_year) {
                                                 Ok(new_parts) => {
                                                     new_parts
                                                 },
                                                 Err(e) => {
                                                     println!("error getting participants from api: {:?}", e);
+                                                    no_error = write_error(&stream, e);
+                                                    break;
+                                                }
+                                            };
+                                            let new_bibchips = match get_bibchips(&http_client, &api, &event_slug, &event_year) {
+                                                Ok(new_bibchips) => {
+                                                    new_bibchips
+                                                },
+                                                Err(e) => {
+                                                    println!("error getting bibchips from api: {:?}", e);
                                                     no_error = write_error(&stream, e);
                                                     break;
                                                 }
@@ -1761,24 +1771,11 @@ fn handle_stream(
                                             // if participant deletion was successful, add new participants
                                             // first translate into participants and bibchips
                                             let mut parts: Vec<participant::Participant> = Vec::new();
-                                            let mut bibchips: Vec<bibchip::BibChip> = Vec::new();
                                             for p in &new_parts {
                                                 parts.push(p.get_participant());
-                                                bibchips.push(p.get_bibchip());
                                             }
                                             match sq.add_participants(&parts) {
-                                                Ok(_) => {
-                                                    match sq.add_bibchips(&bibchips) {
-                                                        Ok(_) => {},
-                                                        Err(e) => {
-                                                            println!("error adding bibchips: {e}");
-                                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                                message: format!("error adding bibchips: {e}")
-                                                            });
-                                                            break;
-                                                        }
-                                                    }
-                                                },
+                                                Ok(_) => { },
                                                 Err(e) => {
                                                     println!("error adding participants: {e}");
                                                     no_error = write_error(&stream, errors::Errors::DatabaseError {
@@ -1786,6 +1783,16 @@ fn handle_stream(
                                                     });
                                                     break;
                                                 },
+                                            }
+                                            match sq.add_bibchips(&new_bibchips) {
+                                                Ok(_) => { },
+                                                Err(e) => {
+                                                    println!("error adding bibchips: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                        message: format!("error adding bibchips: {e}")
+                                                    });
+                                                    break;
+                                                }
                                             }
                                             // get participants and send them to the connection that had us update participants
                                             match sq.get_participants() {
@@ -1870,21 +1877,29 @@ fn handle_stream(
                 requests::Request::ParticipantsAdd { participants } => {
                     if let Ok(mut sq) = sqlite.lock() {
                         let mut parts: Vec<participant::Participant> = Vec::new();
-                        let mut bibchips: Vec<bibchip::BibChip> = Vec::new();
                         for p in participants {
                             parts.push(p.get_participant());
-                            bibchips.push(p.get_bibchip());
                         }
                         match sq.add_participants(&parts) {
                             Ok(_) => {
-                                match sq.add_bibchips(&bibchips) {
-                                    Ok(num) => {
-                                        no_error = write_success(&stream, num);
+                                match sq.get_participants() {
+                                    Ok(parts) => {
+                                        if let Ok(c_socks) = control_sockets.lock() {
+                                            for sock in c_socks.iter() {
+                                                if let Some(sock) = sock {
+                                                    // we might be writing to other sockets
+                                                    // so errors here shouldn't close our connection
+                                                    _ = write_participants(&sock, &parts);
+                                                }
+                                            }
+                                        } else {
+                                            no_error = write_participants(&stream, &parts);
+                                        }
                                     },
                                     Err(e) => {
-                                        println!("Error adding bibchips. {e}");
+                                        println!("error getting participants. {e}");
                                         no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error adding bibchips: {e}")
+                                            message: format!("error getting participants: {e}")
                                         });
                                     }
                                 }
@@ -1893,6 +1908,51 @@ fn handle_stream(
                                 println!("Error adding participants. {e}");
                                 no_error = write_error(&stream, errors::Errors::DatabaseError {
                                     message: format!("error adding participants: {e}")
+                                });
+                            }
+                        }
+                    }
+                },
+                requests::Request::BibChipsGet => {
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.get_bibchips() {
+                            Ok(bib_chips) => {
+                                no_error = write_bibchips(&stream, &bib_chips);
+                            },
+                            Err(e) => {
+                                println!("error getting bibchips from database. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error getting bibchips from database: {e}")
+                                });
+                            }
+                        }
+                    }
+                },
+                requests::Request::BibChipsRemove => {
+                    if let Ok(sq) = sqlite.lock() {
+                        match sq.delete_all_bibchips() {
+                            Ok(num) => {
+                                no_error = write_success(&stream, num);
+                            },
+                            Err(e) => {
+                                println!("Error deleting bibchips. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error deleting bibchips: {e}")
+                                });
+                            }
+                        }
+                    }
+                },
+                requests::Request::BibChipsAdd { bib_chips } => {
+                    if let Ok(mut sq) = sqlite.lock() {
+                        match sq.add_bibchips(&bib_chips) {
+                            Ok(num) => {
+                                no_error = write_success(&stream, num);
+                            },
+                            Err(e) => {
+                                println!("Error adding bibchips. {e}");
+                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    message: format!("error adding bibchips: {e}")
                                 });
                             }
                         }
@@ -2794,6 +2854,48 @@ fn write_success(
     true
 }
 
+fn write_bibchips(
+    stream: &TcpStream,
+    bibchips: &Vec<bibchip::BibChip>
+) -> bool {
+    match serde_json::to_writer(stream, &responses::Responses::BibChips {
+        bib_chips: bibchips.to_vec(),
+    }) {
+        Ok(_) => {},
+        Err(e) => {
+            match e.io_error_kind() {
+                Some(ErrorKind::BrokenPipe) |
+                Some(ErrorKind::ConnectionReset) |
+                Some(ErrorKind::ConnectionAborted) => {
+                    return false;
+                },
+                _ => {
+                    println!("16/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
+        }
+    };
+    let mut writer = stream;
+    match writer.write_all(b"\n") {
+        Ok(_) => {},
+        Err(e) => {
+            match e.kind() {
+                ErrorKind::BrokenPipe |
+                ErrorKind::ConnectionReset |
+                ErrorKind::ConnectionAborted => {
+                    return false;
+                },
+                _ => {
+                    println!("16/ Something went wrong writing to the socket. {e}");
+                    return false;
+                }
+            }
+        }
+    };
+    true
+}
+
 fn write_participants(
     stream: &TcpStream,
     parts: &Vec<participant::Participant>
@@ -3276,16 +3378,16 @@ fn get_event_years(
 
 fn get_participants(
     http_client: &reqwest::blocking::Client,
-    api: Api,
-    slug: String,
-    year: String
+    api: &Api,
+    slug: &str,
+    year: &str
 ) -> Result<Vec<requests::RequestParticipant>, errors::Errors> {
     let url = api.uri();
     let response = match http_client.post(format!("{url}participants"))
         .headers(construct_headers(api.token()))
         .json(&results::requests::GetParticipantsRequest{
-            slug,
-            year
+            slug: String::from(slug),
+            year: String::from(year)
         })
         .send() {
             Ok(resp) => resp,
@@ -3304,6 +3406,49 @@ fn get_participants(
                 }
             };
             resp_body.participants
+        },
+        reqwest::StatusCode::NOT_FOUND => {
+            println!("event not found");
+            return Err(errors::Errors::NotFound);
+        }
+        other => {
+            println!("invalid status code: {other}");
+            return Err(errors::Errors::ServerError { message: String::from("invalid status code") })
+        }
+    };
+    Ok(output)
+}
+
+fn get_bibchips(
+    http_client: &reqwest::blocking::Client,
+    api: &Api,
+    slug: &str,
+    year: &str
+) -> Result<Vec<bibchip::BibChip>, errors::Errors> {
+    let url = api.uri();
+    let response = match http_client.post(format!("{url}bibchips"))
+        .headers(construct_headers(api.token()))
+        .json(&results::requests::GetBibChipsRequest{
+            slug: String::from(slug),
+            year: String::from(year)
+        })
+        .send() {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("error trying to talk to api: {e}");
+                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
+            }
+        };
+    let output = match response.status() {
+        reqwest::StatusCode::OK => {
+            let resp_body: results::responses::GetBibChipsResponse = match response.json() {
+                Ok(it) => it,
+                Err(e) => {
+                    println!("error trying to parse response from api: {e}");
+                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
+                }
+            };
+            resp_body.bib_chips
         },
         reqwest::StatusCode::NOT_FOUND => {
             println!("event not found");
