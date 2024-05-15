@@ -3383,7 +3383,7 @@ fn get_participants(
     year: &str
 ) -> Result<Vec<requests::RequestParticipant>, errors::Errors> {
     let url = api.uri();
-    let response = match http_client.post(format!("{url}participants"))
+    let response = match http_client.get(format!("{url}participants"))
         .headers(construct_headers(api.token()))
         .json(&results::requests::GetParticipantsRequest{
             slug: String::from(slug),
@@ -3426,7 +3426,7 @@ fn get_bibchips(
     year: &str
 ) -> Result<Vec<bibchip::BibChip>, errors::Errors> {
     let url = api.uri();
-    let response = match http_client.post(format!("{url}bibchips"))
+    let response = match http_client.get(format!("{url}bibchips"))
         .headers(construct_headers(api.token()))
         .json(&results::requests::GetBibChipsRequest{
             slug: String::from(slug),
