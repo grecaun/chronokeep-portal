@@ -16,6 +16,7 @@ struct ReadData {
     tags: Vec<TagData>,
     antenna_data: bool,
     antennas: [u8;MAX_ANTENNAS],
+    last_ka_received_at: u64
 }
 
 pub fn connect(
@@ -81,6 +82,7 @@ pub fn connect(
                 let mut read_map: HashMap<u128, (u128, TagData)> = HashMap::new();
                 let mut count: usize = 0;
                 let mut purge_count: usize = 0;
+                let mut last_ka_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                 loop {
                     /*
                         Start of reading loop
@@ -94,7 +96,7 @@ pub fn connect(
                         // unable to grab mutex...
                         break;
                     }
-                    match read(&mut t_stream, buf, leftover_buffer, leftover_num) {
+                    match read(&mut t_stream, buf, leftover_buffer, leftover_num, last_ka_received_at) {
                         Ok(data) => {
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
@@ -188,7 +190,7 @@ pub fn connect(
                      */
                 }
                 stop(&mut t_stream, &reading, &t_reader_name, &msg_id);
-                finalize(&mut t_stream, &msg_id, &reading);
+                finalize(&mut t_stream, &msg_id, &reading, last_ka_received_at);
                 save_reads(&mut read_map, &t_control, &t_sqlite, t_reader_name.as_str());
                 if let Ok(mut con) = t_connected.lock() {
                     *con = false;
@@ -559,7 +561,12 @@ fn stop_reading(t_stream: &mut TcpStream, msg_id: u32) -> Result<(), &'static st
     }
 }
 
-fn finalize(t_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>, reading: &Arc<sync::Mutex<bool>>) {
+fn finalize(
+    t_stream: &mut TcpStream,
+    msg_id: &Arc<sync::Mutex<u32>>,
+    reading: &Arc<sync::Mutex<bool>>,
+    last_ka_received_at: u64
+) {
     // finalize what we're doing
     let mut fin_id = match msg_id.lock() {
         Ok(id) => *id,
@@ -580,7 +587,7 @@ fn finalize(t_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>, reading: &
     let leftover_num: &mut usize = &mut 0;
     match t_stream.write_all(&close) {
         Ok(_) => {
-            match read(t_stream, buf, leftover_buffer, leftover_num) {
+            match read(t_stream, buf, leftover_buffer, leftover_num, last_ka_received_at) {
                 Ok(_) => (),
                 Err(e) => {
                     match e.kind() {
@@ -674,12 +681,14 @@ fn read(
     tcp_stream: &mut TcpStream,
     buf: &mut [u8;BUFFER_SIZE],
     leftover_buffer: &mut [u8;BUFFER_SIZE],
-    leftover_num: &mut usize
+    leftover_num: &mut usize,
+    last_ka_received_at: u64
 ) -> Result<ReadData, std::io::Error> {
     let mut output = ReadData {
         tags: Vec::new(),
         antenna_data: false,
         antennas: [0;MAX_ANTENNAS],
+        last_ka_received_at: last_ka_received_at
     };
     let numread = tcp_stream.read(buf);
     match numread {
@@ -702,6 +711,10 @@ fn read(
                         let max_ix = leftover_type.length as usize;
                         match leftover_type.kind {
                             llrp::message_types::KEEPALIVE => {
+                                let local_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                                if local_received_at > output.last_ka_received_at {
+                                    output.last_ka_received_at = local_received_at
+                                }
                                 let response = requests::keepalive_ack(&leftover_type.id);
                                 match tcp_stream.write_all(&response) {
                                     Ok(_) => (),
