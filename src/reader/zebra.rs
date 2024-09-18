@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
-use super::{ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
+use super::{reconnector::Reconnector, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
 pub mod requests;
 
@@ -24,7 +24,8 @@ pub fn connect(
     sqlite: &Arc<Mutex<sqlite::SQLite>>,
     control: &Arc<Mutex<control::Control>>,
     read_saver: &Arc<processor::ReadSaver>,
-    sound: Arc<SoundNotifier>
+    sound: Arc<SoundNotifier>,
+    reconnector: Option<Arc<Reconnector>>
 ) -> Result<JoinHandle<()>, &'static str> {
     let ip_addr = match IpAddr::from_str(&reader.ip_address) {
         Ok(addr) => addr,
@@ -68,6 +69,7 @@ pub fn connect(
             let t_control_sockets = reader.control_sockets.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
             let mut t_sight_processor = reader.sight_processor.clone();
+            let t_reconnector = reconnector.unwrap().clone();
 
             let output = thread::spawn(move|| {
                 let buf: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
@@ -83,6 +85,7 @@ pub fn connect(
                 let mut count: usize = 0;
                 let mut purge_count: usize = 0;
                 let mut last_ka_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                let mut reconnect = false;
                 loop {
                     /*
                         Start of reading loop
@@ -92,66 +95,14 @@ pub fn connect(
                         if *keepalive == false {
                             break;
                         };
-                    } else {
-                        // unable to grab mutex...
-                        break;
-                    }
-                    match read(&mut t_stream, buf, leftover_buffer, leftover_num, last_ka_received_at) {
-                        Ok(data) => {
-                            // process tags if we were told there were some
-                            if data.tags.len() > 0 {
-                                t_sound.notify_one();
-                                count += data.tags.len();
-                                let mut tags = data.tags;
-                                match process_tags(&mut read_map, &mut tags, &t_control, &t_read_saver, t_reader_name.as_str()) {
-                                    Ok(new_reads) => {
-                                        if new_reads.len() > 0 {
-                                            match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
-                                                Ok(_) => {},
-                                                Err(e) => {
-                                                    println!("error sending new reads to repeaters: {e}")
-                                                }
-                                            }
-                                            if let Some(processor) = t_sight_processor {
-                                                processor.notify();
-                                                t_sight_processor = Some(processor);
-                                            }
-                                        }
-                                    },
-                                    Err(e) => println!("Error processing tags. {e}"),
-                                };
-                            }
-                            // if antenna data exists then we can update the readers antennas
-                            if data.antenna_data {
-                                let mut updated = false;
-                                if let Ok(mut ant) = t_antennas.lock() {
-                                    for ix in 0..16 {
-                                        if data.antennas[ix] != ANTENNA_STATUS_NONE {
-                                            ant[ix] = data.antennas[ix];
-                                        }
-                                    }
-                                    updated = true;
-                                }
-                                // send out notification that we updated the readers
-                                if updated {
-                                    match send_antennas(t_reader_name.as_str(), &t_antennas, &t_control_sockets) {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            println!("error sending antennas to control sockets: {e}")
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            *leftover_num = 0;
-                            match e.kind() {
-                                ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
-                                    break;
-                                }
-                                // TimedOut == Windows, WouldBlock == Linux
-                                ErrorKind::TimedOut | ErrorKind::WouldBlock => {
-                                    match process_tags(&mut read_map, &mut Vec::new(), &t_control, &t_read_saver, t_reader_name.as_str()) {
+                        match read(&mut t_stream, buf, leftover_buffer, leftover_num, last_ka_received_at) {
+                            Ok(data) => {
+                                // process tags if we were told there were some
+                                if data.tags.len() > 0 {
+                                    t_sound.notify_one();
+                                    count += data.tags.len();
+                                    let mut tags = data.tags;
+                                    match process_tags(&mut read_map, &mut tags, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                         Ok(new_reads) => {
                                             if new_reads.len() > 0 {
                                                 match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -167,21 +118,81 @@ pub fn connect(
                                             }
                                         },
                                         Err(e) => println!("Error processing tags. {e}"),
+                                    };
+                                }
+                                // if antenna data exists then we can update the readers antennas
+                                if data.antenna_data {
+                                    let mut updated = false;
+                                    if let Ok(mut ant) = t_antennas.lock() {
+                                        for ix in 0..16 {
+                                            if data.antennas[ix] != ANTENNA_STATUS_NONE {
+                                                ant[ix] = data.antennas[ix];
+                                            }
+                                        }
+                                        updated = true;
                                     }
-                                },
-                                _ => println!("Error reading from reader. {e}"),
-                            }
-                        }
-                    }
-                    if count > TAG_LIMIT {
-                        purge_count += 1;
-                        println!("Purging tags. This is purge number {purge_count}.");
-                        match send_purge_tags(&mut t_stream, &msg_id) {
-                            Ok(_) => {
-                                count = 0;
+                                    // send out notification that we updated the readers
+                                    if updated {
+                                        match send_antennas(t_reader_name.as_str(), &t_antennas, &t_control_sockets) {
+                                            Ok(_) => {},
+                                            Err(e) => {
+                                                println!("error sending antennas to control sockets: {e}")
+                                            }
+                                        }
+                                    }
+                                }
+                                if last_ka_received_at < data.last_ka_received_at {
+                                    last_ka_received_at = data.last_ka_received_at
+                                }
+                                let right_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                                if right_now - 5 > last_ka_received_at {
+                                    println!("no keep alive message received in the last 5 seconds");
+                                    reconnect = true;
+                                    break;
+                                }
                             },
                             Err(e) => {
-                                println!("Error sending purge tag message. {e}");
+                                *leftover_num = 0;
+                                match e.kind() {
+                                    ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
+                                        println!("connection aborted/reset");
+                                        reconnect = true;
+                                        break;
+                                    }
+                                    // TimedOut == Windows, WouldBlock == Linux
+                                    ErrorKind::TimedOut | ErrorKind::WouldBlock => {
+                                        match process_tags(&mut read_map, &mut Vec::new(), &t_control, &t_read_saver, t_reader_name.as_str()) {
+                                            Ok(new_reads) => {
+                                                if new_reads.len() > 0 {
+                                                    match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
+                                                        Ok(_) => {},
+                                                        Err(e) => {
+                                                            println!("error sending new reads to repeaters: {e}")
+                                                        }
+                                                    }
+                                                    if let Some(processor) = t_sight_processor {
+                                                        processor.notify();
+                                                        t_sight_processor = Some(processor);
+                                                    }
+                                                }
+                                            },
+                                            Err(e) => println!("Error processing tags. {e}"),
+                                        }
+                                    },
+                                    _ => println!("Error reading from reader. {e}"),
+                                }
+                            }
+                        }
+                        if count > TAG_LIMIT {
+                            purge_count += 1;
+                            println!("Purging tags. This is purge number {purge_count}.");
+                            match send_purge_tags(&mut t_stream, &msg_id) {
+                                Ok(_) => {
+                                    count = 0;
+                                },
+                                Err(e) => {
+                                    println!("Error sending purge tag message. {e}");
+                                }
                             }
                         }
                     }
@@ -195,7 +206,10 @@ pub fn connect(
                 if let Ok(mut con) = t_connected.lock() {
                     *con = false;
                 }
-                println!("Thread reading from this reader has now closed.")
+                println!("Thread reading from this reader has now closed.");
+                if reconnect == true {
+                    //t_reconnector.as_ref().run();
+                }
             });
             Ok(output)
         },

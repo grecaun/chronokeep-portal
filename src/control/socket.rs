@@ -4,7 +4,7 @@ use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, sound_board::Voice};
 
 use self::notifications::Notification;
 
@@ -701,7 +701,20 @@ fn handle_stream(
                                                     sight_processor.clone(),
                                                 ) {
                                                     Ok(mut reader) => {
-                                                        match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone()) {
+                                                        let mut reconnector = Reconnector::new(
+                                                            readers.clone(),
+                                                            joiners.clone(),
+                                                            control_sockets.clone(),
+                                                            read_repeaters.clone(),
+                                                            sight_processor.clone(),
+                                                            control.clone(),
+                                                            sqlite.clone(),
+                                                            read_saver.clone(),
+                                                            sound.clone(),
+                                                            reader.id(),
+                                                            1
+                                                        );
+                                                        match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(Arc::new(reconnector))) {
                                                             Ok(j) => {
                                                                 if let Ok(mut join) = joiners.lock() {
                                                                     join.push(j);
@@ -835,7 +848,20 @@ fn handle_stream(
                                             reader.set_control_sockets(control_sockets.clone());
                                             reader.set_read_repeaters(read_repeaters.clone());
                                             reader.set_sight_processor(sight_processor.clone());
-                                            match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone()) {
+                                            let mut reconnector = Reconnector::new(
+                                                readers.clone(),
+                                                joiners.clone(),
+                                                control_sockets.clone(),
+                                                read_repeaters.clone(),
+                                                sight_processor.clone(),
+                                                control.clone(),
+                                                sqlite.clone(),
+                                                read_saver.clone(),
+                                                sound.clone(),
+                                                reader.id(),
+                                                1
+                                            );
+                                            match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(Arc::new(reconnector))) {
                                                 Ok(j) => {
                                                     if let Ok(mut join) = joiners.lock() {
                                                         join.push(j);

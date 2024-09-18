@@ -1,11 +1,13 @@
 use std::{io::Write, net::TcpStream, sync::{self, Arc, Mutex}, thread::JoinHandle};
 
+use reconnector::Reconnector;
 use serde::{Deserialize, Serialize};
 
 use crate::{control::{self, socket::MAX_CONNECTED, sound::SoundNotifier}, database::{sqlite, DBError}, processor};
 
 pub mod zebra;
 pub mod auto_connect;
+pub mod reconnector;
 
 pub const READER_KIND_ZEBRA: &str = "ZEBRA";
 pub const READER_KIND_RFID: &str = "RFID";
@@ -265,11 +267,12 @@ impl Reader {
         sqlite: &Arc<Mutex<sqlite::SQLite>>,
         control: &Arc<Mutex<control::Control>>,
         read_saver: &Arc<processor::ReadSaver>,
-        sound: Arc<SoundNotifier>
+        sound: Arc<SoundNotifier>,
+        reconnector: Option<Arc<Reconnector>>
     ) -> Result<JoinHandle<()>, &'static str> {
         match self.kind.as_str() {
             READER_KIND_ZEBRA => {
-                zebra::connect(self, sqlite, control, read_saver, sound)
+                zebra::connect(self, sqlite, control, read_saver, sound, reconnector)
             }
             _ => {
                 Err("reader type not supported")

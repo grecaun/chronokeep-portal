@@ -347,7 +347,7 @@ fn connect_reader(
                     return;
                 }
             };
-            match r.connect(mtx, &controls, &read_saver, sound) {
+            match r.connect(mtx, &controls, &read_saver, sound, None) {
                 Ok(j) => {
                     connected.push(r);
                     joiners.push(j);

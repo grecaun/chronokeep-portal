@@ -2,9 +2,9 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, processor, reader::AUTO_CONNECT_TRUE};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
 
-pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 40;
+pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 60;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum State {
@@ -85,7 +85,20 @@ impl AutoConnector {
                     reader.set_control_sockets(self.control_sockets.clone());
                     reader.set_read_repeaters(self.read_repeaters.clone());
                     reader.set_sight_processor(self.sight_processor.clone());
-                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone()) {
+                    let mut reconnector = Reconnector::new(
+                        self.readers.clone(),
+                        self.joiners.clone(),
+                        self.control_sockets.clone(),
+                        self.read_repeaters.clone(),
+                        self.sight_processor.clone(),
+                        self.control.clone(),
+                        self.sqlite.clone(),
+                        self.read_saver.clone(),
+                        self.sound.clone(),
+                        reader.id(),
+                        1
+                    );
+                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(Arc::new(reconnector))) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
