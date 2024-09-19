@@ -85,7 +85,7 @@ impl AutoConnector {
                     reader.set_control_sockets(self.control_sockets.clone());
                     reader.set_read_repeaters(self.read_repeaters.clone());
                     reader.set_sight_processor(self.sight_processor.clone());
-                    let mut reconnector = Reconnector::new(
+                    let reconnector = Reconnector::new(
                         self.readers.clone(),
                         self.joiners.clone(),
                         self.control_sockets.clone(),
@@ -98,7 +98,7 @@ impl AutoConnector {
                         reader.id(),
                         1
                     );
-                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(Arc::new(reconnector))) {
+                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);

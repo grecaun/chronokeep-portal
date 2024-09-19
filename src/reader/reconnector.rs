@@ -1,9 +1,10 @@
 use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, processor::{self, SightingsProcessor}};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, processor::{self}};
 
 pub const WAITING_PERIOD_SECONDS: u64 = 1;
 
+#[derive(Clone)]
 pub struct Reconnector {
     readers: Arc<Mutex<Vec<super::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
@@ -20,37 +21,6 @@ pub struct Reconnector {
 
 
 impl Reconnector {
-    pub(crate) fn new_internal(
-        readers: Arc<Mutex<Vec<super::Reader>>>,
-        joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
-        control: Arc<Mutex<control::Control>>,
-        sqlite: Arc<Mutex<sqlite::SQLite>>,
-        read_saver: Arc<processor::ReadSaver>,
-        sound: Arc<SoundNotifier>,
-        id: i64,
-        count: i32
-    ) -> Reconnector {
-        let sight_processor = SightingsProcessor::new(
-            Arc::new(Mutex::new(Default::default())),
-            Arc::new(Mutex::new(Default::default())),
-            sqlite.clone(),
-            Arc::new(Mutex::new(false))
-        );
-        Reconnector {
-            readers,
-            joiners,
-            control_sockets: Arc::new(Mutex::new(Default::default())),
-            read_repeaters: Arc::new(Mutex::new(Default::default())),
-            sight_processor: Arc::new(sight_processor),
-            control,
-            sqlite,
-            read_saver,
-            sound,
-            id,
-            count
-        }
-    }
-
     pub fn new(
         readers: Arc<Mutex<Vec<super::Reader>>>,
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
@@ -106,7 +76,7 @@ impl Reconnector {
                         self.id,
                         1
                     );
-                    match old_reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(Arc::new(reconnector))) {
+                    match old_reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
@@ -115,15 +85,16 @@ impl Reconnector {
                             let mut count = 0;
                             loop {
                                 count += 1;
-                                if count > 5 {
+                                if count > 5 || old_reader.is_reading() == Some(true) {
                                     break;
                                 }
                                 match old_reader.initialize() {
                                     Ok(_) => {
+                                        println!("Reader initialized. Try {count}.");
                                         break;
                                     },
                                     Err(e) => {
-                                        println!("Error initializing reader: {e}");
+                                        eprintln!("Error initializing reader: {e}");
                                     }
                                 }
                                 // wait for a few seconds before retrying
@@ -133,7 +104,7 @@ impl Reconnector {
                                 match old_reader.disconnect() {
                                     Ok(_) => {},
                                     Err(_) => {
-                                        println!("error attempting to disconnect from reader before reconnect attempt")
+                                        eprintln!("error attempting to disconnect from reader before reconnect attempt")
                                     },
                                 }
                                 readers.push(old_reader);

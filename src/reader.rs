@@ -268,7 +268,7 @@ impl Reader {
         control: &Arc<Mutex<control::Control>>,
         read_saver: &Arc<processor::ReadSaver>,
         sound: Arc<SoundNotifier>,
-        reconnector: Option<Arc<Reconnector>>
+        reconnector: Option<Reconnector>
     ) -> Result<JoinHandle<()>, &'static str> {
         match self.kind.as_str() {
             READER_KIND_ZEBRA => {

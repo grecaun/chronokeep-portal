@@ -271,7 +271,7 @@ pub fn set_keepalive(id: &u32) -> [u8;20] {
         0x00, 0x09,
         // keepalive trigger type - periodic
         0x01,
-        // time interval - 2000 (2 seconds)
+        // time interval - 2000 (2 seconds) (0x07 0xD0)
         0x00, 0x00, 0x07, 0xD0
     ]
 }

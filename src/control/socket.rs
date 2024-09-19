@@ -701,7 +701,7 @@ fn handle_stream(
                                                     sight_processor.clone(),
                                                 ) {
                                                     Ok(mut reader) => {
-                                                        let mut reconnector = Reconnector::new(
+                                                        let reconnector = Reconnector::new(
                                                             readers.clone(),
                                                             joiners.clone(),
                                                             control_sockets.clone(),
@@ -714,7 +714,7 @@ fn handle_stream(
                                                             reader.id(),
                                                             1
                                                         );
-                                                        match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(Arc::new(reconnector))) {
+                                                        match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(reconnector)) {
                                                             Ok(j) => {
                                                                 if let Ok(mut join) = joiners.lock() {
                                                                     join.push(j);
@@ -784,26 +784,22 @@ fn handle_stream(
                                     match u_readers.iter().position(|x| x.id() == id) {
                                         Some(ix) => {
                                             let mut reader = u_readers.remove(ix);
-                                            if reader.is_reading() == Some(true) {
-                                                match reader.stop() {
-                                                    Ok(_) => {},
-                                                    Err(e) => {
-                                                        println!("Error connecting to reader: {e}");
-                                                        no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                                            message: format!("error stopping reader: {e}")
-                                                        });
-                                                    }
+                                            match reader.stop() {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("Error connecting to reader: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                        message: format!("error stopping reader: {e}")
+                                                    });
                                                 }
                                             }
-                                            if reader.is_connected() == Some(true) {
-                                                match reader.disconnect() {
-                                                    Ok(_) => {},
-                                                    Err(e) => {
-                                                        println!("Error connecting to reader: {e}");
-                                                        no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                                            message: format!("error disconnecting reader: {e}")
-                                                        });
-                                                    }
+                                            match reader.disconnect() {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("Error connecting to reader: {e}");
+                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                        message: format!("error disconnecting reader: {e}")
+                                                    });
                                                 }
                                             }
                                             u_readers.push(reader);
@@ -848,7 +844,7 @@ fn handle_stream(
                                             reader.set_control_sockets(control_sockets.clone());
                                             reader.set_read_repeaters(read_repeaters.clone());
                                             reader.set_sight_processor(sight_processor.clone());
-                                            let mut reconnector = Reconnector::new(
+                                            let reconnector = Reconnector::new(
                                                 readers.clone(),
                                                 joiners.clone(),
                                                 control_sockets.clone(),
@@ -861,7 +857,7 @@ fn handle_stream(
                                                 reader.id(),
                                                 1
                                             );
-                                            match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(Arc::new(reconnector))) {
+                                            match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(reconnector)) {
                                                 Ok(j) => {
                                                     if let Ok(mut join) = joiners.lock() {
                                                         join.push(j);
