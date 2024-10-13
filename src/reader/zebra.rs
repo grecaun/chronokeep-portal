@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, fs, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
@@ -771,7 +771,8 @@ fn read(
                                 }
                             }
                             found_type => {
-                                println!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type));
+                                //println!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type));
+                                fs::write("unknown_messages.txt", format!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)))?;
                             },
                         }
                     }
@@ -838,7 +839,8 @@ fn read(
                                 }
                             }
                             found_type => {
-                                println!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type));
+                                //println!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type));
+                                fs::write("unknown_messages.txt", format!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)))?;
                             },
                         }
                         cur_ix = max_ix;
