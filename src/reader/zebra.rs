@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{reconnector::Reconnector, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
@@ -10,7 +10,7 @@ pub mod requests;
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 pub const BUFFER_SIZE: usize = 65536;
 // FX7500 stops around 750k -> 900k tags, FX9600 stops around 5.5 million tags
-pub const TAG_LIMIT: usize = 200000;
+pub const TAG_LIMIT: usize = 100000;
 
 struct ReadData {
     tags: Vec<TagData>,
@@ -770,8 +770,8 @@ fn read(
                                     Err(_) => (),
                                 }
                             }
-                            _ => {
-                                //println!("Message Type Found! V: {} - {}", info.version, found_type);
+                            found_type => {
+                                println!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type));
                             },
                         }
                     }
@@ -837,8 +837,8 @@ fn read(
                                     Err(_) => (),
                                 }
                             }
-                            _ => {
-                                //println!("Message Type Found! V: {} - {}", info.version, found_type);
+                            found_type => {
+                                println!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type));
                             },
                         }
                         cur_ix = max_ix;
