@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, fs::OpenOptions, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
@@ -706,6 +706,8 @@ fn read(
         antennas: [0;MAX_ANTENNAS],
         last_ka_received_at: last_ka_received_at
     };
+
+    let mut file = OpenOptions::new().append(true).open("unknown_messages.txt").unwrap();
     let numread = tcp_stream.read(buf);
     match numread {
         Ok(num) => {
@@ -772,7 +774,9 @@ fn read(
                             }
                             found_type => {
                                 //println!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type));
-                                fs::write("unknown_messages.txt", format!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)))?;
+                                if let Err(e) = writeln!(file, "Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)) {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
                             },
                         }
                     }
@@ -840,7 +844,9 @@ fn read(
                             }
                             found_type => {
                                 //println!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type));
-                                fs::write("unknown_messages.txt", format!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type)))?;
+                                if let Err(e) = writeln!(file, "Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type)) {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
                             },
                         }
                         cur_ix = max_ix;
