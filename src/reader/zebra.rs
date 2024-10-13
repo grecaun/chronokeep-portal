@@ -840,7 +840,7 @@ fn read(
                             }
                             found_type => {
                                 //println!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type));
-                                fs::write("unknown_messages.txt", format!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)))?;
+                                fs::write("unknown_messages.txt", format!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type)))?;
                             },
                         }
                         cur_ix = max_ix;
