@@ -830,7 +830,7 @@ fn read(
                                     },
                                     Err(_) => (),
                                 }
-                            }
+                            },
                             llrp::message_types::READER_EVENT_NOTIFICATION => {
                                 match process_reader_event_notification(&buf, cur_ix + 10, &max_ix) {
                                     Ok(antenna) => {
@@ -841,10 +841,55 @@ fn read(
                                     },
                                     Err(_) => (),
                                 }
-                            }
+                            },
+                            llrp::message_types::ADD_ROSPEC_RESPONSE => {
+                                if let Err(e) = writeln!(file, "ADD_ROSPEC_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::ENABLE_ROSPEC_RESPONSE => {
+                                if let Err(e) = writeln!(file, "ENABLE_ROSPEC_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::START_ROSPEC_RESPONSE => {
+                                if let Err(e) = writeln!(file, "START_ROSPEC_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::STOP_ROSPEC_RESPONSE => {
+                                if let Err(e) = writeln!(file, "STOP_ROSPEC_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::DISABLE_ROSPEC_RESPONSE => {
+                                if let Err(e) = writeln!(file, "DISABLE_ROSPEC_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::DELETE_ROSPEC_RESPONSE => {
+                                if let Err(e) = writeln!(file, "DELETE_ROSPEC_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE => {
+                                if let Err(e) = writeln!(file, "DELETE_ACCESS_SPEC_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::SET_READER_CONFIG_RESPONSE => {
+                                if let Err(e) = writeln!(file, "SET_READER_CONFIG_RESPONSE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::CUSTOM_MESSAGE => {
+                                if let Err(e) = writeln!(file, "CUSTOM_MESSAGE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
                             found_type => {
                                 //println!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type));
-                                if let Err(e) = writeln!(file, "Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type)) {
+                                if let Err(e) = writeln!(file, "Unknown message Type Found! V: {} - {:?}", info.version, get_message_name(found_type)) {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
