@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fs::OpenOptions, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::{self, FromStr}, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
+use core::str;
+use std::{collections::HashMap, fs::OpenOptions, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
@@ -771,7 +772,140 @@ fn read(
                                     },
                                     Err(_) => (),
                                 }
-                            }
+                            }, // Processing of initialization and shutdown commands.
+                            llrp::message_types::ADD_ROSPEC_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "ADD_ROSPEC_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::ENABLE_ROSPEC_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "ENABLE_ROSPEC_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::START_ROSPEC_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "START_ROSPEC_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::STOP_ROSPEC_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "STOP_ROSPEC_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::DISABLE_ROSPEC_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "DISABLE_ROSPEC_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::DELETE_ROSPEC_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "DELETE_ROSPEC_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "DELETE_ACCESS_SPEC_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::SET_READER_CONFIG_RESPONSE => {
+                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "SET_READER_CONFIG_RESPONSE - {response_message}") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
+                            llrp::message_types::CUSTOM_MESSAGE => {
+                                if let Err(e) = writeln!(file, "CUSTOM_MESSAGE") {
+                                    eprintln!("Couldn't write to file: {}", e);
+                                }
+                            },
                             found_type => {
                                 //println!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type));
                                 if let Err(e) = writeln!(file, "Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)) {
@@ -841,44 +975,132 @@ fn read(
                                     },
                                     Err(_) => (),
                                 }
-                            },
-                            llrp::message_types::ADD_ROSPEC_RESPONSE => {
-                                if let Err(e) = writeln!(file, "ADD_ROSPEC_RESPONSE") {
+                            }, // Processing of initialization and shutdown commands.
+                            llrp::message_types::ADD_ROSPEC_RESPONSE  => {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "ADD_ROSPEC_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
                             llrp::message_types::ENABLE_ROSPEC_RESPONSE => {
-                                if let Err(e) = writeln!(file, "ENABLE_ROSPEC_RESPONSE") {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "ENABLE_ROSPEC_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
                             llrp::message_types::START_ROSPEC_RESPONSE => {
-                                if let Err(e) = writeln!(file, "START_ROSPEC_RESPONSE") {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "START_ROSPEC_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
                             llrp::message_types::STOP_ROSPEC_RESPONSE => {
-                                if let Err(e) = writeln!(file, "STOP_ROSPEC_RESPONSE") {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "STOP_ROSPEC_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
                             llrp::message_types::DISABLE_ROSPEC_RESPONSE => {
-                                if let Err(e) = writeln!(file, "DISABLE_ROSPEC_RESPONSE") {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "DISABLE_ROSPEC_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
                             llrp::message_types::DELETE_ROSPEC_RESPONSE => {
-                                if let Err(e) = writeln!(file, "DELETE_ROSPEC_RESPONSE") {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "DELETE_ROSPEC_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
                             llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE => {
-                                if let Err(e) = writeln!(file, "DELETE_ACCESS_SPEC_RESPONSE") {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "DELETE_ACCESS_SPEC_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
                             llrp::message_types::SET_READER_CONFIG_RESPONSE => {
-                                if let Err(e) = writeln!(file, "SET_READER_CONFIG_RESPONSE") {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
+                                {
+                                    Ok(resp) => match resp {
+                                        Some(msg) => (false, msg),
+                                        None => (true, "success".to_string()),
+                                    },
+                                    Err(msg) => (false, msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to start/stop the reader.
+                                }
+                                if let Err(e) = writeln!(file, "SET_READER_CONFIG_RESPONSE - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
@@ -965,6 +1187,64 @@ fn process_reader_event_notification(buf: &[u8;BUFFER_SIZE], start_ix: usize, ma
         param_ix += param_info.length as usize;
     }
     Ok(output)
+}
+
+
+fn process_llrp_status_parameter(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<String>, &'static str> {
+    // ---------- LLRPStatus Parameter ----------
+    // first 6 bits are reserved
+    // next 10 bits are Type (287)
+    // next 16 bits are the length of the message
+    // next 16 bits are status code
+    // next 16 bits are are error description bytecount (BC)
+    // what follows is BC bytes length error description as UTF-8 String
+    // optionally followed by FieldError Parameter
+            // first 6 bits are reserved
+            // next 10 bits are type (288)
+            // next 16 bits are the length of the parameter (8 bytes)
+            // next 16 bits are the FieldNum (field number for which the error applies)
+            // followed by a 16 bit integer specifying the error code (found under LLRP Status Codes)
+    // optionally followed by ParameterError Parameter
+            // first 6 bits are reserved
+            // next 10 bits are type (289)
+            // next 16 bits specify the parameter type that caused the error
+            // next 16 bits are the error code (possible values under LLRP Status Codes)
+            // optionally followed by FieldError Parameter
+            // optionally followed by ParameterError Parameter
+    let bits = ((buf[start_ix] as u32) << 24) +
+            ((buf[start_ix+1] as u32) << 16) +
+            ((buf[start_ix+2] as u32) << 8) +
+            (buf[start_ix+3] as u32);
+    let param_info = match llrp::bit_masks::get_param_type(&bits) {
+        Ok(info) => info,
+        Err(_) => return Err("unable to get parameter info"),
+    };
+    if parameter_types::LLRP_STATUS != param_info.kind {
+        return Err("invalid llrp status parameter")
+    }
+    let mut param_ix = start_ix + 4;
+    let mut output: Option<String> = None;
+    let code: u16 = ((buf[param_ix] as u16) << 8) +
+            (buf[param_ix+1] as u16);
+    if parameter_types::M_SUCCESS != code {
+        let status_name = match parameter_types::get_llrp_status_name(code) {
+            Some(stat) => stat,
+            None => "UNKNOWN"
+        };
+        let error_description_bytecount: usize = ((buf[param_ix+2] as usize) << 8) +
+                (buf[param_ix+3] as usize);
+        param_ix += 4;
+        if param_ix + error_description_bytecount + 1 > *max_ix {
+            return Err("error message length longer than parameter reported length")
+        }
+        let error_description = match str::from_utf8(&buf[param_ix..param_ix+error_description_bytecount+1]) {
+            Ok(desc) => desc,
+            Err(_) => return Err("unable to convert error description to string")
+        };
+        output = Some(format!("{status_name}: {error_description}"));
+        // potentially process FieldError Parameter and ParameterError Parameter after this
+    }
+    return Ok(output)
 }
 
 fn process_reader_config(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<[u8;MAX_ANTENNAS]>, &'static str> {

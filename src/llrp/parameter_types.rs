@@ -152,6 +152,35 @@ pub const C1G2_BLOCK_WRITE_OP_SPEC_RESULT: u16 = 354;
 pub const C1G2_BLOCK_PERMALOCK_OP_SPEC_RESULT: u16 = 361;
 pub const C1G2_GET_BLOCK_PERMALOCK_STATUS_OP_SPEC_RESULT: u16 = 362;
 
+// LLRP Status Codes
+pub const M_SUCCESS: u16 = 0;
+pub const M_PARAMETER_ERROR: u16 = 100;
+pub const M_FIELD_ERROR: u16 = 101;
+pub const M_UNEXPECTED_PARAMETER: u16 = 102;
+pub const M_MISSING_PARAMETER: u16 = 103;
+pub const M_DUPLICATE_PARAMETER: u16 = 104;
+pub const M_OVERFLOW_PARAMETER: u16 = 105;
+pub const M_OVERFLOW_FIELD: u16 = 106;
+pub const M_UNKNOWN_PARAMETER: u16 = 107;
+pub const M_UNKNOWN_FIELD: u16 = 108;
+pub const M_UNSUPPORTED_MESSAGE: u16 = 109;
+pub const M_UNSUPPORTED_VERSION: u16 = 110;
+pub const M_UNSUPPORTED_PARAMETER: u16 = 111;
+pub const M_UNEXPECTED_MESSAGE: u16 = 112;
+pub const P_PARAMETER_ERROR: u16 = 200;
+pub const P_FIELD_ERROR: u16 = 201;
+pub const P_UNEXPECTED_PARAMETER: u16 = 202;
+pub const P_MISSING_PARAMETER: u16 = 203;
+pub const P_DUPLICATE_PARAMETER: u16 = 204;
+pub const P_OVERFLOW_PARAMETER: u16 = 205;
+pub const P_OVERFLOW_FIELD: u16 = 206;
+pub const P_UNKNOWN_PARAMETER: u16 = 207;
+pub const P_UNKNOWN_FIELD: u16 = 208;
+pub const P_UNSUPPORTED_PARAMETER: u16 = 209;
+pub const A_INVALID: u16 = 300;
+pub const A_OUT_OF_RANGE: u16 = 301;
+pub const R_DEVICE_ERROR: u16 = 401;
+
 pub fn get_parameter_name(kind: u16) -> Option<&'static str> {
     match kind {
         128 => Some("UTC_TIMESTAMP"),
@@ -276,5 +305,38 @@ pub fn get_parameter_name(kind: u16) -> Option<&'static str> {
         354 => Some("C1G2_BLOCK_WRITE_OP_SPEC_RESULT"),
         361 => Some("C1G2_BLOCK_PERMALOCK_OP_SPEC_RESULT"),
         _ => None,
+    }
+}
+
+pub fn get_llrp_status_name(kind: u16) -> Option<&'static str> {
+    match kind {
+        0 => Some("M_SUCCESS"),
+        100 => Some("M_PARAMETER_ERROR"),
+        101 => Some("M_FIELD_ERROR"),
+        102 => Some("M_UNEXPECTED_PARAMETER"),
+        103 => Some("M_MISSING_PARAMETER"),
+        104 => Some("M_DUPLICATE_PARAMETER"),
+        105 => Some("M_OVERFLOW_PARAMETER"),
+        106 => Some("M_OVERFLOW_FIELD"),
+        107 => Some("M_UNKNOWN_PARAMETER"),
+        108 => Some("M_UNKNOWN_FIELD"),
+        109 => Some("M_UNSUPPORTED_MESSAGE"),
+        110 => Some("M_UNSUPPORTED_VERSION"),
+        111 => Some("M_UNSUPPORTED_PARAMETER"),
+        112 => Some("M_UNEXPECTED_MESSAGE"),
+        200 => Some("P_PARAMETER_ERROR"),
+        201 => Some("P_FIELD_ERROR"),
+        202 => Some("P_UNEXPECTED_PARAMETER"),
+        203 => Some("P_MISSING_PARAMETER"),
+        204 => Some("P_DUPLICATE_PARAMETER"),
+        205 => Some("P_OVERFLOW_PARAMETER"),
+        206 => Some("P_OVERFLOW_FIELD"),
+        207 => Some("P_UNKNOWN_PARAMETER"),
+        208 => Some("P_UNKNOWN_FIELD"),
+        209 => Some("P_UNSUPPORTED_PARAMETER"),
+        300 => Some("A_INVALID"),
+        301 => Some("A_OUT_OF_RANGE"),
+        401 => Some("R_DEVICE_ERROR"),
+        _ => None
     }
 }
