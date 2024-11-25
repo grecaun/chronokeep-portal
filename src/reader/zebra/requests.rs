@@ -199,10 +199,15 @@ pub fn purge_tags(id: &u32) -> [u8;16] {
         ((id & 0x00FF0000) >> 16) as u8,
         ((id & 0x0000FF00) >> 8) as u8,
         (id & 0x000000FF) as u8,
-        // vendor ID 161
-        0x00, 0x00, 0x00, 0xA1,
-        // other info
-        0x03, 0x00
+        // vendor ID (motorola - 161)
+        ((parameter_types::MOTOROLA_VENDOR_ID & 0xFF000000) >> 24) as u8,
+        ((parameter_types::MOTOROLA_VENDOR_ID & 0x00FF0000) >> 16) as u8,
+        ((parameter_types::MOTOROLA_VENDOR_ID & 0x0000FF00) >> 8) as u8,
+        (parameter_types::MOTOROLA_VENDOR_ID & 0x000000FF) as u8,
+        // message subtype (3)
+        (parameter_types::MOTO_PURGE_TAGS) as u8,
+        // PurgeTagEventStateOnly (false, purge all tags)
+        0x00
     ]
 }
 

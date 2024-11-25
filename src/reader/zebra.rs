@@ -2,7 +2,7 @@ use core::str;
 use std::{collections::HashMap, fs::OpenOptions, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types::{self, get_llrp_custom_message_name}}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{reconnector::Reconnector, ReaderStatus, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
@@ -627,8 +627,12 @@ fn finalize(
 }
 
 fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let purge_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
     // purge tags
-    let buf = requests::purge_tags(&4);
+    let buf = requests::purge_tags(&purge_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
@@ -643,47 +647,56 @@ fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -
 }
 
 fn send_connect_messages(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let mut connect_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
     // set reader configuration     - set keepalive
-    let buf = requests::set_keepalive(&3);
+    let buf = requests::set_keepalive(&connect_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
+    connect_id += 1;
     // purge tags
-    let buf = requests::purge_tags(&4);
+    let buf = requests::purge_tags(&connect_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
+    connect_id += 1;
     // set reader configuration     - set no filter
-    let buf = requests::set_no_filter(&5);
+    let buf = requests::set_no_filter(&connect_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
+    connect_id += 1;
     // set reader configuration     - normal config
-    let buf = requests::set_reader_config(&6);
+    let buf = requests::set_reader_config(&connect_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
+    connect_id += 1;
     // enable events and reports
-    let buf = requests::enable_events_and_reports(&7);
+    let buf = requests::enable_events_and_reports(&connect_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
+    connect_id += 1;
     // get antenna properties (config == 2)
     // this will report back information on the antennas
     // gpi_port and gpo_port values should be ignored in this query
-    let buf = requests::get_reader_config(&8, &0, &2, &0, &0);
+    let buf = requests::get_reader_config(&connect_id, &0, &2, &0, &0);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
     // update message id
     if let Ok(mut id) = msg_id.lock() {
-        *id = 8;
+        *id = connect_id + 1;
     } else {
         return Err("unable to get id lock")
     }
@@ -704,7 +717,7 @@ fn read(
         last_ka_received_at: last_ka_received_at
     };
 
-    let mut file = OpenOptions::new().append(true).open("unknown_messages.txt").unwrap();
+    let mut file = OpenOptions::new().append(true).create(true).open("./unknown_messages.txt").unwrap();
     let numread = tcp_stream.read(buf);
     match numread {
         Ok(num) => {
@@ -898,7 +911,33 @@ fn read(
                                 }
                             },
                             llrp::message_types::CUSTOM_MESSAGE => {
-                                if let Err(e) = writeln!(file, "CUSTOM_MESSAGE") {
+                                let (success, message_name, response_message) = match process_custom_message(leftover_buffer, 10, &max_ix) {
+                                    Ok(resp) => match resp {
+                                        Some(msg_info) => match msg_info {
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_PURGE_TAGS_RESPONSE) |
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_UPDATE_RADIO_FIRMWARE_RESPONSE) |
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_UPDATE_RADIO_CONFIG_RESPONSE) |
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_GET_RADIO_UPDATE_STATUS_RESPONSE) => {
+                                                match process_llrp_status_parameter(buf, cur_ix + 15, &max_ix) {
+                                                    Ok(sub_resp) => {
+                                                        match sub_resp {
+                                                            Some(msg) => (false, get_llrp_custom_message_name(msg_info.0, msg_info.1), msg),
+                                                            None => (true, get_llrp_custom_message_name(msg_info.0, msg_info.1), "success".to_string()),
+                                                        }
+                                                    },
+                                                    Err(msg) => (false, get_llrp_custom_message_name(msg_info.0, msg_info.1), msg.to_string()),
+                                                }
+                                            },
+                                            _ => (false, "UNKNOWN CUSTOM MESSAGE", "unknown vendor/message type".to_string()),
+                                        },
+                                        None => (false, "UNKNOWN CUSTOM MESSAGE", "no information returned".to_string()),
+                                    },
+                                    Err(msg) => (false, "UNKNOWN CUSTOM MESSAGE", msg.to_string()),
+                                };
+                                if success {
+                                    // Continue process as required to start/stop the reader (or verify purge tags worked)
+                                }
+                                if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
@@ -973,8 +1012,7 @@ fn read(
                                 }
                             }, // Processing of initialization and shutdown commands.
                             llrp::message_types::ADD_ROSPEC_RESPONSE  => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -989,8 +1027,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::ENABLE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -1005,8 +1042,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::START_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -1021,8 +1057,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::STOP_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -1037,8 +1072,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::DISABLE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -1053,8 +1087,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::DELETE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -1069,8 +1102,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -1085,8 +1117,7 @@ fn read(
                                 }
                             },
                             llrp::message_types::SET_READER_CONFIG_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, 10, &max_ix)
-                                {
+                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
                                         Some(msg) => (false, msg),
                                         None => (true, "success".to_string()),
@@ -1101,7 +1132,33 @@ fn read(
                                 }
                             },
                             llrp::message_types::CUSTOM_MESSAGE => {
-                                if let Err(e) = writeln!(file, "CUSTOM_MESSAGE") {
+                                let (success, message_name, response_message) = match process_custom_message(&buf, cur_ix + 10, &max_ix) {
+                                    Ok(resp) => match resp {
+                                        Some(msg_info) => match msg_info {
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_PURGE_TAGS_RESPONSE) |
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_UPDATE_RADIO_FIRMWARE_RESPONSE) |
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_UPDATE_RADIO_CONFIG_RESPONSE) |
+                                            (parameter_types::MOTOROLA_VENDOR_ID, parameter_types::MOTO_GET_RADIO_UPDATE_STATUS_RESPONSE) => {
+                                                match process_llrp_status_parameter(buf, cur_ix + 15, &max_ix) {
+                                                    Ok(sub_resp) => {
+                                                        match sub_resp {
+                                                            Some(msg) => (false, get_llrp_custom_message_name(msg_info.0, msg_info.1), msg),
+                                                            None => (true, get_llrp_custom_message_name(msg_info.0, msg_info.1), "success".to_string()),
+                                                        }
+                                                    },
+                                                    Err(msg) => (false, get_llrp_custom_message_name(msg_info.0, msg_info.1), msg.to_string()),
+                                                }
+                                            },
+                                            _ => (false, "UNKNOWN CUSTOM MESSAGE", "unknown vendor/message type".to_string()),
+                                        },
+                                        None => (false, "UNKNOWN CUSTOM MESSAGE", "no information returned".to_string()),
+                                    },
+                                    Err(msg) => (false, "UNKNOWN CUSTOM MESSAGE", msg.to_string()),
+                                };
+                                if success {
+                                    // TODO Continue process as required to connect to the reader or process purge tags.
+                                }
+                                if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
@@ -1185,6 +1242,20 @@ fn process_reader_event_notification(buf: &[u8;BUFFER_SIZE], start_ix: usize, ma
     Ok(output)
 }
 
+fn process_custom_message(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<(u32, u16)>, &'static str> {
+    // first 32 bits are the vendor identifier
+    // next 8 bits are the message subtype
+    // the leftover bits are the vendor specified payload
+    if *max_ix < start_ix + 4 {
+        return Err("invalid length")
+    }
+    let vendor_id = ((buf[start_ix] as u32) << 24) +
+            ((buf[start_ix+1] as u32) << 16) +
+            ((buf[start_ix+2] as u32) << 8) +
+            (buf[start_ix+3] as u32);
+    let subtype = buf[start_ix+4] as u16;
+    return Ok(Some((vendor_id, subtype)));
+}
 
 fn process_llrp_status_parameter(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<String>, &'static str> {
     // ---------- LLRPStatus Parameter ----------
@@ -1216,6 +1287,7 @@ fn process_llrp_status_parameter(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix
         Err(_) => return Err("unable to get parameter info"),
     };
     if parameter_types::LLRP_STATUS != param_info.kind {
+        println!("invalid llrp status parameter parsed: {}", param_info.kind);
         return Err("invalid llrp status parameter")
     }
     let mut param_ix = start_ix + 4;
