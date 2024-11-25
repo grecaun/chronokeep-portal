@@ -21,6 +21,22 @@ pub const ANTENNA_STATUS_NONE: u8 = 0;
 pub const ANTENNA_STATUS_DISCONNECTED: u8 = 1;
 pub const ANTENNA_STATUS_CONNECTED: u8 = 2;
 
+#[derive(PartialEq, Eq)]
+pub enum ReaderStatus {
+    Disconnected,
+    //Connecting,
+    Connected,
+    //Starting,
+    Started,
+    //Stopping,
+    Stopped,
+    //Disconnecting,
+}
+
+impl Default for ReaderStatus {
+    fn default() -> Self { ReaderStatus::Disconnected }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Reader {
     id: i64,
@@ -41,9 +57,7 @@ pub struct Reader {
     pub msg_id: Arc<sync::Mutex<u32>>,
 
     #[serde(skip)]
-    pub reading: Arc<sync::Mutex<bool>>,
-    #[serde(skip)]
-    pub connected: Arc<sync::Mutex<bool>>,
+    pub status: Arc<sync::Mutex<ReaderStatus>>,
     
     #[serde(skip)]
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
@@ -71,8 +85,7 @@ impl Reader {
             socket: Mutex::new(None),
             keepalive: Arc::new(Mutex::new(true)),
             msg_id: Arc::new(Mutex::new(0)),
-            reading: Arc::new(Mutex::new(false)),
-            connected: Arc::new(Mutex::new(false)),
+            status: Arc::new(Mutex::new(ReaderStatus::Disconnected)),
             auto_connect,
             control_sockets: Arc::new(Mutex::new(Default::default())),
             read_repeaters: Arc::new(Mutex::new(Default::default())),
@@ -121,8 +134,7 @@ impl Reader {
                     socket: sync::Mutex::new(None),
                     keepalive: Arc::new(sync::Mutex::new(true)),
                     msg_id: Arc::new(sync::Mutex::new(0)),
-                    reading: Arc::new(sync::Mutex::new(false)),
-                    connected: Arc::new(sync::Mutex::new(false)),
+                    status: Arc::new(sync::Mutex::new(ReaderStatus::Disconnected)),
                     auto_connect,
                     control_sockets,
                     read_repeaters,
@@ -205,16 +217,17 @@ impl Reader {
 
     pub fn is_connected(&self) -> Option<bool> {
         let mut output: Option<bool> = None;
-        if let Ok(con) = self.connected.lock() {
-            output = Some(*con);
+        if let Ok(con) = self.status.lock() {
+            // All states other than Disconnected should mark the reader as connected.
+            output = Some(ReaderStatus::Disconnected != *con)
         }
         output
     }
 
     pub fn is_reading(&self) -> Option<bool> {
         let mut output: Option<bool> = None;
-        if let Ok(con) = self.reading.lock() {
-            output = Some(*con);
+        if let Ok(con) = self.status.lock() {
+            output = Some(ReaderStatus::Started == *con)
         }
         output
     }
@@ -224,8 +237,8 @@ impl Reader {
         if let Ok(mut keepalive) = self.keepalive.lock() {
             *keepalive = false;
         };
-        if let Ok(mut con) = self.connected.lock() {
-            *con = false;
+        if let Ok(mut con) = self.status.lock() {
+            *con = ReaderStatus::Disconnected;
         }
         Ok(())
     }

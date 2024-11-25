@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
-use super::{reconnector::Reconnector, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
+use super::{reconnector::Reconnector, ReaderStatus, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
 pub mod requests;
 
@@ -39,6 +39,9 @@ pub fn connect(
     match res {
         Err(_) => return Err("unable to connect"),
         Ok(mut tcp_stream) => {
+            //if let Ok(mut con) = reader.status.lock() {
+            //    *con = ReaderStatus::Connecting;
+            //}
             // try to send connection messages
             match send_connect_messages(&mut tcp_stream, &reader.msg_id) {
                 Ok(_) => println!("Successfully connected to reader {}.", reader.nickname()),
@@ -51,18 +54,17 @@ pub fn connect(
                     return Err("error copying stream to thread")
                 }
             };
-            if let Ok(mut con) = reader.connected.lock() {
-                *con = true;
+            if let Ok(mut con) = reader.status.lock() {
+                *con = ReaderStatus::Connected;
             }
             // copy values for out thread
             let mut t_stream = tcp_stream;
             let t_mutex = reader.keepalive.clone();
             let msg_id = reader.msg_id.clone();
-            let reading = reader.reading.clone();
+            let status = reader.status.clone();
             let t_reader_name = reader.nickname.clone();
             let t_sqlite = sqlite.clone();
             let t_control = control.clone();
-            let t_connected = reader.connected.clone();
             let t_sound = sound.clone();
             let t_antennas = reader.antennas.clone();
             let t_read_saver = read_saver.clone();
@@ -201,11 +203,11 @@ pub fn connect(
                         End of reading loop
                      */
                 }
-                stop(&mut t_stream, &reading, &t_reader_name, &msg_id);
-                finalize(&mut t_stream, &msg_id, &reading, last_ka_received_at);
+                stop(&mut t_stream, &status, &t_reader_name, &msg_id);
+                finalize(&mut t_stream, &msg_id, &status, last_ka_received_at);
                 save_reads(&mut read_map, &t_control, &t_sqlite, t_reader_name.as_str());
-                if let Ok(mut con) = t_connected.lock() {
-                    *con = false;
+                if let Ok(mut con) = status.lock() {
+                    *con = ReaderStatus::Disconnected;
                 }
                 println!("Thread reading from this reader has now closed.");
                 if reconnect == true {
@@ -220,11 +222,11 @@ pub fn connect(
 }
 
 pub fn initialize(reader: &mut super::Reader) -> Result<(), &'static str> {
-    if let Ok(mut r) = reader.reading.lock() {
-        if *r {
-            return Err("already reading")
+    if let Ok(r) = reader.status.lock() {
+        if ReaderStatus::Connected != *r {
+            return Err("already reading or not connected")
         }
-        *r = true;
+        //*r = ReaderStatus::Starting;
     } else {
         return Err("unable to check if we're actually reading")
     }
@@ -275,6 +277,9 @@ pub fn initialize(reader: &mut super::Reader) -> Result<(), &'static str> {
                 return Err("not connected")
             }
         }
+        if let Ok(mut r) = reader.status.lock() {
+            *r = ReaderStatus::Started;
+        } 
         Ok(())
     } else {
         return Err("unable to get stream mutex")
@@ -282,8 +287,8 @@ pub fn initialize(reader: &mut super::Reader) -> Result<(), &'static str> {
 }
 
 pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
-    if let Ok(r) = reader.reading.lock() {
-        if !*r {
+    if let Ok(r) = reader.status.lock() {
+        if ReaderStatus::Started != *r {
             return Err("not reading")
         }
     } else {
@@ -291,9 +296,9 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
     }
     let msg_id = reader.get_next_id();
     if let Ok(stream) = reader.socket.lock() {
-        if let Ok(mut r) = reader.reading.lock() {
-            *r = false;
-        }
+        //if let Ok(mut r) = reader.status.lock() {
+        //    *r = ReaderStatus::Stopping;
+        //}
         match &*stream {
             Some(s) => {
                 let mut w_stream = match s.try_clone() {
@@ -311,6 +316,9 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
                 return Err("not connected")
             }
         }
+        if let Ok(mut r) = reader.status.lock() {
+            *r = ReaderStatus::Stopped;
+        }
         Ok(())
     } else {
         Err("unable to get stream mutex")
@@ -319,12 +327,12 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
 
 fn stop(
     socket: &mut TcpStream,
-    reading: &Arc<Mutex<bool>>,
+    status: &Arc<Mutex<ReaderStatus>>,
     nickname: &String,
     msg_mtx: &Arc<sync::Mutex<u32>>
 ) {
-    if let Ok(r) = reading.lock() {
-        if !*r {
+    if let Ok(r) = status.lock() {
+        if ReaderStatus::Disconnected == *r {
             return
         }
     }
@@ -581,7 +589,7 @@ fn stop_reading(t_stream: &mut TcpStream, msg_id: u32) -> Result<(), &'static st
 fn finalize(
     t_stream: &mut TcpStream,
     msg_id: &Arc<sync::Mutex<u32>>,
-    reading: &Arc<sync::Mutex<bool>>,
+    status: &Arc<sync::Mutex<ReaderStatus>>,
     last_ka_received_at: u64
 ) {
     // finalize what we're doing
@@ -589,8 +597,8 @@ fn finalize(
         Ok(id) => *id,
         Err(_) => 0,
     };
-    if let Ok(r) = reading.lock() {
-        if *r {
+    if let Ok(r) = status.lock() {
+        if ReaderStatus::Disconnected != *r {
             match stop_reading(t_stream, fin_id) {
                 Ok(_) => (),
                 Err(e) => println!("Error trying to stop reading. {e}"),
@@ -635,18 +643,6 @@ fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -
 }
 
 fn send_connect_messages(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
-    // delete access spec           - 0
-    let buf = requests::delete_access_spec(&1, &0);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
-    // delete rospec                - 0
-    let buf = requests::delete_rospec(&2, &0);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
     // set reader configuration     - set keepalive
     let buf = requests::set_keepalive(&3);
     match tcp_stream.write_all(&buf) {
