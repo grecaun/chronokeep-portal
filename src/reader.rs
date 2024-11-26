@@ -24,13 +24,21 @@ pub const ANTENNA_STATUS_CONNECTED: u8 = 2;
 #[derive(PartialEq, Eq)]
 pub enum ReaderStatus {
     Disconnected,
-    //Connecting,
+    ConnectingKeepalive,
+    ConnectingPurgeTags,
+    ConnectingSetNoFilter,
+    ConnectingSetReaderConfig,
+    ConnectingEnableEventsAndReports,
+    ConnectingGetReaderConfig,
+    ConnectingDeleteAccessSpec,
+    ConnectingDeleteRospec,
+    ConnectingAddRospec,
+    ConnectingEnableRospec,
+    ConnectingStartRospec,
     Connected,
-    //Starting,
-    Started,
-    //Stopping,
+    StoppingDisableRospec,
+    StoppingDeleteRospec,
     Stopped,
-    //Disconnecting,
 }
 
 impl Default for ReaderStatus {
@@ -58,6 +66,8 @@ pub struct Reader {
 
     #[serde(skip)]
     pub status: Arc<sync::Mutex<ReaderStatus>>,
+    #[serde(skip)]
+    pub status_retries: Arc<sync::Mutex<u16>>,
     
     #[serde(skip)]
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
@@ -86,6 +96,7 @@ impl Reader {
             keepalive: Arc::new(Mutex::new(true)),
             msg_id: Arc::new(Mutex::new(0)),
             status: Arc::new(Mutex::new(ReaderStatus::Disconnected)),
+            status_retries: Arc::new(Mutex::new(0)),
             auto_connect,
             control_sockets: Arc::new(Mutex::new(Default::default())),
             read_repeaters: Arc::new(Mutex::new(Default::default())),
@@ -135,6 +146,7 @@ impl Reader {
                     keepalive: Arc::new(sync::Mutex::new(true)),
                     msg_id: Arc::new(sync::Mutex::new(0)),
                     status: Arc::new(sync::Mutex::new(ReaderStatus::Disconnected)),
+                    status_retries: Arc::new(Mutex::new(0)),
                     auto_connect,
                     control_sockets,
                     read_repeaters,
@@ -218,18 +230,13 @@ impl Reader {
     pub fn is_connected(&self) -> Option<bool> {
         let mut output: Option<bool> = None;
         if let Ok(con) = self.status.lock() {
-            // All states other than Disconnected should mark the reader as connected.
-            output = Some(ReaderStatus::Disconnected != *con)
+            output = Some(ReaderStatus::Connected == *con)
         }
         output
     }
 
     pub fn is_reading(&self) -> Option<bool> {
-        let mut output: Option<bool> = None;
-        if let Ok(con) = self.status.lock() {
-            output = Some(ReaderStatus::Started == *con)
-        }
-        output
+        self.is_connected()
     }
 
     pub fn disconnect(&mut self) -> Result<(), &'static str> {
@@ -286,17 +293,6 @@ impl Reader {
         match self.kind.as_str() {
             READER_KIND_ZEBRA => {
                 zebra::connect(self, sqlite, control, read_saver, sound, reconnector)
-            }
-            _ => {
-                Err("reader type not supported")
-            }
-        }
-    }
-
-    pub fn initialize(&mut self) -> Result<(), &'static str> {
-        match self.kind.as_str() {
-            READER_KIND_ZEBRA => {
-                zebra::initialize(self)
             }
             _ => {
                 Err("reader type not supported")

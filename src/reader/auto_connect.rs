@@ -103,13 +103,6 @@ impl AutoConnector {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
                             }
-                            println!("Initializing reader.");
-                            match reader.initialize() {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    println!("Error initializing reader: {e}");
-                                }
-                            }
                         }
                         Err(e) => {
                             println!("Error connecting to reader: {e}");

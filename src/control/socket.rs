@@ -19,6 +19,8 @@ pub const MAX_CONNECTED: usize = 4;
 pub const CONNECTION_TYPE: &str = "chrono_portal";
 pub const CONNECTION_VERS: usize = 1;
 
+pub const CONNECTION_CHANGE_PAUSE: u64 = 500;
+
 pub const READ_TIMEOUT_SECONDS: u64 = 5;
 pub const KEEPALIVE_INTERVAL_SECONDS: u64 = 30;
 
@@ -719,16 +721,6 @@ fn handle_stream(
                                                                 if let Ok(mut join) = joiners.lock() {
                                                                     join.push(j);
                                                                 }
-                                                                // start reader when connecting
-                                                                match reader.initialize() {
-                                                                    Ok(_) => {},
-                                                                    Err(e) => {
-                                                                        println!("Error connecting to reader: {e}");
-                                                                        no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                                                            message: format!("error connecting to reader: {e}")
-                                                                        });
-                                                                    }
-                                                                }
                                                             },
                                                             Err(e) => {
                                                                 println!("Error connecting to reader: {e}");
@@ -752,6 +744,7 @@ fn handle_stream(
                                             no_error = write_error(&stream, errors::Errors::NotFound);
                                         }
                                     };
+                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
                                     if let Ok(c_socks) = control_sockets.lock() {
                                         for sock in c_socks.iter() {
                                             if let Some(sock) = sock {
@@ -808,6 +801,7 @@ fn handle_stream(
                                             no_error = write_error(&stream, errors::Errors::NotFound);
                                         }
                                     };
+                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
                                     if let Ok(c_socks) = control_sockets.lock() {
                                         for sock in c_socks.iter() {
                                             if let Some(sock) = sock {
@@ -871,19 +865,9 @@ fn handle_stream(
                                                 }
                                             }
                                         }
-                                        if reader.is_reading() != Some(true) {
-                                            match reader.initialize() {
-                                                Ok(_) => {},
-                                                Err(e) => {
-                                                    println!("Error connecting to reader: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
-                                                        message: format!("error connecting to reader: {e}")
-                                                    });
-                                                }
-                                            }
-                                        }
                                         u_readers.push(reader);
                                     }
+                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
                                     if let Ok(c_socks) = control_sockets.lock() {
                                         for sock in c_socks.iter() {
                                             if let Some(sock) = sock {
@@ -939,6 +923,7 @@ fn handle_stream(
                                         }
                                         u_readers.push(reader);
                                     }
+                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
                                     if let Ok(c_socks) = control_sockets.lock() {
                                         for sock in c_socks.iter() {
                                             if let Some(sock) = sock {

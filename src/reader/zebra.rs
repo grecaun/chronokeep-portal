@@ -2,7 +2,7 @@ use core::str;
 use std::{collections::HashMap, fs::OpenOptions, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::get_message_name, parameter_types::{self, get_llrp_custom_message_name}}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::{self, get_message_name}, parameter_types::{self, get_llrp_custom_message_name}}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{reconnector::Reconnector, ReaderStatus, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
@@ -17,7 +17,8 @@ struct ReadData {
     tags: Vec<TagData>,
     antenna_data: bool,
     antennas: [u8;MAX_ANTENNAS],
-    last_ka_received_at: u64
+    last_ka_received_at: u64,
+    status_messages: Vec<(u16, bool)>
 }
 
 pub fn connect(
@@ -39,11 +40,12 @@ pub fn connect(
     match res {
         Err(_) => return Err("unable to connect"),
         Ok(mut tcp_stream) => {
-            //if let Ok(mut con) = reader.status.lock() {
-            //    *con = ReaderStatus::Connecting;
-            //}
+            // Set reader status to Initial connection state.
+            if let Ok(mut con) = reader.status.lock() {
+                *con = ReaderStatus::ConnectingKeepalive;
+            }
             // try to send connection messages
-            match send_connect_messages(&mut tcp_stream, &reader.msg_id) {
+            match send_set_keepalive(&mut tcp_stream, &reader.msg_id) {
                 Ok(_) => println!("Successfully connected to reader {}.", reader.nickname()),
                 Err(e) => return Err(e),
             };
@@ -54,9 +56,6 @@ pub fn connect(
                     return Err("error copying stream to thread")
                 }
             };
-            if let Ok(mut con) = reader.status.lock() {
-                *con = ReaderStatus::Connected;
-            }
             // copy values for out thread
             let mut t_stream = tcp_stream;
             let t_mutex = reader.keepalive.clone();
@@ -68,6 +67,8 @@ pub fn connect(
             let t_sound = sound.clone();
             let t_antennas = reader.antennas.clone();
             let t_read_saver = read_saver.clone();
+            let t_reader_status = reader.status.clone();
+            let t_reader_status_retries = reader.status_retries.clone();
 
             let t_control_sockets = reader.control_sockets.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
@@ -101,6 +102,480 @@ pub fn connect(
                     }
                     match read(&mut t_stream, buf, leftover_buffer, leftover_num, last_ka_received_at) {
                         Ok(data) => {
+                            // process any status messages
+                            if data.status_messages.len() > 0 {
+                                let mut attempt = 0;
+                                if let Ok(att) = t_reader_status_retries.lock() {
+                                    attempt = *att;
+                                }
+                                for (msg_kind, success) in data.status_messages {
+                                    match msg_kind {
+                                        // SET_READER_CONFIG_RESPONSE is the proper response for:
+                                        // SetKeepalive (step 1)
+                                        // SetNoFilter (step 3)
+                                        // SetReaderConfig (step 4)
+                                        // EnableEventsAndReports (step 5)
+                                        llrp::message_types::SET_READER_CONFIG_RESPONSE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                            if success {
+                                                attempt = 0;
+                                                match *stat {
+                                                    ReaderStatus::ConnectingKeepalive => {
+                                                        *stat = ReaderStatus::ConnectingPurgeTags;
+                                                        match send_purge_tags(&mut t_stream, &msg_id) {
+                                                            Ok(_) => {
+                                                                println!("-- Purge Tags request on connection sent.")
+                                                            },
+                                                            Err(e) => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                eprintln!("error sending purge tags message: {e}")
+                                                            },
+                                                        }
+                                                    },
+                                                    ReaderStatus::ConnectingSetNoFilter => {
+                                                        *stat = ReaderStatus::ConnectingSetReaderConfig;
+                                                        match send_set_reader_config(&mut t_stream, &msg_id) {
+                                                            Ok(_) => {
+                                                                println!("-- Set Reader Config request on connection sent.")
+                                                            },
+                                                            Err(e) => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                eprintln!("error sending set reader config message: {e}")
+                                                            },
+                                                        }
+                                                    },
+                                                    ReaderStatus::ConnectingSetReaderConfig => {
+                                                        *stat = ReaderStatus::ConnectingDeleteAccessSpec;
+                                                        // ENABLE_EVENTS_AND_REPORTS and GET_READER_CONFIG fail to report success from the reader
+                                                        match send_enable_events_and_reports(&mut t_stream, &msg_id) {
+                                                            Ok(_) => {
+                                                                println!("-- Send Enable Events and Reports request on connection sent.")
+                                                            },
+                                                            Err(e) => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                eprintln!("error sending enable events and reports message: {e}")
+                                                            },
+                                                        }
+                                                        match send_get_reader_config(&mut t_stream, &msg_id) {
+                                                            Ok(_) => {
+                                                                println!("-- Get Reader Config request on connection sent.")
+                                                            },
+                                                            Err(e) => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                eprintln!("error sending get reader config message: {e}")
+                                                            },
+                                                        }
+                                                        match send_delete_access_spec(&mut t_stream, &msg_id) {
+                                                            Ok(_) => {
+                                                                println!("-- Delete Access Spec request on connection sent.")
+                                                            },
+                                                            Err(e) => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                eprintln!("error sending delete access spec message: {e}")
+                                                            },
+                                                        }
+                                                    },
+                                                    _ => {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                        println!("unknown reader status while processing SET_READER_CONFIG_RESPONSE")
+                                                    },
+                                                }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::ConnectingKeepalive => {
+                                                                match send_set_keepalive(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Set Keepalive request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending set keepalive message: {e}")
+                                                                    },
+                                                                }
+                                                            },
+                                                            ReaderStatus::ConnectingSetNoFilter => {
+                                                                match send_set_no_filter(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Set No Filter request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending set no filter message: {e}")
+                                                                    },
+                                                                }
+                                                            },
+                                                            ReaderStatus::ConnectingSetReaderConfig => {
+                                                                match send_set_reader_config(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Set Reader Config request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending set reader config message: {e}")
+                                                                    },
+                                                                }
+                                                            },
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing SET_READER_CONFIG_RESPONSE")
+                                                            },
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // CUSTOM_MESSAGE is the proper response for:
+                                        // PurgeTags (step 2)
+                                        llrp::message_types::CUSTOM_MESSAGE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::ConnectingPurgeTags => {
+                                                            *stat = ReaderStatus::ConnectingSetNoFilter;
+                                                            match send_set_no_filter(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Set No Filter request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending set no filter message: {e}")
+                                                                },
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing CUSTOM_MESSAGE")
+                                                        }
+                                                    }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::ConnectingPurgeTags => {
+                                                                match send_purge_tags(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Purge Tags request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending purge tags message: {e}")
+                                                                    },
+                                                                }
+                                                            }
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing CUSTOM_MESSAGE")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // DELETE_ACCESS_SPEC_RESPONSE is the proper response for:
+                                        // DeleteAccessSpec (step 6)
+                                        llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::ConnectingDeleteAccessSpec => {
+                                                            *stat = ReaderStatus::ConnectingDeleteRospec;
+                                                            match send_delete_rospec(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Delete Rospec request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending delete rospec message: {e}")
+                                                                },
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing DELETE_ACCESS_SPEC_RESPONSE")
+                                                        }
+                                                    }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::ConnectingDeleteRospec => {
+                                                                match send_delete_access_spec(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Delete Access Spec request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending delete access spec message: {e}")
+                                                                    },
+                                                                }
+                                                            }
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing DELETE_ACCESS_SPEC_RESPONSE")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // DISABLE_ROSPEC_RESPONSE is the proper response for:
+                                        // DisableRospec (step 1 of stopping)
+                                        llrp::message_types::DISABLE_ROSPEC_RESPONSE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::StoppingDisableRospec => {
+                                                            *stat = ReaderStatus::StoppingDeleteRospec;
+                                                            match send_delete_rospec(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Delete Rospec request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending delete rospec message: {e}")
+                                                                },
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
+                                                        }
+                                                    }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::StoppingDisableRospec => {
+                                                                match send_disable_rospec(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Disable Rospec request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending disable rospec message: {e}")
+                                                                    },
+                                                                }
+                                                            }
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // DELETE_ROSPEC_RESPONSE is the proper response for:
+                                        // DeleteRospec (step 7, step 2 of stopping)
+                                        llrp::message_types::DELETE_ROSPEC_RESPONSE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::ConnectingDeleteRospec => {
+                                                            *stat = ReaderStatus::ConnectingAddRospec;
+                                                            match send_add_rospec(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Add Rospec request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending add rospec message: {e}")
+                                                                },
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
+                                                        }
+                                                    }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::ConnectingAddRospec => {
+                                                                match send_delete_rospec(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Delete Rospec request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending delete rospec message: {e}")
+                                                                    },
+                                                                }
+                                                            },
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // ADD_ROSPEC_RESPONSE is the proper response for:
+                                        // AddRospec (step 8)
+                                        llrp::message_types::ADD_ROSPEC_RESPONSE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::ConnectingAddRospec => {
+                                                            *stat = ReaderStatus::ConnectingEnableRospec;
+                                                            match send_enable_rospec(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Enable Rospec request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending enable rospec message: {e}")
+                                                                },
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing ADD_ROSPEC_RESPONSE")
+                                                        }
+                                                    }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::ConnectingAddRospec => {
+                                                                match send_add_rospec(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Add Rospec request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending add rospec message: {e}")
+                                                                    },
+                                                                }
+                                                            },
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing ADD_ROSPEC_RESPONSE")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // ENABLE_ROSPEC_RESPONSE is the proper response for:
+                                        // EnableRospec (step 9)
+                                        llrp::message_types::ENABLE_ROSPEC_RESPONSE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::ConnectingEnableRospec => {
+                                                            *stat = ReaderStatus::ConnectingStartRospec;
+                                                            match send_start_rospec(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Start Rospec request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending start rospec message: {e}")
+                                                                },
+                                                            }
+                                                        }
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing ENABLE_ROSPEC_RESPONSE")
+                                                        }
+                                                    }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::ConnectingEnableRospec => {
+                                                                match send_enable_rospec(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Enable Rospec request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending enable rospec message: {e}")
+                                                                    },
+                                                                }
+                                                            },
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing ENABLE_ROSPEC_RESPONSE")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // START_ROSPEC_RESPONSE is the proper response for:
+                                        // StartRospec (step 10)
+                                        llrp::message_types::START_ROSPEC_RESPONSE => {
+                                            attempt += 1;
+                                            if let Ok(mut stat) = t_reader_status.lock() {
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::ConnectingStartRospec => {
+                                                            *stat = ReaderStatus::Connected;
+                                                            // inform control sockets of reader connection change?
+                                                        }
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing START_ROSPEC_RESPONSE")
+                                                        }
+                                                    }
+                                                } else {
+                                                    if attempt > 5 {
+                                                        *stat = ReaderStatus::Disconnected;
+                                                    } else {
+                                                        match *stat {
+                                                            ReaderStatus::ConnectingStartRospec => {
+                                                                match send_start_rospec(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Start Rospect request on connection sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending start rospec message: {e}")
+                                                                    },
+                                                                }
+                                                            },
+                                                            _ => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("unknown reader status while processing START_ROSPEC_RESPONSE")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        _ => {
+                                            println!("Error, unknown status message processed.");
+                                        }
+                                    }
+                                }
+                            }
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
                                 t_sound.notify_one();
@@ -221,74 +696,129 @@ pub fn connect(
     }
 }
 
-pub fn initialize(reader: &mut super::Reader) -> Result<(), &'static str> {
-    if let Ok(r) = reader.status.lock() {
-        if ReaderStatus::Connected != *r {
-            return Err("already reading or not connected")
-        }
-        //*r = ReaderStatus::Starting;
-    } else {
-        return Err("unable to check if we're actually reading")
+fn send_delete_access_spec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // delete all access spec
+    let buf = requests::delete_access_spec(&local_id, &0);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
     }
-    let del_acs_id = reader.get_next_id();
-    let del_ros_id = reader.get_next_id();
-    let add_ros_id = reader.get_next_id();
-    let ena_ros_id = reader.get_next_id();
-    let sta_ros_id = reader.get_next_id();
-    if let Ok(stream) = reader.socket.lock() {
-        match &*stream {
-            Some(s) => {
-                let mut w_stream = match s.try_clone() {
-                    Ok(v) => v,
-                    Err(_) => return Err("unable to copy stream"),
-                };
-                // delete all access spec
-                let msg = requests::delete_access_spec(&del_acs_id, &0);
-                match w_stream.write_all(&msg) {
-                    Ok(_) => (),
-                    Err(_) => return Err("error writing data")
-                }
-                // delete all rospec
-                let msg = requests::delete_rospec(&del_ros_id, &0);
-                match w_stream.write_all(&msg) {
-                    Ok(_) => (),
-                    Err(_) => return Err("error writing data")
-                }
-                // add rospec
-                let msg = requests::add_rospec(&add_ros_id, &100);
-                match w_stream.write_all(&msg) {
-                    Ok(_) => (),
-                    Err(_) => return Err("error writing data")
-                }
-                // enable rospec
-                let msg = requests::enable_rospec(&ena_ros_id, &100);
-                match w_stream.write_all(&msg) {
-                    Ok(_) => (),
-                    Err(_) => return Err("error writing data")
-                }
-                // start rospec
-                let msg = requests::start_rospec(&sta_ros_id, &100);
-                match w_stream.write_all(&msg) {
-                    Ok(_) => (),
-                    Err(_) => return Err("error writing data")
-                }
-            },
-            None => {
-                return Err("not connected")
-            }
-        }
-        if let Ok(mut r) = reader.status.lock() {
-            *r = ReaderStatus::Started;
-        } 
-        Ok(())
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
     } else {
-        return Err("unable to get stream mutex")
+        return Err("unable to get id lock")
     }
+    return Ok(())
+}
+
+fn send_disable_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // delete all rospec
+    let buf = requests::disable_rospec(&local_id, &0);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
+}
+
+fn send_delete_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // delete all rospec
+    let buf = requests::delete_rospec(&local_id, &0);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
+}
+
+fn send_add_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // add rospec
+    let buf = requests::add_rospec(&local_id, &100);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
+}
+
+fn send_enable_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // enable rospec
+    let buf = requests::enable_rospec(&local_id, &100);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
+}
+
+fn send_start_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // start rospec
+    let buf = requests::start_rospec(&local_id, &100);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
 }
 
 pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
     if let Ok(r) = reader.status.lock() {
-        if ReaderStatus::Started != *r {
+        if ReaderStatus::Connected != *r {
             return Err("not reading")
         }
     } else {
@@ -626,13 +1156,13 @@ fn finalize(
     }
 }
 
-fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
-    let purge_id = match msg_id.lock() {
+fn send_set_keepalive(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
         Ok(id) => *id,
         Err(_) => 0,
     };
-    // purge tags
-    let buf = requests::purge_tags(&purge_id);
+    // set reader configuration     - set keepalive
+    let buf = requests::set_keepalive(&local_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
@@ -646,61 +1176,107 @@ fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -
     return Ok(())
 }
 
-fn send_connect_messages(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
-    let mut connect_id = match msg_id.lock() {
+fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
         Ok(id) => *id,
         Err(_) => 0,
     };
-    // set reader configuration     - set keepalive
-    let buf = requests::set_keepalive(&connect_id);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
-    connect_id += 1;
     // purge tags
-    let buf = requests::purge_tags(&connect_id);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
-    connect_id += 1;
-    // set reader configuration     - set no filter
-    let buf = requests::set_no_filter(&connect_id);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
-    connect_id += 1;
-    // set reader configuration     - normal config
-    let buf = requests::set_reader_config(&connect_id);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
-    connect_id += 1;
-    // enable events and reports
-    let buf = requests::enable_events_and_reports(&connect_id);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
-    connect_id += 1;
-    // get antenna properties (config == 2)
-    // this will report back information on the antennas
-    // gpi_port and gpo_port values should be ignored in this query
-    let buf = requests::get_reader_config(&connect_id, &0, &2, &0, &0);
+    let buf = requests::purge_tags(&local_id);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
     // update message id
     if let Ok(mut id) = msg_id.lock() {
-        *id = connect_id + 1;
+        *id += 1;
     } else {
         return Err("unable to get id lock")
     }
-    Ok(())
+    return Ok(())
+}
+
+fn send_set_no_filter(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // purge tags
+    let buf = requests::set_no_filter(&local_id);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
+}
+
+fn send_set_reader_config(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // set reader configuration     - normal config
+    let buf = requests::set_reader_config(&local_id);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
+}
+
+fn send_enable_events_and_reports(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // enable events and reports
+    let buf = requests::enable_events_and_reports(&local_id);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
+}
+
+
+fn send_get_reader_config(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
+    let local_id = match msg_id.lock() {
+        Ok(id) => *id,
+        Err(_) => 0,
+    };
+    // get antenna properties (config == 2)
+    // this will report back information on the antennas
+    // gpi_port and gpo_port values should be ignored in this query
+    let buf = requests::get_reader_config(&local_id, &0, &2, &0, &0);
+    match tcp_stream.write_all(&buf) {
+        Ok(_) => (),
+        Err(_) => return Err("unable to write to stream"),
+    }
+    // update message id
+    if let Ok(mut id) = msg_id.lock() {
+        *id += 1;
+    } else {
+        return Err("unable to get id lock")
+    }
+    return Ok(())
 }
 
 fn read(
@@ -714,7 +1290,8 @@ fn read(
         tags: Vec::new(),
         antenna_data: false,
         antennas: [0;MAX_ANTENNAS],
-        last_ka_received_at: last_ka_received_at
+        last_ka_received_at,
+        status_messages: Vec::new(),
     };
 
     let mut file = OpenOptions::new().append(true).create(true).open("./unknown_messages.txt").unwrap();
@@ -782,118 +1359,13 @@ fn read(
                                     Err(_) => (),
                                 }
                             }, // Processing of initialization and shutdown commands.
-                            llrp::message_types::ADD_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
-                                {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "ADD_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::ENABLE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
-                                {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "ENABLE_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::START_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
-                                {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "START_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::STOP_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
-                                {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "STOP_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::DISABLE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
-                                {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "DISABLE_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::DELETE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
-                                {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "DELETE_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
-                                {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "DELETE_ACCESS_SPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
+                            llrp::message_types::ADD_ROSPEC_RESPONSE |
+                            llrp::message_types::ENABLE_ROSPEC_RESPONSE |
+                            llrp::message_types::START_ROSPEC_RESPONSE |
+                            llrp::message_types::STOP_ROSPEC_RESPONSE |
+                            llrp::message_types::DISABLE_ROSPEC_RESPONSE |
+                            llrp::message_types::DELETE_ROSPEC_RESPONSE |
+                            llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE |
                             llrp::message_types::SET_READER_CONFIG_RESPONSE => {
                                 let (success, response_message) = match process_llrp_status_parameter(leftover_buffer, 10, &max_ix)
                                 {
@@ -903,10 +1375,8 @@ fn read(
                                     },
                                     Err(msg) => (false, msg.to_string()),
                                 };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "SET_READER_CONFIG_RESPONSE - {response_message}") {
+                                output.status_messages.push((leftover_type.kind, success));
+                                if let Err(e) = writeln!(file, "{} - {response_message}", message_types::get_message_name(leftover_type.kind).unwrap()) {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
@@ -934,9 +1404,7 @@ fn read(
                                     },
                                     Err(msg) => (false, "UNKNOWN CUSTOM MESSAGE", msg.to_string()),
                                 };
-                                if success {
-                                    // Continue process as required to start/stop the reader (or verify purge tags worked)
-                                }
+                                output.status_messages.push((leftover_type.kind, success));
                                 if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
@@ -1011,111 +1479,13 @@ fn read(
                                     Err(_) => (),
                                 }
                             }, // Processing of initialization and shutdown commands.
-                            llrp::message_types::ADD_ROSPEC_RESPONSE  => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "ADD_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::ENABLE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "ENABLE_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::START_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "START_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::STOP_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "STOP_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::DISABLE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "DISABLE_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::DELETE_ROSPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "DELETE_ROSPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
-                            llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE => {
-                                let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
-                                    Ok(resp) => match resp {
-                                        Some(msg) => (false, msg),
-                                        None => (true, "success".to_string()),
-                                    },
-                                    Err(msg) => (false, msg.to_string()),
-                                };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "DELETE_ACCESS_SPEC_RESPONSE - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
-                                }
-                            },
+                            llrp::message_types::ADD_ROSPEC_RESPONSE |
+                            llrp::message_types::ENABLE_ROSPEC_RESPONSE |
+                            llrp::message_types::START_ROSPEC_RESPONSE |
+                            llrp::message_types::STOP_ROSPEC_RESPONSE |
+                            llrp::message_types::DISABLE_ROSPEC_RESPONSE |
+                            llrp::message_types::DELETE_ROSPEC_RESPONSE |
+                            llrp::message_types::DELETE_ACCESS_SPEC_RESPONSE |
                             llrp::message_types::SET_READER_CONFIG_RESPONSE => {
                                 let (success, response_message) = match process_llrp_status_parameter(&buf, cur_ix + 10, &max_ix) {
                                     Ok(resp) => match resp {
@@ -1124,10 +1494,8 @@ fn read(
                                     },
                                     Err(msg) => (false, msg.to_string()),
                                 };
-                                if success {
-                                    // TODO Continue process as required to start/stop the reader.
-                                }
-                                if let Err(e) = writeln!(file, "SET_READER_CONFIG_RESPONSE - {response_message}") {
+                                output.status_messages.push((info.kind, success));
+                                if let Err(e) = writeln!(file, "{} - {response_message}", message_types::get_message_name(info.kind).unwrap()) {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }
                             },
@@ -1155,9 +1523,7 @@ fn read(
                                     },
                                     Err(msg) => (false, "UNKNOWN CUSTOM MESSAGE", msg.to_string()),
                                 };
-                                if success {
-                                    // TODO Continue process as required to connect to the reader or process purge tags.
-                                }
+                                output.status_messages.push((info.kind, success));
                                 if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
                                     eprintln!("Couldn't write to file: {}", e);
                                 }

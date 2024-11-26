@@ -76,58 +76,13 @@ impl Reconnector {
                         self.id,
                         1
                     );
+                    println!("Initializing reader.");
                     match old_reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
                             }
-                            println!("Initializing reader.");
-                            let mut count = 0;
-                            loop {
-                                count += 1;
-                                if count > 5 || old_reader.is_reading() == Some(true) {
-                                    break;
-                                }
-                                match old_reader.initialize() {
-                                    Ok(_) => {
-                                        println!("Reader initialized. Try {count}.");
-                                        break;
-                                    },
-                                    Err(e) => {
-                                        eprintln!("Error initializing reader: {e}");
-                                    }
-                                }
-                                // wait for a few seconds before retrying
-                                thread::sleep(Duration::from_secs(WAITING_PERIOD_SECONDS));
-                            }
-                            if old_reader.is_reading() != Some(true) {
-                                match old_reader.disconnect() {
-                                    Ok(_) => {},
-                                    Err(_) => {
-                                        eprintln!("error attempting to disconnect from reader before reconnect attempt")
-                                    },
-                                }
-                                readers.push(old_reader);
-                                thread::sleep(Duration::from_secs(WAITING_PERIOD_SECONDS));
-                                let new_reconnector = Reconnector::new(
-                                    self.readers.clone(),
-                                    self.joiners.clone(),
-                                    self.control_sockets.clone(),
-                                    self.read_repeaters.clone(),
-                                    self.sight_processor.clone(),
-                                    self.control.clone(),
-                                    self.sqlite.clone(),
-                                    self.read_saver.clone(),
-                                    self.sound.clone(),
-                                    self.id,
-                                    self.count + 1
-                                );
-                                new_reconnector.run();
-                                // return so only on success will the control sockets be notified of changes
-                                return;
-                            }
-                            readers.push(old_reader);
-                        }
+                        },
                         Err(e) => {
                             println!("Error connecting to reader: {e}");
                             // wait for a few seconds before retrying
@@ -151,6 +106,35 @@ impl Reconnector {
                             return;
                         }
                     }
+                    // wait for a few seconds before checking if we're reading
+                    thread::sleep(Duration::from_secs(WAITING_PERIOD_SECONDS));
+                    if old_reader.is_reading() != Some(true) {
+                        match old_reader.disconnect() {
+                            Ok(_) => {},
+                            Err(_) => {
+                                eprintln!("error attempting to disconnect from reader before reconnect attempt")
+                            },
+                        }
+                        readers.push(old_reader);
+                        thread::sleep(Duration::from_secs(WAITING_PERIOD_SECONDS));
+                        let new_reconnector = Reconnector::new(
+                            self.readers.clone(),
+                            self.joiners.clone(),
+                            self.control_sockets.clone(),
+                            self.read_repeaters.clone(),
+                            self.sight_processor.clone(),
+                            self.control.clone(),
+                            self.sqlite.clone(),
+                            self.read_saver.clone(),
+                            self.sound.clone(),
+                            self.id,
+                            self.count + 1
+                        );
+                        new_reconnector.run();
+                        // return so only on success will the control sockets be notified of changes
+                        return;
+                    }
+                    readers.push(old_reader);
                 },
                 None => {  },
             }

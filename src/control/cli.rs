@@ -157,11 +157,7 @@ pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, controls: &Arc<Mutex<sup
                         };
                         match connected.iter().position(|x| x.id() == id) {
                             Some(ix) => {
-                                let mut reader =  connected.remove(ix);
-                                match reader.initialize() {
-                                    Ok(_) => (),
-                                    Err(e) => println!("Error initializing reader. {e}")
-                                };
+                                let reader =  connected.remove(ix);
                                 connected.push(reader);
                             },
                             None => {
