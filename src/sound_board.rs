@@ -59,8 +59,6 @@ pub const BEEP_RAND_MAX: u64 = 350; //350
 pub const BEEP_SEPARATION: u64 = 50; //50
 pub const BEEP_SEP_RAND_MAX: u64 = 450; //450
 
-trait SliceType: std::io::Read + std::io::Seek {}
-
 #[derive(Clone)]
 pub struct SoundBoard {
     current_voice: Arc<Mutex<Voice>>,

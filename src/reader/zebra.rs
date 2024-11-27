@@ -1,5 +1,5 @@
 use core::str;
-use std::{collections::HashMap, fs::OpenOptions, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, env, fs::{File, OpenOptions}, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::{self, get_message_name}, parameter_types::{self, get_llrp_custom_message_name}}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
@@ -12,6 +12,8 @@ pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 pub const BUFFER_SIZE: usize = 65536;
 // FX7500 stops around 750k -> 900k tags, FX9600 stops around 5.5 million tags
 pub const TAG_LIMIT: usize = 100000;
+
+pub const WRITEABLE_FILE_PATH: &str = "PORTAL_WRITEABLE_FILE_PATH";
 
 struct ReadData {
     tags: Vec<TagData>,
@@ -54,7 +56,7 @@ pub fn connect(
             }
             // try to send connection messages
             match send_set_keepalive(&mut tcp_stream, &reader.msg_id) {
-                Ok(_) => println!("Successfully connected to reader {}.", reader.nickname()),
+                Ok(_) => println!("Connection process started on reader {}.", reader.nickname()),
                 Err(e) => return Err(e),
             };
             // copy tcp stream into the mutex
@@ -1307,8 +1309,10 @@ fn read(
         last_ka_received_at,
         status_messages: Vec::new(),
     };
-
-    let mut file = OpenOptions::new().append(true).create(true).open("./unknown_messages.txt").unwrap();
+    let mut file: Option<File> = None;
+    if let Ok(file_path) = env::var(WRITEABLE_FILE_PATH) {
+        file = Some(OpenOptions::new().append(true).create(true).open(file_path).unwrap());
+    }
     let numread = tcp_stream.read(buf);
     match numread {
         Ok(num) => {
@@ -1390,8 +1394,10 @@ fn read(
                                     Err(msg) => (false, msg.to_string()),
                                 };
                                 output.status_messages.push((leftover_type.kind, success));
-                                if let Err(e) = writeln!(file, "{} - {response_message}", message_types::get_message_name(leftover_type.kind).unwrap()) {
-                                    eprintln!("Couldn't write to file: {}", e);
+                                if let Some(ref mut file) = file {
+                                    if let Err(e) = writeln!(file, "{} - {response_message}", message_types::get_message_name(leftover_type.kind).unwrap()) {
+                                        eprintln!("Couldn't write to file: {}", e);
+                                    }
                                 }
                             },
                             llrp::message_types::CUSTOM_MESSAGE => {
@@ -1419,14 +1425,18 @@ fn read(
                                     Err(msg) => (false, "UNKNOWN CUSTOM MESSAGE", msg.to_string()),
                                 };
                                 output.status_messages.push((leftover_type.kind, success));
-                                if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
+                                if let Some(ref mut file) = file {
+                                    if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
+                                        eprintln!("Couldn't write to file: {}", e);
+                                    }
                                 }
                             },
                             found_type => {
                                 //println!("Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type));
-                                if let Err(e) = writeln!(file, "Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)) {
-                                    eprintln!("Couldn't write to file: {}", e);
+                                if let Some(ref mut file) = file {
+                                    if let Err(e) = writeln!(file, "Message Type Found! V: {} - {:?}", leftover_type.version, get_message_name(found_type)) {
+                                        eprintln!("Couldn't write to file: {}", e);
+                                    }
                                 }
                             },
                         }
@@ -1509,8 +1519,10 @@ fn read(
                                     Err(msg) => (false, msg.to_string()),
                                 };
                                 output.status_messages.push((info.kind, success));
-                                if let Err(e) = writeln!(file, "{} - {response_message}", message_types::get_message_name(info.kind).unwrap()) {
-                                    eprintln!("Couldn't write to file: {}", e);
+                                if let Some(ref mut file) = file {
+                                    if let Err(e) = writeln!(file, "{} - {response_message}", message_types::get_message_name(info.kind).unwrap()) {
+                                        eprintln!("Couldn't write to file: {}", e);
+                                    }
                                 }
                             },
                             llrp::message_types::CUSTOM_MESSAGE => {
@@ -1538,14 +1550,18 @@ fn read(
                                     Err(msg) => (false, "UNKNOWN CUSTOM MESSAGE", msg.to_string()),
                                 };
                                 output.status_messages.push((info.kind, success));
-                                if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
-                                    eprintln!("Couldn't write to file: {}", e);
+                                if let Some(ref mut file) = file {
+                                    if let Err(e) = writeln!(file, "{message_name} - {response_message}") {
+                                        eprintln!("Couldn't write to file: {}", e);
+                                    }
                                 }
                             },
                             found_type => {
                                 //println!("Message Type Found! V: {} - {:?}", info.version, get_message_name(found_type));
-                                if let Err(e) = writeln!(file, "Unknown message Type Found! V: {} - {:?}", info.version, get_message_name(found_type)) {
-                                    eprintln!("Couldn't write to file: {}", e);
+                                if let Some(ref mut file) = file {
+                                    if let Err(e) = writeln!(file, "Unknown message Type Found! V: {} - {:?}", info.version, get_message_name(found_type)) {
+                                        eprintln!("Couldn't write to file: {}", e);
+                                    }
                                 }
                             },
                         }
