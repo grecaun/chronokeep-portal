@@ -2,7 +2,10 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::
 
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, processor::{self}};
 
+// Total potential time before reconnect attempts are stopped
+// is WAITING_PERIOD_SECONDS * RECONNECT_ATTEMPTS
 pub const WAITING_PERIOD_SECONDS: u64 = 1;
+pub const RECONNECT_ATTEMPTS: i32 = 30;
 
 #[derive(Clone)]
 pub struct Reconnector {
@@ -51,7 +54,7 @@ impl Reconnector {
 
     pub fn run(self) {
         // Try to connect at most 5 times.
-        if self.count > 5 {
+        if self.count > RECONNECT_ATTEMPTS {
             return;
         }
         println!("Attempting to reconnect to reader. Attempt {0}.", self.count);
@@ -101,13 +104,14 @@ impl Reconnector {
                                 self.id,
                                 self.count + 1
                             );
+                            drop(readers);
                             new_reconnector.run();
                             // return so only on success will the control sockets be notified of changes
                             return;
                         }
                     }
-                    // wait for a few seconds before checking if we're reading
-                    thread::sleep(Duration::from_secs(WAITING_PERIOD_SECONDS));
+                    // wait for a few milliseconds before checking if we're reading
+                    thread::sleep(Duration::from_millis(socket::CONNECTION_CHANGE_PAUSE));
                     if old_reader.is_reading() != Some(true) {
                         match old_reader.disconnect() {
                             Ok(_) => {},
@@ -130,6 +134,7 @@ impl Reconnector {
                             self.id,
                             self.count + 1
                         );
+                        drop(readers);
                         new_reconnector.run();
                         // return so only on success will the control sockets be notified of changes
                         return;

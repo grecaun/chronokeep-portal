@@ -40,6 +40,14 @@ pub fn connect(
     match res {
         Err(_) => return Err("unable to connect"),
         Ok(mut tcp_stream) => {
+            match tcp_stream.set_read_timeout(Some(Duration::from_secs(1))) {
+                Ok(_) => {},
+                Err(e) => println!("unexpected error setting read timeout on tcp stream: {e}")
+            }
+            match tcp_stream.set_write_timeout(Some(Duration::from_secs(1))) {
+                Ok(_) => {},
+                Err(e) => println!("unexpected error setting write timeout on tcp stream: {e}")
+            }
             // Set reader status to Initial connection state.
             if let Ok(mut con) = reader.status.lock() {
                 *con = ReaderStatus::ConnectingKeepalive;
@@ -620,14 +628,14 @@ pub fn connect(
                                     }
                                 }
                             }
+                            if last_ka_received_at < data.last_ka_received_at {
+                                last_ka_received_at = data.last_ka_received_at
+                            }
                             let right_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                             if right_now - 5 > last_ka_received_at {
                                 println!("no keep alive message received in the last 5 seconds");
                                 reconnect = true;
                                 break;
-                            }
-                            if last_ka_received_at < data.last_ka_received_at {
-                                last_ka_received_at = data.last_ka_received_at
                             }
                         },
                         Err(e) => {
@@ -656,6 +664,12 @@ pub fn connect(
                                             }
                                         },
                                         Err(e) => println!("Error processing tags. {e}"),
+                                    }
+                                    let right_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                                    if right_now - 5 > last_ka_received_at {
+                                        println!("no keep alive message received in the last 5 seconds");
+                                        reconnect = true;
+                                        break;
                                     }
                                 },
                                 _ => println!("Error reading from reader. {e}"),
