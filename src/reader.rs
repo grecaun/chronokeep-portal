@@ -229,7 +229,7 @@ impl Reader {
 
     pub fn is_connected(&self) -> Option<bool> {
         let mut output: Option<bool> = None;
-        if let Ok(con) = self.status.lock() {
+        if let Ok(con) = self.status.try_lock() {
             output = Some(ReaderStatus::Connected == *con)
         }
         output
