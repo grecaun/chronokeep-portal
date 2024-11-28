@@ -2697,7 +2697,6 @@ pub fn write_reads(
                 },
                 _ => {
                     println!("6/ Something went wrong writing to the socket. {e}");
-                    return false;
                 }
             }
         }
@@ -2714,7 +2713,6 @@ pub fn write_reads(
                 },
                 _ => {
                     println!("6/ Something went wrong writing to the socket. {e}");
-                    return false;
                 }
             }
         }

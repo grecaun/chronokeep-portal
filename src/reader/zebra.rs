@@ -978,7 +978,14 @@ fn send_new(
                     Some(sock) => {
                         if repeaters[ix] == true {
                             //println!("Sending reads to subscribed socket {ix}.");
-                            no_error = no_error && socket::write_reads(&sock, &reads);
+                            // If write_reads returned false it wasn't able to write the reads due to connection being broken.
+                            let loc_err = socket::write_reads(&sock, &reads);
+                            if !loc_err {
+                                if let Err(e) = sock.shutdown(std::net::Shutdown::Both) {
+                                    println!("Error shutting down closed socket. {e}");
+                                }
+                            }
+                            no_error = no_error && loc_err;
                         }
                     },
                     None => {}
