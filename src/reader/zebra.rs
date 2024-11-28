@@ -257,7 +257,10 @@ pub fn connect(
                                                                     eprintln!("error sending set no filter message: {e}")
                                                                 },
                                                             }
-                                                        }
+                                                        },
+                                                        ReaderStatus::Connected => {
+                                                            println!("Successfully purged tags while connected.");
+                                                        },
                                                         _ => {
                                                             *stat = ReaderStatus::Disconnected;
                                                             println!("unknown reader status while processing CUSTOM_MESSAGE")
@@ -278,7 +281,10 @@ pub fn connect(
                                                                         eprintln!("error sending purge tags message: {e}")
                                                                     },
                                                                 }
-                                                            }
+                                                            },
+                                                            ReaderStatus::Connected => {
+                                                                println!("Successfully purged tags while connected.");
+                                                            },
                                                             _ => {
                                                                 *stat = ReaderStatus::Disconnected;
                                                                 println!("unknown reader status while processing CUSTOM_MESSAGE")
