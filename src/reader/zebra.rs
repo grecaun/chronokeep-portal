@@ -972,7 +972,7 @@ fn send_new(
 ) -> Result<(), &'static str> {
     let mut no_error = true;
     if let Ok(sockets) = control_sockets.lock() {
-        if let Ok(repeaters) = read_repeaters.lock() {
+        if let Ok(mut repeaters) = read_repeaters.lock() {
             for ix in 0..MAX_CONNECTED {
                 match &sockets[ix] {
                     Some(sock) => {
@@ -981,6 +981,7 @@ fn send_new(
                             // If write_reads returned false it wasn't able to write the reads due to connection being broken.
                             let loc_err = socket::write_reads(&sock, &reads);
                             if !loc_err {
+                                repeaters[ix] = false;
                                 if let Err(e) = sock.shutdown(std::net::Shutdown::Both) {
                                     println!("Error shutting down closed socket. {e}");
                                 }
