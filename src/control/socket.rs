@@ -4,7 +4,7 @@ use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
 
 use self::notifications::Notification;
 
@@ -29,10 +29,12 @@ pub const UPDATE_SCRIPT_ENV: &str = "PORTAL_UPDATE_SCRIPT";
 pub const JSON_START_CHAR: char = '{';
 pub const JSON_END_CHAR: char = '}';
 
-pub fn control_loop(sqlite: Arc<Mutex<sqlite::SQLite>>, control: &Arc<Mutex<super::Control>>) {
-    // Keepalive is the boolean that tells us if we need to keep running.
-    let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
-
+pub fn control_loop(
+    sqlite: Arc<Mutex<sqlite::SQLite>>,
+    control: &Arc<Mutex<super::Control>>,
+    keepalive: Arc<Mutex<bool>>,
+    _screen: Arc<Mutex<Option<CharacterDisplay>>>,
+) {
     // Joiners are join handles for threads we spin up.
     let joiners: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
     // Readers are chip readers that are saved.  They may be connected or reading as well.
