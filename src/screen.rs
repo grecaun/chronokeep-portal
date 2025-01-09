@@ -9,6 +9,8 @@ use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 #[cfg(target_os = "linux")]
 use rppal::{hal, i2c::I2c};
 
+pub const EMPTY_STRING: &str = "                    ";
+
 #[derive(Clone)]
 pub struct CharacterDisplay {
     _keepalive: Arc<Mutex<bool>>,
@@ -80,7 +82,7 @@ impl CharacterDisplay {
                 let _ = lcd.home();
                 if messages.len() > 0 && messages.len() <= 4 {
                     for msg in &*messages {
-                        let _ = writeln!(lcd, "{msg}");
+                        let _ = write!(lcd, "{msg}");
                     }
                 }
                 messages.clear();
@@ -107,7 +109,16 @@ impl CharacterDisplay {
     pub fn print(&self, mut _new_messages: Vec<String>) {
         #[cfg(target_os = "linux")]
         {
+            for msg in &mut _new_messages {
+                if msg.len() > 20 {
+                    let _ = msg.split_off(20);
+                } else if msg.len() < 20 {
+                    *msg = format!("{:<20}", msg)
+                }
+            }
+            _new_messages.truncate(4);
             if let Ok(mut messages) = self._messages.try_lock() {
+                messages.clear();
                 messages.append(&mut _new_messages);
             }
             let (lock, cvar) = &*self._waiter;

@@ -93,6 +93,7 @@ pub fn control_loop(
             return
         }
     }
+    let _ = socket.set_read_timeout(Some(Duration::from_secs(READ_TIMEOUT_SECONDS)));
     let listener: TcpListener = socket.into();
 
     // create our zero configuration udp socket struct

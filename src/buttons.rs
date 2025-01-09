@@ -85,24 +85,32 @@ impl Buttons {
                     }
                 }
                 if let Ok(result) = a_gpio.poll_interrupts(&btns, false, Some(Duration::from_millis(1250))) {
+                    let mut messages: Vec<String> = Vec::new();
                     match result {
                         Some((pin, _event)) => {
                             let p = pin.pin();
                             if p == self.up_button {
-                                println!("Up button pressed.");
+                                messages.push(String::from("Up button pressed!"));
                             } else if p == self.down_button {
-                                println!("Down button pressed.");
+                                messages.push(String::from("Down button pressed!"));
                             } else if p == self.left_button {
-                                println!("Left button pressed.");
+                                messages.push(String::from("Left button pressed!"));
                             } else if p == self.right_button {
-                                println!("Right button pressed.");
+                                messages.push(String::from("Right button pressed!"));
                             } else if p == self.enter_button {
-                                println!("Enter button pressed.");
+                                messages.push(String::from("Enter button pressed!"));
                             } else {
                                 println!("Unknown button pressed. GPIO {p}");
                             }
                         },
                         None => {}
+                    }
+                    if messages.len() > 0 {
+                        if let Ok(screen) = self._screen.try_lock() {
+                            if let Some(lcd) = &*screen {
+                                lcd.print(messages);
+                            }
+                        }
                     }
                 }
             }
