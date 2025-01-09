@@ -170,12 +170,15 @@ fn main() {
     {
         println!("Checking if there's a screen to display information on.");
         if let Ok(screen_bus) = std::env::var("PORTAL_SCREEN_BUS") {
-            let bus: i32 = screen_bus.parse().unwrap_or(-1);
-            if bus >= 0 {
+            let bus: u8 = screen_bus.parse().unwrap_or(255);
+            if bus < 50 {
                 println!("Screen bus is {bus}.");
-                //#[cfg(target_os = "linux")]
                 if let Ok(mut screen) = screen.lock() {
-                    *screen = Some(CharacterDisplay::new(bus));
+                    let new_screen = CharacterDisplay::new(keepalive.clone());
+                    *screen = Some(new_screen.clone());
+                    thread::spawn(move|| {
+                        new_screen.run(bus);
+                    });
                 }
             }
             // Only check for buttons if we have a screen.
@@ -183,24 +186,24 @@ fn main() {
             let mut up: u8 = 0;
             if let Ok(btn) = std::env::var("PORTAL_UP_BUTTON") {
                 up = btn.parse().unwrap_or(0);
-                println!("Up button is {up}");
             }
             let mut down: u8 = 0;
             if let Ok(btn) = std::env::var("PORTAL_DOWN_BUTTON") {
                 down = btn.parse().unwrap_or(0);
-                println!("down button is {down}");
             }
             let mut left: u8 = 0;
             if let Ok(btn) = std::env::var("PORTAL_LEFT_BUTTON") {
                 left = btn.parse().unwrap_or(0);
-                println!("Left button is {left}");
             }
             let mut right: u8 = 0;
             if let Ok(btn) = std::env::var("PORTAL_RIGHT_BUTTON") {
                 right = btn.parse().unwrap_or(0);
-                println!("Right button is {right}");
             }
-            if up > 0 && down > 0 && left > 0 && right > 0 {
+            let mut enter: u8 = 0;
+            if let Ok(btn) = std::env::var("PORTAL_ENTER_BUTTON") {
+                enter = btn.parse().unwrap_or(0);
+            }
+            if up > 0 && down > 0 && left > 0 && right > 0 && enter > 0 {
                 println!("All buttons are accounted for. Starting button thread.");
                 let btns = Buttons::new(
                     sqlite.clone(),
@@ -210,7 +213,8 @@ fn main() {
                     up,
                     down,
                     left,
-                    right
+                    right,
+                    enter
                 );
                 thread::spawn(move|| {
                     btns.run();
