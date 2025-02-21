@@ -8,6 +8,7 @@ use crate::{control::{self, socket::MAX_CONNECTED, sound::SoundNotifier}, databa
 pub mod zebra;
 pub mod auto_connect;
 pub mod reconnector;
+pub mod helpers;
 
 pub const READER_KIND_ZEBRA: &str = "ZEBRA";
 pub const READER_KIND_RFID: &str = "RFID";

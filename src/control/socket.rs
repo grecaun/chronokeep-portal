@@ -2401,7 +2401,7 @@ fn write_time(
     true
 }
 
-fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
+pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
     let setting_names = [
         super::SETTING_CHIP_TYPE,
         super::SETTING_PORTAL_NAME,
@@ -2424,7 +2424,7 @@ fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
     settings
 }
 
-fn write_settings(
+pub(crate) fn write_settings(
     stream: &TcpStream,
     settings: &Vec<setting::Setting>
 ) -> bool {
