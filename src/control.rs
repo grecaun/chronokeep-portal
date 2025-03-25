@@ -15,6 +15,10 @@ pub const SETTING_VOLUME: &str = "SETTING_VOLUME";
 pub const SETTING_VOICE: &str = "SETTING_VOICE";
 pub const SETTING_AUTO_REMOTE: &str = "SETTING_AUTO_REMOTE";
 pub const SETTING_UPLOAD_INTERVAL: &str = "SETTING_UPLOAD_INTERVAL";
+pub const SETTING_NTFY_URL: &str = "SETTING_NTFY_URL";
+pub const SETTING_NTFY_USER: &str = "SETTING_NTFY_USER";
+pub const SETTING_NTFY_PASS: &str = "SETTING_NTFY_PASS";
+pub const SETTING_NTFY_TOPIC: &str = "SETTING_NTFY_TOPIC";
 
 pub struct Control {
     pub name: String,
@@ -26,6 +30,10 @@ pub struct Control {
     pub sound_board: SoundBoard,
     pub auto_remote: bool,
     pub upload_interval: u64,
+    pub ntfy_url: String,
+    pub ntfy_user: String,
+    pub ntfy_pass: String,
+    pub ntfy_topic: String,
 }
 
 impl Control {
@@ -71,6 +79,10 @@ impl Control {
             sound_board: SoundBoard::new(defaults::DEFAULT_VOICE),
             auto_remote: defaults::DEFAULT_AUTO_REMOTE,
             upload_interval: defaults::DEFAULT_UPLOAD_INTERVAL,
+            ntfy_url: String::from(""),
+            ntfy_user: String::from(""),
+            ntfy_pass: String::from(""),
+            ntfy_topic: String::from(""),
         };
         match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
             Ok(s) => {
@@ -256,6 +268,86 @@ impl Control {
                         },
                         Err(e) => return Err(e)
                     }
+            }
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_NTFY_URL) {
+            Ok(s) => {
+                output.ntfy_url = String::from(s.value());
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_NTFY_URL),
+                    String::new(),
+                )) {
+                    Ok(s) => {
+                        output.ntfy_url = String::from(s.value());
+                        println!("NTFY url successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            }
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_NTFY_USER) {
+            Ok(s) => {
+                output.ntfy_user = String::from(s.value());
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_NTFY_USER),
+                    String::new(),
+                )) {
+                    Ok(s) => {
+                        output.ntfy_user = String::from(s.value());
+                        println!("NTFY user successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            }
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_NTFY_PASS) {
+            Ok(s) => {
+                output.ntfy_pass = String::from(s.value());
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_NTFY_PASS),
+                    String::new(),
+                )) {
+                    Ok(s) => {
+                        output.ntfy_pass = String::from(s.value());
+                        println!("NTFY pass successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            }
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_NTFY_TOPIC) {
+            Ok(s) => {
+                output.ntfy_topic = String::from(s.value());
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_NTFY_TOPIC),
+                    String::new(),
+                )) {
+                    Ok(s) => {
+                        output.ntfy_topic = String::from(s.value());
+                        println!("NTFY topic successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
             }
             Err(e) => {
                 return Err(e)
