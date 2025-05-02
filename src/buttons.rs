@@ -6,12 +6,12 @@ use std::time::Duration;
 use rppal::gpio::{Gpio, Trigger};
 
 #[cfg(target_os = "linux")]
-use crate::{control::Control, database::sqlite, screen::CharacterDisplay};
+use crate::screen::ButtonPress;
+#[cfg(target_os = "linux")]
+use crate::screen::CharacterDisplay;
 
 #[cfg(target_os = "linux")]
 pub struct Buttons {
-    _sqlite: Arc<Mutex<sqlite::SQLite>>,
-    _control: Arc<Mutex<Control>>,
     _screen: Arc<Mutex<Option<CharacterDisplay>>>,
     keepalive: Arc<Mutex<bool>>,
     up_button: u8,
@@ -24,19 +24,31 @@ pub struct Buttons {
 #[cfg(target_os = "linux")]
 impl Buttons {
     pub fn new(
-        _sqlite: Arc<Mutex<sqlite::SQLite>>,
-        _control: Arc<Mutex<Control>>,
         _screen: Arc<Mutex<Option<CharacterDisplay>>>,
-        keepalive: Arc<Mutex<bool>>,
-        up_button: u8,
-        down_button: u8,
-        left_button: u8,
-        right_button: u8,
-        enter_button: u8
+        keepalive: Arc<Mutex<bool>>
     ) -> Self {
+        println!("Checking if there are buttons we should be reading from.");
+        let mut up_button: u8 = 0;
+        if let Ok(btn) = std::env::var("PORTAL_UP_BUTTON") {
+            up_button = btn.parse().unwrap_or(0);
+        }
+        let mut down_button: u8 = 0;
+        if let Ok(btn) = std::env::var("PORTAL_DOWN_BUTTON") {
+            down_button = btn.parse().unwrap_or(0);
+        }
+        let mut left_button: u8 = 0;
+        if let Ok(btn) = std::env::var("PORTAL_LEFT_BUTTON") {
+            left_button = btn.parse().unwrap_or(0);
+        }
+        let mut right_button: u8 = 0;
+        if let Ok(btn) = std::env::var("PORTAL_RIGHT_BUTTON") {
+            right_button = btn.parse().unwrap_or(0);
+        }
+        let mut enter_button: u8 = 0;
+        if let Ok(btn) = std::env::var("PORTAL_ENTER_BUTTON") {
+            enter_button = btn.parse().unwrap_or(0);
+        }
         Self {
-            _sqlite,
-            _control,
             _screen,
             keepalive,
             up_button,
@@ -85,32 +97,28 @@ impl Buttons {
                     }
                 }
                 if let Ok(result) = a_gpio.poll_interrupts(&btns, false, Some(Duration::from_millis(1250))) {
-                    let mut messages: Vec<String> = Vec::new();
                     match result {
                         Some((pin, _event)) => {
                             let p = pin.pin();
-                            if p == self.up_button {
-                                messages.push(String::from("Up button pressed!"));
-                            } else if p == self.down_button {
-                                messages.push(String::from("Down button pressed!"));
-                            } else if p == self.left_button {
-                                messages.push(String::from("Left button pressed!"));
-                            } else if p == self.right_button {
-                                messages.push(String::from("Right button pressed!"));
-                            } else if p == self.enter_button {
-                                messages.push(String::from("Enter button pressed!"));
-                            } else {
-                                println!("Unknown button pressed. GPIO {p}");
+                            if let Ok(guarded_screen) = self._screen.try_lock() {
+                                if let Some(screen) = &*guarded_screen {
+                                    if p == self.up_button {
+                                        screen.register_button(ButtonPress::Up);
+                                    } else if p == self.down_button {
+                                        screen.register_button(ButtonPress::Down);
+                                    } else if p == self.left_button {
+                                        screen.register_button(ButtonPress::Left);
+                                    } else if p == self.right_button {
+                                        screen.register_button(ButtonPress::Right);
+                                    } else if p == self.enter_button {
+                                        screen.register_button(ButtonPress::Enter);
+                                    } else {
+                                        println!("Unknown button pressed. GPIO {p}");
+                                    }
+                                }
                             }
                         },
                         None => {}
-                    }
-                    if messages.len() > 0 {
-                        if let Ok(screen) = self._screen.try_lock() {
-                            if let Some(lcd) = &*screen {
-                                lcd.print(messages);
-                            }
-                        }
                     }
                 }
             }

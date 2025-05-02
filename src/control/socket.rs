@@ -1,4 +1,6 @@
 use std::{env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
+#[cfg(target_os = "linux")]
+use crate::buttons::Buttons;
 
 use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
@@ -32,8 +34,7 @@ pub const JSON_END_CHAR: char = '}';
 pub fn control_loop(
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     control: &Arc<Mutex<super::Control>>,
-    keepalive: Arc<Mutex<bool>>,
-    _screen: Arc<Mutex<Option<CharacterDisplay>>>,
+    keepalive: Arc<Mutex<bool>>
 ) {
     // Joiners are join handles for threads we spin up.
     let joiners: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
@@ -50,6 +51,42 @@ pub fn control_loop(
     
     // Our control port will be semi-random at the start to try to ensure we don't try to get a port in use.
     let control_port = get_available_port();
+
+    // Check if we can start a screen
+    
+    let screen: Arc<Mutex<Option<CharacterDisplay>>> = Arc::new(Mutex::new(None));
+    // Check for screen information
+    #[cfg(target_os = "linux")]
+    {
+        println!("Checking if there's a screen to display information on.");
+        if let Ok(screen_bus) = std::env::var("PORTAL_SCREEN_BUS") {
+            let bus: u8 = screen_bus.parse().unwrap_or(255);
+            if bus < 50 {
+                println!("Screen bus is {bus}.");
+                if let Ok(mut screen) = screen.lock() {
+                    let mut new_screen = CharacterDisplay::new(
+                        keepalive.clone(),
+                        control.clone(),
+                        readers.clone(),
+                        sqlite.clone()
+                    );
+                    *screen = Some(new_screen.clone());
+                    thread::spawn(move|| {
+                        new_screen.run(bus);
+                    });
+                }
+                // Start buttons
+                println!("Starting button thread.");
+                let btns = Buttons::new(
+                    screen.clone(), 
+                    keepalive.clone()
+                );
+                thread::spawn(move|| {
+                    btns.run();
+                });
+            }
+        }
+    }
 
     let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
         Ok(sock) => sock,
@@ -326,7 +363,9 @@ pub fn control_loop(
                 }
             },
             Err(e) => {
-                println!("Connection failed. {e}")
+                if e.kind() != ErrorKind::WouldBlock {
+                    println!("Connection failed. {e}")
+                }
             }
         }
     }

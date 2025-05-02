@@ -28,7 +28,7 @@ pub struct CharacterDisplay {
     current_menu: [u8; 3],
 }
 
-enum ButtonPress {
+pub enum ButtonPress {
     Up,
     Down,
     Left,
@@ -190,40 +190,37 @@ impl CharacterDisplay {
         }
     }
 
-    #[cfg(target_os = "linux")]
-    pub fn init(&self, bus: u8) -> Result<AdafruitLCDBackpack, &str> {
+    pub fn run(&mut self, bus: u8) {
+        #[cfg(target_os = "linux")]
         println!("Attempting to connect to screen on i2c{bus}.");
+        #[cfg(target_os = "linux")]
         let i2c_res = I2c::with_bus(bus);
+        #[cfg(target_os = "linux")]
         if let Err(ref e) = i2c_res {
             println!("Error connecting to screen on bus {bus}. {e}");
-            return Err("error connecting to screen");
         }
-        let i2c = i2c_res.unwrap();
-        let delay = hal::Delay::new();
-        let mut lcd = AdafruitLCDBackpack::new(i2c, LcdDisplayType::Lcd20x4, delay);
-        println!("Initializing the lcd.");
-        if let Err(e) = lcd.init() {
-            println!("Error initializing lcd. {e}");
-            return Err("error initializing lcd");
-        }
-        if let Err(e) = lcd.backlight(true) {
-            println!("Error setting lcd backlight. {e}");
-            return Err("error setting lcd backlight");
-        }
-        if let Err(e) = lcd.clear() {
-            println!("Error clearing lcd. {e}");
-            return Err("error clearing lcd screen");
-        }
-        if let Err(e) = lcd.home() {
-            println!("Error homing cursor. {e}");
-            return Err("error homing lcd screen cursor");
-        }
-        Ok(lcd)
-    }
-
-    pub fn run(&mut self, _bus: u8) {
         #[cfg(target_os = "linux")]
-        let mut lcd = init(_bus);
+        let i2c = i2c_res.unwrap();
+        #[cfg(target_os = "linux")]
+        let delay = hal::Delay::new();
+        #[cfg(target_os = "linux")]
+        let mut lcd = AdafruitLCDBackpack::new(i2c, LcdDisplayType::Lcd20x4, delay);
+        #[cfg(target_os = "linux")]
+        {
+            println!("Initializing the lcd.");
+            if let Err(e) = lcd.init() {
+                println!("Error initializing lcd. {e}");
+            }
+            if let Err(e) = lcd.backlight(true) {
+                println!("Error setting lcd backlight. {e}");
+            }
+            if let Err(e) = lcd.clear() {
+                println!("Error clearing lcd. {e}");
+            }
+            if let Err(e) = lcd.home() {
+                println!("Error homing cursor. {e}");
+            }
+        }
         loop {
             if let Ok(keepalive) = self.keepalive.try_lock() {
                 if *keepalive == false {
@@ -237,16 +234,19 @@ impl CharacterDisplay {
                 waiting = cvar.wait(waiting).unwrap();
             }
             if let Ok(mut presses) = self.button_presses.try_lock() {
+                let mut messages: Vec<String> = Vec::new();
                 for press in &*presses {
                     match press {
                         ButtonPress::Up => {
                             println!("Up button registered.");
+                            messages.push(String::from("Up button pressed!"));
                             if self.current_menu[1] > 0 {
                                 self.current_menu[1] -= 1;
                             }
                         },
                         ButtonPress::Down => {
                             println!("Down button registered.");
+                            messages.push(String::from("Down button pressed!"));
                             match self.current_menu[0] {
                                 0 => { // main menu, max ix 4
                                     if self.current_menu[1] < 4 {
@@ -263,6 +263,7 @@ impl CharacterDisplay {
                         },
                         ButtonPress::Left => {
                             println!("Left button registered.");
+                            messages.push(String::from("Left button pressed!"));
                             if self.current_menu[0] == 1 {
                                 if let Ok(mut control) = self.control.lock() {
                                     match self.current_menu[1] {
@@ -372,6 +373,7 @@ impl CharacterDisplay {
                         },
                         ButtonPress::Right => {
                             println!("Right button registered.");
+                            messages.push(String::from("Right button pressed!"));
                             if self.current_menu[0] == 1 {
                                 if let Ok(mut control) = self.control.lock() {
                                     match self.current_menu[1] {
@@ -481,6 +483,7 @@ impl CharacterDisplay {
                         },
                         ButtonPress::Enter => {
                             println!("Enter button registered.");
+                            messages.push(String::from("Enter button pressed!"));
                             match self.current_menu[0] {
                                 0 => {
                                     match self.current_menu[1] {
@@ -528,6 +531,22 @@ impl CharacterDisplay {
                     } 
                 }
                 presses.clear();
+                #[cfg(target_os = "linux")]
+                {
+                    for msg in &mut messages {
+                        if msg.len() > 20 {
+                            let _ = msg.split_off(20);
+                        } else if msg.len() < 20 {
+                            *msg = format!("{:<20}", msg)
+                        }
+                    }
+                    messages.truncate(4);
+                    let _ = lcd.clear();
+                    let _ = lcd.home();
+                    for msg in &*messages {
+                        let _ = write!(lcd, "{msg}");
+                    }
+                }
                 // TODO Update the screen.
             }
             *waiting = true;
@@ -541,33 +560,31 @@ impl CharacterDisplay {
         println!("LCD thread terminated.");
     }
 
-    #[cfg(target_os = "linux")]
-    pub fn stop(&self) {
-        if let Ok(mut keepalive) = self._keepalive.lock() {
-            *keepalive = false;
+    pub fn register_button(&self, button: ButtonPress) {
+        if let Ok(mut presses) = self.button_presses.try_lock() {
+            presses.push(button);
         }
-        let (lock, cvar) = &*self._waiter;
+        let (lock, cvar) = &*self.waiter;
         let mut waiting = lock.lock().unwrap();
         *waiting = false;
         cvar.notify_one();
     }
 
-    pub fn print(&self, mut _new_messages: Vec<String>) {
-        #[cfg(target_os = "linux")]
+    #[cfg(target_os = "linux")]
+    pub fn stop(&self) {
+        if let Ok(mut keepalive) = self.keepalive.lock() {
+            *keepalive = false;
+        }
+        let (lock, cvar) = &*self.waiter;
+        let mut waiting = lock.lock().unwrap();
+        *waiting = false;
+        cvar.notify_one();
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn update(&self) {
         {
-            for msg in &mut _new_messages {
-                if msg.len() > 20 {
-                    let _ = msg.split_off(20);
-                } else if msg.len() < 20 {
-                    *msg = format!("{:<20}", msg)
-                }
-            }
-            _new_messages.truncate(4);
-            if let Ok(mut messages) = self._messages.try_lock() {
-                messages.clear();
-                messages.append(&mut _new_messages);
-            }
-            let (lock, cvar) = &*self._waiter;
+            let (lock, cvar) = &*self.waiter;
             let mut waiting = lock.lock().unwrap();
             *waiting = false;
             cvar.notify_one();

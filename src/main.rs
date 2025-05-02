@@ -2,13 +2,7 @@ use core::panic;
 use std::env;
 use std::sync::Arc;
 use std::sync::Mutex;
-#[cfg(target_os = "linux")]
-use std::thread;
-#[cfg(target_os = "linux")]
-use buttons::Buttons;
 use dotenv::dotenv;
-use screen::CharacterDisplay;
-
 use crate::database::sqlite;
 use crate::database::Database;
 use crate::objects::backup;
@@ -163,73 +157,15 @@ fn main() {
     else {
         println!("Unable to get control mutex for some reason.");
     }
-    let screen: Arc<Mutex<Option<CharacterDisplay>>> = Arc::new(Mutex::new(None));
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
-    // Check for screen information
-    #[cfg(target_os = "linux")]
-    {
-        println!("Checking if there's a screen to display information on.");
-        if let Ok(screen_bus) = std::env::var("PORTAL_SCREEN_BUS") {
-            let bus: u8 = screen_bus.parse().unwrap_or(255);
-            if bus < 50 {
-                println!("Screen bus is {bus}.");
-                if let Ok(mut screen) = screen.lock() {
-                    let new_screen = CharacterDisplay::new(keepalive.clone());
-                    *screen = Some(new_screen.clone());
-                    thread::spawn(move|| {
-                        new_screen.run(bus);
-                    });
-                }
-            }
-            // Only check for buttons if we have a screen.
-            println!("Checking if there are buttons we should be reading from.");
-            let mut up: u8 = 0;
-            if let Ok(btn) = std::env::var("PORTAL_UP_BUTTON") {
-                up = btn.parse().unwrap_or(0);
-            }
-            let mut down: u8 = 0;
-            if let Ok(btn) = std::env::var("PORTAL_DOWN_BUTTON") {
-                down = btn.parse().unwrap_or(0);
-            }
-            let mut left: u8 = 0;
-            if let Ok(btn) = std::env::var("PORTAL_LEFT_BUTTON") {
-                left = btn.parse().unwrap_or(0);
-            }
-            let mut right: u8 = 0;
-            if let Ok(btn) = std::env::var("PORTAL_RIGHT_BUTTON") {
-                right = btn.parse().unwrap_or(0);
-            }
-            let mut enter: u8 = 0;
-            if let Ok(btn) = std::env::var("PORTAL_ENTER_BUTTON") {
-                enter = btn.parse().unwrap_or(0);
-            }
-            if up > 0 && down > 0 && left > 0 && right > 0 && enter > 0 {
-                println!("All buttons are accounted for. Starting button thread.");
-                let btns = Buttons::new(
-                    sqlite.clone(),
-                    control.clone(),
-                    screen.clone(), 
-                    keepalive.clone(),
-                    up,
-                    down,
-                    left,
-                    right,
-                    enter
-                );
-                thread::spawn(move|| {
-                    btns.run();
-                });
-            }
-        }
-    }
-    // Check for 
+    // Check for command line arguments
     let args: Vec<String> = env::args().collect();
     if args.len() > 0 && args[0].as_str() == "daemon" {
-        control::socket::control_loop(sqlite.clone(), &control, keepalive.clone(), screen.clone())
+        control::socket::control_loop(sqlite.clone(), &control, keepalive.clone())
     }  else {
         match CONTROL_TYPE {
             "socket" => {
-                control::socket::control_loop(sqlite.clone(), &control, keepalive.clone(), screen.clone())
+                control::socket::control_loop(sqlite.clone(), &control, keepalive.clone())
             },
             "cli" => {
                 control::cli::control_loop(sqlite.clone(), &control);
