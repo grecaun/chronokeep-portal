@@ -55,7 +55,6 @@ impl CharacterDisplay {
             reader_info: Vec::new(),
             main_menu: vec![
                 " > Start Reading    ".to_string(),
-                "   Stop Reading     ".into(),
                 "   Settings         ".into(),
                 "   About            ".into(),
                 "   Shutdown         ".into(),
@@ -72,17 +71,17 @@ impl CharacterDisplay {
     pub fn update_title_bar(&mut self, status: uploader::Status, err_count: isize) {
         if let Ok(control) = self.control.lock() {
             if err_count > 9 {
-                self.title_bar = format!("{:>.17} 9+", control.name)
+                self.title_bar = format!("{:<17} 9+", control.name)
             } else if err_count > 0 {
-                self.title_bar = format!("{:>.17}  {}", control.name, err_count)
+                self.title_bar = format!("{:<17}  {}", control.name, err_count)
             } else {
-                let mut upload_status = "";
+                let mut upload_status = " ";
                 if status == Status::Running {
                     upload_status = "+";
                 } else if status == Status::Stopped || status == Status::Stopping {
                     upload_status = "-";
                 }
-                self.title_bar = format!("{:>.17}  {}", control.name, upload_status)
+                self.title_bar = format!("{:<17}  {}", control.name, upload_status)
             }
         }
     }
@@ -160,12 +159,21 @@ impl CharacterDisplay {
     }
 
     pub fn update_menu(&mut self) {
-        self.main_menu[0].replace_range(1..2, " ");
-        self.main_menu[1].replace_range(1..2, " ");
-        self.main_menu[2].replace_range(1..2, " ");
-        self.main_menu[3].replace_range(1..2, " ");
-        self.main_menu[4].replace_range(1..2, " ");
-        self.main_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
+        match self.current_menu[0] {
+            0 => { // main menu, max ix 3
+                for line in self.main_menu.iter_mut() {
+                    line.replace_range(1..2, " ");
+                }
+                self.main_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
+            },
+            1 => { // settings menu, max ix 7
+                for line in self.settings_menu.iter_mut() {
+                    line.replace_range(1..2, " ");
+                }
+                self.settings_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
+            }
+            _ => {}
+        }
     }
 
     pub fn update_settings(&mut self) {
@@ -179,14 +187,14 @@ impl CharacterDisplay {
             if control.auto_remote {
                 auto_upload = "yes";
             }
-            self.settings_menu.push(format!("   Sightings   {:>.4} ", control.sighting_period));
-            self.settings_menu.push(format!("   Read Window {:>.4} ", control.read_window));
-            self.settings_menu.push(format!("   Chip Type   {:>.4} ", control.chip_type));
-            self.settings_menu.push(format!("   Play Sounds {:>.4} ", play_sound));
-            self.settings_menu.push(format!("   Volume      {:>.4} ", (control.volume * 10.0) as usize));
-            self.settings_menu.push(format!("   Voice    {:>.7} ", control.sound_board.get_voice().as_str()));
-            self.settings_menu.push(format!("   Auto Upload {:>.4} ", auto_upload));
-            self.settings_menu.push(format!("   Upload Int  {:>.4} ", control.upload_interval));
+            self.settings_menu.push(format!("   Sightings   {:<4} ", control.sighting_period));
+            self.settings_menu.push(format!("   Read Window {:<4} ", control.read_window));
+            self.settings_menu.push(format!("   Chip Type   {:<4} ", control.chip_type));
+            self.settings_menu.push(format!("   Play Sounds {:<4} ", play_sound));
+            self.settings_menu.push(format!("   Volume      {:<4} ", (control.volume * 10.0) as usize));
+            self.settings_menu.push(format!("   Voice    {:<7} ", control.sound_board.get_voice().as_str()));
+            self.settings_menu.push(format!("   Auto Upload {:<4} ", auto_upload));
+            self.settings_menu.push(format!("   Upload Int  {:<4} ", control.upload_interval));
         }
     }
 
@@ -220,6 +228,14 @@ impl CharacterDisplay {
             if let Err(e) = lcd.home() {
                 println!("Error homing cursor. {e}");
             }
+            self.update_title_bar(uploader::Status::Unknown, 0);
+            let mut messages: Vec<String> = vec!(self.title_bar.clone());
+            messages.push(self.main_menu[1].clone());
+            messages.push(self.main_menu[0].clone());
+            messages.push(self.main_menu[2].clone());
+            for msg in &*messages {
+                let _ = write!(lcd, "{msg}");
+            }
         }
         loop {
             if let Ok(keepalive) = self.keepalive.try_lock() {
@@ -228,28 +244,27 @@ impl CharacterDisplay {
                     break;
                 }
             }
-            let (lock, cvar) = &*self.waiter;
+            let (lock, cvar) = &*self.waiter.clone();
             let mut waiting = lock.lock().unwrap();
             while *waiting {
                 waiting = cvar.wait(waiting).unwrap();
             }
-            if let Ok(mut presses) = self.button_presses.try_lock() {
-                let mut messages: Vec<String> = Vec::new();
+            if let Ok(mut presses) = self.button_presses.clone().try_lock() {
                 for press in &*presses {
                     match press {
                         ButtonPress::Up => {
                             println!("Up button registered.");
-                            messages.push(String::from("Up button pressed!"));
                             if self.current_menu[1] > 0 {
                                 self.current_menu[1] -= 1;
                             }
+                            self.current_menu[2] = 0;
+                            self.update_menu();
                         },
                         ButtonPress::Down => {
                             println!("Down button registered.");
-                            messages.push(String::from("Down button pressed!"));
                             match self.current_menu[0] {
-                                0 => { // main menu, max ix 4
-                                    if self.current_menu[1] < 4 {
+                                0 => { // main menu, max ix 3
+                                    if usize::from(self.current_menu[1]) < 3 {
                                         self.current_menu[1] += 1;
                                     }
                                 },
@@ -260,10 +275,11 @@ impl CharacterDisplay {
                                 }
                                 _ => {}
                             }
+                            self.current_menu[2] = 0;
+                            self.update_menu();
                         },
                         ButtonPress::Left => {
                             println!("Left button registered.");
-                            messages.push(String::from("Left button pressed!"));
                             if self.current_menu[0] == 1 {
                                 if let Ok(mut control) = self.control.lock() {
                                     match self.current_menu[1] {
@@ -370,10 +386,10 @@ impl CharacterDisplay {
                                     }
                                 }
                             }
+                            self.current_menu[2] = 0;
                         },
                         ButtonPress::Right => {
                             println!("Right button registered.");
-                            messages.push(String::from("Right button pressed!"));
                             if self.current_menu[0] == 1 {
                                 if let Ok(mut control) = self.control.lock() {
                                     match self.current_menu[1] {
@@ -479,27 +495,28 @@ impl CharacterDisplay {
                                         _ => {}
                                     }
                                 }
+                            } else if self.current_menu[0] == 2 && self.current_menu[2] == 1 {
+                                // TODO stop reading
                             }
+                            self.current_menu[2] = 0;
                         },
                         ButtonPress::Enter => {
                             println!("Enter button registered.");
-                            messages.push(String::from("Enter button pressed!"));
                             match self.current_menu[0] {
                                 0 => {
                                     match self.current_menu[1] {
                                         0 => { // Start Reading
                                         },
-                                        1 => { // Stop Reading
-                                        },
-                                        2 => { // Settings
+                                        1 => { // Settings
                                             self.current_menu[0] = 1;
                                             self.current_menu[1] = 0;
+                                            self.update_settings();
                                         }
-                                        3 => { // About
-                                            self.current_menu[0] = 2;
+                                        2 => { // About
+                                            self.current_menu[0] = 3;
                                             self.current_menu[1] = 0;
                                         },
-                                        4 => { // Shutdown
+                                        3 => { // Shutdown
                                             // TODO Deal with shutdown
                                         },
                                         _ => {}
@@ -521,7 +538,10 @@ impl CharacterDisplay {
                                             }
                                         }
                                     }
-                                }
+                                },
+                                3 => {
+                                    self.current_menu[2] = 1;
+                                },
                                 _ => {
                                     self.current_menu[0] = 0;
                                     self.current_menu[1] = 0;
@@ -533,16 +553,72 @@ impl CharacterDisplay {
                 presses.clear();
                 #[cfg(target_os = "linux")]
                 {
-                    for msg in &mut messages {
-                        if msg.len() > 20 {
-                            let _ = msg.split_off(20);
-                        } else if msg.len() < 20 {
-                            *msg = format!("{:<20}", msg)
-                        }
-                    }
-                    messages.truncate(4);
+                    let mut messages: Vec<String> = vec!(self.title_bar.clone());
                     let _ = lcd.clear();
                     let _ = lcd.home();
+                    match self.current_menu[0] {
+                        0 => { // main menu, max ix 3
+                            match self.current_menu[1] {
+                                0 | 1 => {
+                                    messages.push(self.main_menu[1].clone()); // Interface writes lines odd lines before even lines,
+                                    messages.push(self.main_menu[0].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
+                                    messages.push(self.main_menu[2].clone());
+                                },
+                                _ => { // 2 | 3
+                                    messages.push(self.main_menu[2].clone());
+                                    messages.push(self.main_menu[1].clone());
+                                    messages.push(self.main_menu[3].clone());
+                                },
+                            };
+                        },
+                        1 => { // settings menu, max ix 7
+                            match self.current_menu[1] {
+                                0 | 1 => {
+                                    messages.push(self.settings_menu[1].clone());
+                                    messages.push(self.settings_menu[0].clone());
+                                    messages.push(self.settings_menu[2].clone());
+                                },
+                                2 => {
+                                    messages.push(self.settings_menu[2].clone());
+                                    messages.push(self.settings_menu[1].clone());
+                                    messages.push(self.settings_menu[3].clone());
+                                },
+                                3 => {
+                                    messages.push(self.settings_menu[3].clone());
+                                    messages.push(self.settings_menu[2].clone());
+                                    messages.push(self.settings_menu[4].clone());
+                                },
+                                4 => {
+                                    messages.push(self.settings_menu[4].clone());
+                                    messages.push(self.settings_menu[3].clone());
+                                    messages.push(self.settings_menu[5].clone());
+                                },
+                                5 => {
+                                    messages.push(self.settings_menu[5].clone());
+                                    messages.push(self.settings_menu[4].clone());
+                                    messages.push(self.settings_menu[6].clone());
+                                },
+                                _ => { // 6 | 7
+                                    messages.push(self.settings_menu[6].clone());
+                                    messages.push(self.settings_menu[5].clone());
+                                    messages.push(self.settings_menu[7].clone());
+                                },
+                            };
+                        }
+                        2 => { // reader is reading
+                            if self.reader_info.len() > 0 {
+                                messages.push(self.reader_info[0].clone());
+                            }
+                            if self.reader_info.len() > 1 {
+                                messages.push(self.reader_info[1].clone());
+                            }
+                        }
+                        3 => { // about menu
+                            messages.push(String::from("Chronokeep Portal"));
+                            messages.push(String::from("Version 0.1"));
+                        }
+                        _ => {}
+                    }
                     for msg in &*messages {
                         let _ = write!(lcd, "{msg}");
                     }
