@@ -71,9 +71,9 @@ impl CharacterDisplay {
     pub fn update_title_bar(&mut self, status: uploader::Status, err_count: isize) {
         if let Ok(control) = self.control.lock() {
             if err_count > 9 {
-                self.title_bar = format!("{:<17} 9+", control.name)
+                self.title_bar = format!("{:.17} 9+", control.name)
             } else if err_count > 0 {
-                self.title_bar = format!("{:<17}  {}", control.name, err_count)
+                self.title_bar = format!("{:.17}  {}", control.name, err_count)
             } else {
                 let mut upload_status = " ";
                 if status == Status::Running {
@@ -81,7 +81,7 @@ impl CharacterDisplay {
                 } else if status == Status::Stopped || status == Status::Stopping {
                     upload_status = "-";
                 }
-                self.title_bar = format!("{:<17}  {}", control.name, upload_status)
+                self.title_bar = format!("{:.17}  {}", control.name, upload_status)
             }
         }
     }
@@ -100,14 +100,14 @@ impl CharacterDisplay {
                         let mut line = [ANTENNA_STATUS_NONE; 9];
                         line[0] = num;
                         if let Ok(ants) = read.antennas.lock() {
-                            line[1] = ants[1];
-                            line[2] = ants[2];
-                            line[3] = ants[3];
-                            line[4] = ants[4];
-                            line[5] = ants[5];
-                            line[6] = ants[6];
-                            line[7] = ants[7];
-                            line[8] = ants[8];
+                            line[1] = ants[0];
+                            line[2] = ants[1];
+                            line[3] = ants[2];
+                            line[4] = ants[3];
+                            line[5] = ants[4];
+                            line[6] = ants[5];
+                            line[7] = ants[6];
+                            line[8] = ants[7];
                         }
                         lines.push(line);
                     }
@@ -187,14 +187,14 @@ impl CharacterDisplay {
             if control.auto_remote {
                 auto_upload = "yes";
             }
-            self.settings_menu.push(format!("   Sightings   {:<4} ", control.sighting_period));
-            self.settings_menu.push(format!("   Read Window {:<4} ", control.read_window));
-            self.settings_menu.push(format!("   Chip Type   {:<4} ", control.chip_type));
-            self.settings_menu.push(format!("   Play Sounds {:<4} ", play_sound));
-            self.settings_menu.push(format!("   Volume      {:<4} ", (control.volume * 10.0) as usize));
-            self.settings_menu.push(format!("   Voice    {:<7} ", control.sound_board.get_voice().as_str()));
-            self.settings_menu.push(format!("   Auto Upload {:<4} ", auto_upload));
-            self.settings_menu.push(format!("   Upload Int  {:<4} ", control.upload_interval));
+            self.settings_menu.push(format!("   Sightings   {:>4.4} ", control.sighting_period));
+            self.settings_menu.push(format!("   Read Window {:>4.4} ", control.read_window));
+            self.settings_menu.push(format!("   Chip Type   {:>4.4} ", control.chip_type));
+            self.settings_menu.push(format!("   Play Sounds {:>4.4} ", play_sound));
+            self.settings_menu.push(format!("   Volume      {:>4.4} ", (control.volume * 10.0) as usize));
+            self.settings_menu.push(format!("   Voice    {:>7.7} ", control.sound_board.get_voice().as_str()));
+            self.settings_menu.push(format!("   Auto Upload {:>4.4} ", auto_upload));
+            self.settings_menu.push(format!("   Upload Int  {:>4.4} ", control.upload_interval));
         }
     }
 
@@ -254,8 +254,26 @@ impl CharacterDisplay {
                     match press {
                         ButtonPress::Up => {
                             println!("Up button registered.");
-                            if self.current_menu[1] > 0 {
-                                self.current_menu[1] -= 1;
+                            match self.current_menu[0] {
+                                0 => {
+                                    if self.current_menu[1] > 0 {
+                                        self.current_menu[1] -= 1;
+                                    } else {
+                                        self.current_menu[1] = 4;
+                                    }
+                                }
+                                1 => {
+                                    if self.current_menu[1] > 0 {
+                                        self.current_menu[1] -= 1;
+                                    } else {
+                                        self.current_menu[1] = 7;
+                                    }
+                                }
+                                2 => {}, // current reading, do nothing
+                                _ => { // 3 == about, 2 == ?
+                                    self.current_menu[0] = 0;
+                                    self.current_menu[1] = 0;
+                                }
                             }
                             self.current_menu[2] = 0;
                             self.update_menu();
@@ -264,246 +282,276 @@ impl CharacterDisplay {
                             println!("Down button registered.");
                             match self.current_menu[0] {
                                 0 => { // main menu, max ix 3
-                                    if usize::from(self.current_menu[1]) < 3 {
+                                    if self.current_menu[1] < 3 {
                                         self.current_menu[1] += 1;
+                                    } else { // wrap around to the start
+                                        self.current_menu[1] = 0;
                                     }
                                 },
                                 1 => { // settings menu, max ix 7
                                     if self.current_menu[1] < 7 {
                                         self.current_menu[1] += 1;
+                                    } else { // wrap around to 0
+                                        self.current_menu[1] = 0;
                                     }
                                 }
-                                _ => {}
+                                2 => {}, // current reading, do nothing
+                                _ => { // 3 == about
+                                    self.current_menu[0] = 0;
+                                    self.current_menu[1] = 0;
+                                }
                             }
                             self.current_menu[2] = 0;
                             self.update_menu();
                         },
                         ButtonPress::Left => {
                             println!("Left button registered.");
-                            if self.current_menu[0] == 1 {
-                                if let Ok(mut control) = self.control.lock() {
-                                    match self.current_menu[1] {
-                                        0 => {  // Sighting Period
-                                            if control.sighting_period > 29 {
-                                                if let Ok(sq) = self.sqlite.lock() {
-                                                    control.sighting_period -= 30;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_SIGHTING_PERIOD.to_string(), control.sighting_period.to_string())) {
-                                                        println!("Error saving setting: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        1 => {  // Read Window
-                                            if control.read_window > 5 {
-                                                if let Ok(sq) = self.sqlite.lock() {
-                                                    control.read_window -= 1;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_READ_WINDOW.to_string(), control.read_window.to_string())) {
-                                                        println!("Error saving setting: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        2 => {  // Chip Type
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                if control.chip_type == TYPE_CHIP_HEX {
-                                                    control.chip_type = TYPE_CHIP_DEC.to_string();
-                                                } else {
-                                                    control.chip_type = TYPE_CHIP_HEX.to_string();
-                                                }
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_CHIP_TYPE.to_string(), control.chip_type.to_string())) {
-                                                    println!("Error saving setting: {e}");
-                                                }
-                                            }
-                                        }
-                                        3 => {  // Play Sound
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                control.play_sound = !control.play_sound;
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
-                                                    println!("Error saving setting: {e}");
-                                                }
-                                            }
-                                        }
-                                        4 => {  // Volume
-                                            if control.volume >= 0.1 {
-                                                if let Ok(sq) = self.sqlite.lock() {
-                                                    control.volume -= 0.1;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
-                                                        println!("Error saving setting: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        5 => {  // Voice
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                match control.sound_board.get_voice() {
-                                                    Voice::Emily => {
-                                                        if let Err(_) = control.sound_board.change_voice(Voice::Custom) {
-                                                            println!("Error changing voice to Custom");
-                                                            control.sound_board.play_custom_not_available(control.volume);
-                                                        } else {
-                                                            control.sound_board.play_introduction(control.volume);
+                            match self.current_menu[0] {
+                                0 => {},
+                                1 => {
+                                    if let Ok(mut control) = self.control.lock() {
+                                        match self.current_menu[1] {
+                                            0 => {  // Sighting Period
+                                                if control.sighting_period > 29 {
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.sighting_period -= 30;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_SIGHTING_PERIOD.to_string(), control.sighting_period.to_string())) {
+                                                            println!("Error saving setting: {e}");
                                                         }
-                                                    },
-                                                    Voice::Michael => {
-                                                        if let Err(_) = control.sound_board.change_voice(Voice::Emily) {
-                                                            println!("Error changing voice to Emily");
-                                                        } else {
-                                                            control.sound_board.play_introduction(control.volume);
-                                                        }
-                                                    },
-                                                    Voice::Custom => {
-                                                        if let Err(_) = control.sound_board.change_voice(Voice::Michael) {
-                                                            println!("Error changing voice to Michael");
-                                                        } else {
-                                                            control.sound_board.play_introduction(control.volume);
-                                                        }
-                                                    },
-                                                }
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOICE.to_string(), control.sound_board.get_voice().as_str().to_string())) {
-                                                    println!("Error saving setting: {e}");
+                                                    }
                                                 }
                                             }
-                                        }
-                                        6 => {  // Auto Upload
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                control.auto_remote = !control.auto_remote;
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
-                                                    println!("Error saving setting: {e}");
+                                            1 => {  // Read Window
+                                                if control.read_window > 5 {
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.read_window -= 1;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_READ_WINDOW.to_string(), control.read_window.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
                                                 }
                                             }
-                                        }
-                                        7 => {  // Upload Interval
-                                            if control.upload_interval > 0{
+                                            2 => {  // Chip Type
                                                 if let Ok(sq) = self.sqlite.lock() {
-                                                    control.upload_interval -= 1;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
+                                                    if control.chip_type == TYPE_CHIP_HEX {
+                                                        control.chip_type = TYPE_CHIP_DEC.to_string();
+                                                    } else {
+                                                        control.chip_type = TYPE_CHIP_HEX.to_string();
+                                                    }
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_CHIP_TYPE.to_string(), control.chip_type.to_string())) {
                                                         println!("Error saving setting: {e}");
                                                     }
                                                 }
                                             }
+                                            3 => {  // Play Sound
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    control.play_sound = !control.play_sound;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            4 => {  // Volume
+                                                if control.volume >= 0.1 {
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.volume -= 0.1;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            5 => {  // Voice
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    match control.sound_board.get_voice() {
+                                                        Voice::Emily => {
+                                                            if let Err(_) = control.sound_board.change_voice(Voice::Custom) {
+                                                                println!("Error changing voice to Custom");
+                                                                control.sound_board.play_custom_not_available(control.volume);
+                                                            } else {
+                                                                control.sound_board.play_introduction(control.volume);
+                                                            }
+                                                        },
+                                                        Voice::Michael => {
+                                                            if let Err(_) = control.sound_board.change_voice(Voice::Emily) {
+                                                                println!("Error changing voice to Emily");
+                                                            } else {
+                                                                control.sound_board.play_introduction(control.volume);
+                                                            }
+                                                        },
+                                                        Voice::Custom => {
+                                                            if let Err(_) = control.sound_board.change_voice(Voice::Michael) {
+                                                                println!("Error changing voice to Michael");
+                                                            } else {
+                                                                control.sound_board.play_introduction(control.volume);
+                                                            }
+                                                        },
+                                                    }
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOICE.to_string(), control.sound_board.get_voice().as_str().to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            6 => {  // Auto Upload
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    control.auto_remote = !control.auto_remote;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            7 => {  // Upload Interval
+                                                if control.upload_interval > 0{
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.upload_interval -= 1;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
                                         }
-                                        _ => {}
                                     }
-                                }
+                                },
+                                2 => {}, // currently reading, do nothing
+                                _ => { // 3 == about
+                                    self.current_menu[0] = 0;
+                                    self.current_menu[1] = 0;
+                                    self.update_menu();
+                                },
                             }
                             self.current_menu[2] = 0;
                         },
                         ButtonPress::Right => {
                             println!("Right button registered.");
-                            if self.current_menu[0] == 1 {
-                                if let Ok(mut control) = self.control.lock() {
-                                    match self.current_menu[1] {
-                                        0 => {  // Sighting Period
-                                            if control.sighting_period < 99990 {
-                                                if let Ok(sq) = self.sqlite.lock() {
-                                                    control.sighting_period += 30;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_SIGHTING_PERIOD.to_string(), control.sighting_period.to_string())) {
-                                                        println!("Error saving setting: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        1 => {  // Read Window
-                                            if control.read_window < 50 {
-                                                if let Ok(sq) = self.sqlite.lock() {
-                                                    control.read_window += 1;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_READ_WINDOW.to_string(), control.read_window.to_string())) {
-                                                        println!("Error saving setting: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        2 => {  // Chip Type
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                if control.chip_type == TYPE_CHIP_HEX {
-                                                    control.chip_type = TYPE_CHIP_DEC.to_string();
-                                                } else {
-                                                    control.chip_type = TYPE_CHIP_HEX.to_string();
-                                                }
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_CHIP_TYPE.to_string(), control.chip_type.to_string())) {
-                                                    println!("Error saving setting: {e}");
-                                                }
-                                            }
-                                        }
-                                        3 => {  // Play Sound
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                control.play_sound = !control.play_sound;
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
-                                                    println!("Error saving setting: {e}");
-                                                }
-                                            }
-                                        }
-                                        4 => {  // Volume
-                                            if control.volume < 1.0 {
-                                                if let Ok(sq) = self.sqlite.lock() {
-                                                    control.volume += 0.1;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
-                                                        println!("Error saving setting: {e}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        5 => {  // Voice
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                match control.sound_board.get_voice() {
-                                                    Voice::Emily => {
-                                                        if let Err(_) = control.sound_board.change_voice(Voice::Michael) {
-                                                            println!("Error changing voice to Michael");
-                                                        } else {
-                                                            control.sound_board.play_introduction(control.volume);
+                            match self.current_menu[0] {
+                                0 => { // similar to enter function
+
+                                },
+                                1 => {
+                                    if let Ok(mut control) = self.control.lock() {
+                                        match self.current_menu[1] {
+                                            0 => {  // Sighting Period
+                                                if control.sighting_period < 99990 {
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.sighting_period += 30;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_SIGHTING_PERIOD.to_string(), control.sighting_period.to_string())) {
+                                                            println!("Error saving setting: {e}");
                                                         }
-                                                    },
-                                                    Voice::Michael => {
-                                                        if let Err(_) = control.sound_board.change_voice(Voice::Custom) {
-                                                            println!("Error changing voice to Custom");
-                                                            control.sound_board.play_custom_not_available(control.volume);
-                                                        } else {
-                                                            control.sound_board.play_introduction(control.volume);
-                                                        }
-                                                    },
-                                                    Voice::Custom => {
-                                                        if let Err(_) = control.sound_board.change_voice(Voice::Emily) {
-                                                            println!("Error changing voice to Emily");
-                                                        } else {
-                                                            control.sound_board.play_introduction(control.volume);
-                                                        }
-                                                    },
-                                                }
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOICE.to_string(), control.sound_board.get_voice().as_str().to_string())) {
-                                                    println!("Error saving setting: {e}");
+                                                    }
                                                 }
                                             }
-                                        }
-                                        6 => {  // Auto Upload
-                                            if let Ok(sq) = self.sqlite.lock() {
-                                                control.auto_remote = !control.auto_remote;
-                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
-                                                    println!("Error saving setting: {e}");
+                                            1 => {  // Read Window
+                                                if control.read_window < 50 {
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.read_window += 1;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_READ_WINDOW.to_string(), control.read_window.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
                                                 }
                                             }
-                                        }
-                                        7 => {  // Upload Interval
-                                            if control.upload_interval < 180 {
+                                            2 => {  // Chip Type
                                                 if let Ok(sq) = self.sqlite.lock() {
-                                                    control.upload_interval += 1;
-                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
+                                                    if control.chip_type == TYPE_CHIP_HEX {
+                                                        control.chip_type = TYPE_CHIP_DEC.to_string();
+                                                    } else {
+                                                        control.chip_type = TYPE_CHIP_HEX.to_string();
+                                                    }
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_CHIP_TYPE.to_string(), control.chip_type.to_string())) {
                                                         println!("Error saving setting: {e}");
                                                     }
                                                 }
                                             }
+                                            3 => {  // Play Sound
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    control.play_sound = !control.play_sound;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            4 => {  // Volume
+                                                if control.volume < 1.0 {
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.volume += 0.1;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            5 => {  // Voice
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    match control.sound_board.get_voice() {
+                                                        Voice::Emily => {
+                                                            if let Err(_) = control.sound_board.change_voice(Voice::Michael) {
+                                                                println!("Error changing voice to Michael");
+                                                            } else {
+                                                                control.sound_board.play_introduction(control.volume);
+                                                            }
+                                                        },
+                                                        Voice::Michael => {
+                                                            if let Err(_) = control.sound_board.change_voice(Voice::Custom) {
+                                                                println!("Error changing voice to Custom");
+                                                                control.sound_board.play_custom_not_available(control.volume);
+                                                            } else {
+                                                                control.sound_board.play_introduction(control.volume);
+                                                            }
+                                                        },
+                                                        Voice::Custom => {
+                                                            if let Err(_) = control.sound_board.change_voice(Voice::Emily) {
+                                                                println!("Error changing voice to Emily");
+                                                            } else {
+                                                                control.sound_board.play_introduction(control.volume);
+                                                            }
+                                                        },
+                                                    }
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOICE.to_string(), control.sound_board.get_voice().as_str().to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            6 => {  // Auto Upload
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    control.auto_remote = !control.auto_remote;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            7 => {  // Upload Interval
+                                                if control.upload_interval < 180 {
+                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                        control.upload_interval += 1;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
                                         }
-                                        _ => {}
                                     }
-                                }
-                            } else if self.current_menu[0] == 2 && self.current_menu[2] == 1 {
-                                // TODO stop reading
+                                },
+                                2 => {
+                                    if self.current_menu[2] == 1 {
+                                        // TODO stop reading
+                                    }
+                                },
+                                _ => { // 3 == about
+                                    self.current_menu[0] = 0;
+                                    self.current_menu[1] = 0;
+                                    self.update_menu();
+                                },
                             }
                             self.current_menu[2] = 0;
                         },
                         ButtonPress::Enter => {
                             println!("Enter button registered.");
                             match self.current_menu[0] {
-                                0 => {
+                                0 => { // main
                                     match self.current_menu[1] {
                                         0 => { // Start Reading
                                         },
@@ -522,7 +570,7 @@ impl CharacterDisplay {
                                         _ => {}
                                     }
                                 },
-                                1 => {
+                                1 => { // settings
                                     self.current_menu[0] = 0;
                                     self.current_menu[1] = 0;
                                     // notify of settings changes
@@ -539,12 +587,13 @@ impl CharacterDisplay {
                                         }
                                     }
                                 },
-                                3 => {
+                                2 => { // currently reading
                                     self.current_menu[2] = 1;
                                 },
-                                _ => {
+                                _ => { // 3 => about menu
                                     self.current_menu[0] = 0;
                                     self.current_menu[1] = 0;
+                                    self.update_menu();
                                 },
                             }
                         },
@@ -614,8 +663,10 @@ impl CharacterDisplay {
                             }
                         }
                         3 => { // about menu
-                            messages.push(String::from("Chronokeep Portal"));
-                            messages.push(String::from("Version 0.1"));
+                            messages.push(format!("{:^20.20}", ""));
+                            messages.push(format!("{:^20.20}", env!("CARGO_PKG_VERSION")));
+                            messages.push(format!("{:^20.20}", "Chronokeep Portal"));
+                            messages.push(format!("{:^20.20}", ""));
                         }
                         _ => {}
                     }

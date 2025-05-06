@@ -14,6 +14,7 @@ pub const BUFFER_SIZE: usize = 65536;
 pub const TAG_LIMIT: usize = 100000;
 
 pub const WRITEABLE_FILE_PATH: &str = "PORTAL_WRITEABLE_FILE_PATH";
+pub const ZEBRA_SHIFT: &str = "PORTAL_ZEBRA_SHIFT";
 
 struct ReadData {
     tags: Vec<TagData>,
@@ -621,7 +622,25 @@ pub fn connect(
                                 if let Ok(mut ant) = t_antennas.lock() {
                                     for ix in 0..16 {
                                         if data.antennas[ix] != ANTENNA_STATUS_NONE {
-                                            ant[ix] = data.antennas[ix];
+                                            // The layout for antenna placement on our custom made boxes
+                                            // makes the antenna numbers we see not correspond to the numbers
+                                            // the Zebra FX9600 uses, so we need to shift the index
+                                            let mut ix_shift = ix;
+                                            // So check if the environment variable is set and shift the antenna numberings if so.
+                                            if let Ok(env) = env::var(ZEBRA_SHIFT) {
+                                                if env.len() > 0 {
+                                                    match ix {
+                                                        0 | 2 | 4 | 6 => { 
+                                                            ix_shift = (ix / 2) + 4; // 1 => 5, 3 => 6, 5 => 7, 7 => 8
+                                                        },
+                                                        1 | 3 | 5 | 7 => {                  // Our layout for our system me
+                                                            ix_shift = ((ix + 1) / 2) - 1;  // 2 => 1, 4 => 2, 6 => 3, 8 => 4
+                                                        },
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                            ant[ix_shift] = data.antennas[ix];
                                         }
                                     }
                                     updated = true;
