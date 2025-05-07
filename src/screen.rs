@@ -815,42 +815,8 @@ impl CharacterDisplay {
                                             self.current_menu[1] = 0;
                                         },
                                         MAIN_SHUTDOWN => { // Shutdown
-                                            #[cfg(target_os = "linux")]
-                                            {
-                                                let _ = lcd.clear();
-                                                let _ = lcd.backlight(false);
-                                                let _ = lcd.show_display(false);
-                                            }
-                                            if let Ok(mut ka) = self.keepalive.lock() {
-                                                println!("Starting program stop sequence.");
-                                                *ka = false;
-                                            }
-                                            // play a shutdown command since the shutdown 
-                                            if let Ok(control) = self.control.lock() {
-                                                if control.play_sound {
-                                                    control.sound_board.play_shutdown(control.volume);
-                                                }
-                                            }
-                                            // send shutdown command to the OS
-                                            println!("Sending OS shutdown command if on Linux.");
-                                            match std::env::consts::OS {
-                                                "linux" => {
-                                                    match std::process::Command::new("sudo").arg("shutdown").arg("-h").arg("now").spawn() {
-                                                        Ok(_) => {
-                                                            println!("Shutdown command sent to OS successfully.");
-                                                        },
-                                                        Err(e) => {
-                                                            println!("Error sending shutdown command: {e}");
-                                                        }
-                                                    }
-                                                },
-                                                other => {
-                                                    println!("Shutdown not supported on this platform ({other})");
-                                                }
-                                            }
-                                            // connect to ensure the spawning thread will exit the accept call
-                                            _ = TcpStream::connect(format!("127.0.0.1:{}", self.control_port));
-
+                                            self.current_menu[0] = SHUTDOWN_MENU;
+                                            self.current_menu[1] = 0;
                                         },
                                         _ => {}
                                     }
@@ -880,7 +846,7 @@ impl CharacterDisplay {
                                     self.update_menu();
                                 },
                                 SHUTDOWN_MENU => {
-                                    if self.current_menu[2] == 1 {
+                                    if self.current_menu[1] == 1 {
                                         #[cfg(target_os = "linux")]
                                         {
                                             let _ = lcd.clear();
