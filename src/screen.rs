@@ -1,4 +1,4 @@
-use std::{net::TcpStream, sync::{Arc, Mutex}};
+use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
 
 #[cfg(target_os = "linux")]
 use std::fmt::Write;
@@ -8,9 +8,31 @@ use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 use rppal::{hal, i2c::I2c};
 use std::sync::Condvar;
 
-use crate::{control::{socket::{self, MAX_CONNECTED}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, objects::setting::Setting, reader::{self, ANTENNA_STATUS_NONE}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector, ANTENNA_STATUS_NONE}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
+
+pub const MAIN_MENU: u8 = 0;
+pub const SETTINGS_MENU: u8 = 1;
+pub const READING_MENU: u8 = 2;
+pub const ABOUT_MENU: u8 = 3;
+pub const SHUTDOWN_MENU: u8 = 4;
+pub const STARTUP_MENU: u8 = 5;
+pub const SCREEN_OFF: u8 = 15;
+
+pub const MAIN_START_READING: u8 = 0;
+pub const MAIN_SETTINGS: u8 = 1;
+pub const MAIN_ABOUT: u8 = 2;
+pub const MAIN_SHUTDOWN: u8 = 3;
+
+pub const SETTINGS_SIGHTING_PERIOD: u8 = 0;
+pub const SETTINGS_READ_WINDOW: u8 = 1;
+pub const SETTINGS_CHIP_TYPE: u8 = 2;
+pub const SETTINGS_PLAY_SOUND: u8 = 3;
+pub const SETTINGS_VOLUME: u8 = 4;
+pub const SETTINGS_VOICE: u8 = 5;
+pub const SETTINGS_AUTO_UPLOAD: u8 = 6;
+pub const SETTINGS_UPLOAD_INTERVAL: u8 = 7;
 
 #[derive(Clone)]
 pub struct CharacterDisplay {
@@ -18,13 +40,20 @@ pub struct CharacterDisplay {
     control: Arc<Mutex<Control>>,
     readers: Arc<Mutex<Vec<reader::Reader>>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
-    control_sockets: Option<Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>>,
+    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+    sight_processor: Arc<SightingsProcessor>,
     waiter: Arc<(Mutex<bool>, Condvar)>,
     button_presses: Arc<Mutex<Vec<ButtonPress>>>,
     title_bar: String,
     reader_info: Vec<String>,
     main_menu: Vec<String>,
     settings_menu: Vec<String>,
+    ac_state: Arc<Mutex<auto_connect::State>>,
+    read_saver: Arc<processor::ReadSaver>,
+    sound: Arc<SoundNotifier>,
+    joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    control_port: u16,
     current_menu: [u8; 3],
 }
 
@@ -42,13 +71,23 @@ impl CharacterDisplay {
         control: Arc<Mutex<Control>>,
         readers: Arc<Mutex<Vec<reader::Reader>>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
+        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
+        sight_processor: Arc<SightingsProcessor>,
+        ac_state: Arc<Mutex<auto_connect::State>>,
+        read_saver: Arc<processor::ReadSaver>,
+        sound: Arc<SoundNotifier>,
+        joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
+        control_port: u16,
     ) -> Self {
         Self {
             keepalive,
             control,
             readers,
             sqlite,
-            control_sockets: None,
+            control_sockets,
+            read_repeaters,
+            sight_processor,
             waiter: Arc::new((Mutex::new(true), Condvar::new())),
             button_presses: Arc::new(Mutex::new(Vec::new())),
             title_bar: String::from(""),
@@ -61,11 +100,20 @@ impl CharacterDisplay {
             ],
             settings_menu: Vec::new(),
             current_menu: [0, 0, 0],
+            ac_state,
+            read_saver,
+            sound,
+            joiners,
+            control_port,
         }
     }
 
     pub fn set_control_sockets(&mut self, sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>) {
-        self.control_sockets = Some(sockets);
+        self.control_sockets = sockets;
+    }
+
+    pub fn set_shutdown(&mut self) {
+        self.current_menu[0] = SCREEN_OFF;
     }
 
     pub fn update_title_bar(&mut self, status: uploader::Status, err_count: isize) {
@@ -160,13 +208,13 @@ impl CharacterDisplay {
 
     pub fn update_menu(&mut self) {
         match self.current_menu[0] {
-            0 => { // main menu, max ix 3
+            MAIN_MENU => { // main menu, max ix 3
                 for line in self.main_menu.iter_mut() {
                     line.replace_range(1..2, " ");
                 }
                 self.main_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
             },
-            1 => { // settings menu, max ix 7
+            SETTINGS_MENU => { // settings menu, max ix 7
                 for line in self.settings_menu.iter_mut() {
                     line.replace_range(1..2, " ");
                 }
@@ -255,51 +303,53 @@ impl CharacterDisplay {
                         ButtonPress::Up => {
                             println!("Up button registered.");
                             match self.current_menu[0] {
-                                0 => {
-                                    if self.current_menu[1] > 0 {
+                                MAIN_MENU => {
+                                    if self.current_menu[1] > MAIN_START_READING {
                                         self.current_menu[1] -= 1;
                                     } else {
-                                        self.current_menu[1] = 4;
+                                        self.current_menu[1] = MAIN_SHUTDOWN;
                                     }
                                 }
-                                1 => {
-                                    if self.current_menu[1] > 0 {
+                                SETTINGS_MENU => {
+                                    if self.current_menu[1] > SETTINGS_SIGHTING_PERIOD {
                                         self.current_menu[1] -= 1;
                                     } else {
-                                        self.current_menu[1] = 7;
+                                        self.current_menu[1] = SETTINGS_UPLOAD_INTERVAL;
                                     }
                                 }
-                                2 => {}, // current reading, do nothing
-                                _ => { // 3 == about, 2 == ?
-                                    self.current_menu[0] = 0;
-                                    self.current_menu[1] = 0;
+                                ABOUT_MENU | STARTUP_MENU => {
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
+                                    self.update_menu();
                                 }
+                                _ => {}, // 2 = currently reading, do nothing, 4 = shutdown happening
                             }
-                            self.current_menu[2] = 0;
+                            self.current_menu[2] = 0; // current_menu[2] is only used for proper stop reading command
                             self.update_menu();
                         },
                         ButtonPress::Down => {
                             println!("Down button registered.");
                             match self.current_menu[0] {
-                                0 => { // main menu, max ix 3
-                                    if self.current_menu[1] < 3 {
+                                MAIN_MENU => { // main menu, max ix 3
+                                    if self.current_menu[1] < MAIN_SHUTDOWN {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to the start
-                                        self.current_menu[1] = 0;
+                                        self.current_menu[1] = MAIN_START_READING;
                                     }
                                 },
-                                1 => { // settings menu, max ix 7
-                                    if self.current_menu[1] < 7 {
+                                SETTINGS_MENU => { // settings menu, max ix 7
+                                    if self.current_menu[1] < SETTINGS_UPLOAD_INTERVAL {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to 0
-                                        self.current_menu[1] = 0;
+                                        self.current_menu[1] = SETTINGS_SIGHTING_PERIOD;
                                     }
                                 }
-                                2 => {}, // current reading, do nothing
-                                _ => { // 3 == about
-                                    self.current_menu[0] = 0;
-                                    self.current_menu[1] = 0;
+                                ABOUT_MENU | STARTUP_MENU => { // 3 == about
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
+                                    self.update_menu();
                                 }
+                                _ => {}, // 2 = currently reading, do nothing, 4 = shutdown happening
                             }
                             self.current_menu[2] = 0;
                             self.update_menu();
@@ -307,11 +357,10 @@ impl CharacterDisplay {
                         ButtonPress::Left => {
                             println!("Left button registered.");
                             match self.current_menu[0] {
-                                0 => {},
-                                1 => {
+                                SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
                                         match self.current_menu[1] {
-                                            0 => {  // Sighting Period
+                                            SETTINGS_SIGHTING_PERIOD => {  // Sighting Period
                                                 if control.sighting_period > 29 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.sighting_period -= 30;
@@ -321,7 +370,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            1 => {  // Read Window
+                                            SETTINGS_READ_WINDOW => {  // Read Window
                                                 if control.read_window > 5 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.read_window -= 1;
@@ -331,7 +380,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            2 => {  // Chip Type
+                                            SETTINGS_CHIP_TYPE => {  // Chip Type
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     if control.chip_type == TYPE_CHIP_HEX {
                                                         control.chip_type = TYPE_CHIP_DEC.to_string();
@@ -343,7 +392,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            3 => {  // Play Sound
+                                            SETTINGS_PLAY_SOUND => {  // Play Sound
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     control.play_sound = !control.play_sound;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
@@ -351,7 +400,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            4 => {  // Volume
+                                            SETTINGS_VOLUME => {  // Volume
                                                 if control.volume >= 0.1 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.volume -= 0.1;
@@ -361,7 +410,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            5 => {  // Voice
+                                            SETTINGS_VOICE => {  // Voice
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     match control.sound_board.get_voice() {
                                                         Voice::Emily => {
@@ -392,7 +441,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            6 => {  // Auto Upload
+                                            SETTINGS_AUTO_UPLOAD => {  // Auto Upload
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     control.auto_remote = !control.auto_remote;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
@@ -400,8 +449,8 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            7 => {  // Upload Interval
-                                                if control.upload_interval > 0{
+                                            SETTINGS_UPLOAD_INTERVAL => {  // Upload Interval
+                                                if control.upload_interval > 0 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.upload_interval -= 1;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
@@ -413,26 +462,166 @@ impl CharacterDisplay {
                                             _ => {}
                                         }
                                     }
+                                    self.update_settings();
                                 },
-                                2 => {}, // currently reading, do nothing
-                                _ => { // 3 == about
-                                    self.current_menu[0] = 0;
-                                    self.current_menu[1] = 0;
+                                ABOUT_MENU | STARTUP_MENU => { // 3 == about
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 },
+                                SHUTDOWN_MENU => {
+                                    self.current_menu[1] = (self.current_menu[1] + 1) % 2;
+                                },
+                                _ => {}, // main menu, reading menu, and shutdown menu
                             }
                             self.current_menu[2] = 0;
                         },
                         ButtonPress::Right => {
                             println!("Right button registered.");
                             match self.current_menu[0] {
-                                0 => { // similar to enter function
-
+                                MAIN_MENU => { // similar to enter function
+                                    match self.current_menu[1] {
+                                        MAIN_START_READING => { // Start Reading
+                                            #[cfg(target_os = "linux")]
+                                            {
+                                                let _ = lcd.clear();
+                                                let _ = lcd.home();
+                                                let _ = write!(lcd, "{:.20}", "");
+                                                let _ = write!(lcd, "{:.20}", "");
+                                                let _ = write!(lcd, "{:^20.20}", "Starting . . .");
+                                                let _ = write!(lcd, "{:.20}", "");
+                                            }
+                                            if let Ok(ac) = self.ac_state.lock() {
+                                                match *ac {
+                                                    auto_connect::State::Finished |
+                                                    auto_connect::State::Unknown => {
+                                                        if let Ok(mut u_readers) = self.readers.lock() {
+                                                            // make sure to iterate through the vec in reverse so we don't have some weird loop issues
+                                                            for ix in (0..u_readers.len()).rev() {
+                                                                let mut reader = u_readers.remove(ix);
+                                                                if reader.is_connected() != Some(true) {
+                                                                    self.current_menu[0] = READING_MENU;
+                                                                    self.current_menu[1] = 0;
+                                                                    reader.set_control_sockets(self.control_sockets.clone());
+                                                                    reader.set_read_repeaters(self.read_repeaters.clone());
+                                                                    reader.set_sight_processor(self.sight_processor.clone());
+                                                                    let reconnector = Reconnector::new(
+                                                                        self.readers.clone(),
+                                                                        self.joiners.clone(),
+                                                                        self.control_sockets.clone(),
+                                                                        self.read_repeaters.clone(),
+                                                                        self.sight_processor.clone(),
+                                                                        self.control.clone(),
+                                                                        self.sqlite.clone(),
+                                                                        self.read_saver.clone(),
+                                                                        self.sound.clone(),
+                                                                        reader.id(),
+                                                                        1
+                                                                    );
+                                                                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
+                                                                        Ok(j) => {
+                                                                            if let Ok(mut join) = self.joiners.lock() {
+                                                                                join.push(j);
+                                                                            }
+                                                                        },
+                                                                        Err(e) => {
+                                                                            println!("Error connecting to reader: {e}");
+                                                                        }
+                                                                    }
+                                                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
+                                                                    if let Ok(c_socks) = self.control_sockets.lock() {
+                                                                        for sock in c_socks.iter() {
+                                                                            if let Some(sock) = sock {
+                                                                                _ = socket::write_reader_list(&sock, &u_readers);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                u_readers.push(reader);
+                                                            }
+                                                        }
+                                                    }
+                                                    _ => {
+                                                        println!("Auto connect is working right now.");
+                                                        self.sound.notify_custom(SoundType::StartupInProgress);
+                                                        self.current_menu[0] = STARTUP_MENU;
+                                                        self.current_menu[1] = 0;
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        MAIN_SETTINGS => { // Settings
+                                            self.current_menu[0] = SETTINGS_MENU;
+                                            self.current_menu[1] = SETTINGS_SIGHTING_PERIOD;
+                                            self.update_settings();
+                                        }
+                                        MAIN_ABOUT => { // About
+                                            self.current_menu[0] = ABOUT_MENU;
+                                            self.current_menu[1] = 0;
+                                        },
+                                        MAIN_SHUTDOWN => { // Shutdown
+                                            self.current_menu[0] = SHUTDOWN_MENU;
+                                            self.current_menu[1] = 0;
+                                        },
+                                        _ => {}
+                                    }
                                 },
-                                1 => {
+                                READING_MENU => {
+                                    if self.current_menu[1] == 1 {
+                                        if let Ok(ac) = self.ac_state.lock() {
+                                            match *ac {
+                                                auto_connect::State::Finished |
+                                                auto_connect::State::Unknown => {
+                                                    if let Ok(mut u_readers) = self.readers.lock() {
+                                                        for ix in (0..u_readers.len()).rev() {
+                                                            let mut reader = u_readers.remove(ix);
+                                                            if reader.is_reading() == Some(true) {
+                                                                match reader.stop() {
+                                                                    Ok(_) => {},
+                                                                    Err(e) => {
+                                                                        println!("Error connecting to reader: {e}");
+                                                                    }
+                                                                }
+                                                            }
+                                                            if reader.is_connected() == Some(true) {
+                                                                match reader.disconnect() {
+                                                                    Ok(_) => {},
+                                                                    Err(e) => {
+                                                                        println!("Error connecting to reader: {e}");
+                                                                    }
+                                                                }
+                                                            }
+                                                            u_readers.push(reader);
+                                                        }
+                                                        thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
+                                                        if let Ok(c_socks) = self.control_sockets.lock() {
+                                                            for sock in c_socks.iter() {
+                                                                if let Some(sock) = sock {
+                                                                    _ = socket::write_reader_list(&sock, &u_readers);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                _ => {
+                                                    println!("Auto connect is working right now.");
+                                                    self.sound.notify_custom(SoundType::StartupInProgress);
+                                                    self.current_menu[0] = STARTUP_MENU;
+                                                    self.current_menu[1] = 0;
+                                                },
+                                            }
+                                        } else {
+                                            println!("Auto connect is working right now.");
+                                            self.sound.notify_custom(SoundType::StartupInProgress);
+                                            self.current_menu[0] = STARTUP_MENU;
+                                            self.current_menu[1] = 0;
+                                        }
+                                    }
+                                },
+                                SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
                                         match self.current_menu[1] {
-                                            0 => {  // Sighting Period
+                                            SETTINGS_SIGHTING_PERIOD => {  // Sighting Period
                                                 if control.sighting_period < 99990 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.sighting_period += 30;
@@ -442,7 +631,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            1 => {  // Read Window
+                                            SETTINGS_READ_WINDOW => {  // Read Window
                                                 if control.read_window < 50 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.read_window += 1;
@@ -452,7 +641,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            2 => {  // Chip Type
+                                            SETTINGS_CHIP_TYPE => {  // Chip Type
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     if control.chip_type == TYPE_CHIP_HEX {
                                                         control.chip_type = TYPE_CHIP_DEC.to_string();
@@ -464,7 +653,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            3 => {  // Play Sound
+                                            SETTINGS_PLAY_SOUND => {  // Play Sound
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     control.play_sound = !control.play_sound;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
@@ -472,7 +661,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            4 => {  // Volume
+                                            SETTINGS_VOLUME => {  // Volume
                                                 if control.volume < 1.0 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.volume += 0.1;
@@ -482,7 +671,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            5 => {  // Voice
+                                            SETTINGS_VOICE => {  // Voice
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     match control.sound_board.get_voice() {
                                                         Voice::Emily => {
@@ -513,7 +702,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            6 => {  // Auto Upload
+                                            SETTINGS_AUTO_UPLOAD => {  // Auto Upload
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     control.auto_remote = !control.auto_remote;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
@@ -521,7 +710,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            7 => {  // Upload Interval
+                                            SETTINGS_UPLOAD_INTERVAL => {  // Upload Interval
                                                 if control.upload_interval < 180 {
                                                     if let Ok(sq) = self.sqlite.lock() {
                                                         control.upload_interval += 1;
@@ -535,146 +724,314 @@ impl CharacterDisplay {
                                         }
                                     }
                                 },
-                                2 => {
-                                    if self.current_menu[2] == 1 {
-                                        // TODO stop reading
-                                    }
+                                SHUTDOWN_MENU => {
+                                    self.current_menu[1] = (self.current_menu[1] + 1) % 2;
                                 },
-                                _ => { // 3 == about
-                                    self.current_menu[0] = 0;
-                                    self.current_menu[1] = 0;
+                                ABOUT_MENU | STARTUP_MENU => { // 3 == about, 5 == startup
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 },
+                                _ => {},
                             }
                             self.current_menu[2] = 0;
                         },
                         ButtonPress::Enter => {
                             println!("Enter button registered.");
                             match self.current_menu[0] {
-                                0 => { // main
+                                MAIN_MENU => { // main
                                     match self.current_menu[1] {
-                                        0 => { // Start Reading
+                                        MAIN_START_READING => { // Start Reading
+                                            #[cfg(target_os = "linux")]
+                                            {
+                                                let _ = lcd.clear();
+                                                let _ = lcd.home();
+                                                let _ = write!(lcd, "{:.20}", "");
+                                                let _ = write!(lcd, "{:.20}", "");
+                                                let _ = write!(lcd, "{:^20}", "Starting . . .");
+                                                let _ = write!(lcd, "{:.20}", "");
+                                            }
+                                            if let Ok(ac) = self.ac_state.lock() {
+                                                match *ac {
+                                                    auto_connect::State::Finished |
+                                                    auto_connect::State::Unknown => {
+                                                        if let Ok(mut u_readers) = self.readers.lock() {
+                                                            // make sure to iterate through the vec in reverse so we don't have some weird loop issues
+                                                            for ix in (0..u_readers.len()).rev() {
+                                                                let mut reader = u_readers.remove(ix);
+                                                                if reader.is_connected() != Some(true) {
+                                                                    reader.set_control_sockets(self.control_sockets.clone());
+                                                                    reader.set_read_repeaters(self.read_repeaters.clone());
+                                                                    reader.set_sight_processor(self.sight_processor.clone());
+                                                                    let reconnector = Reconnector::new(
+                                                                        self.readers.clone(),
+                                                                        self.joiners.clone(),
+                                                                        self.control_sockets.clone(),
+                                                                        self.read_repeaters.clone(),
+                                                                        self.sight_processor.clone(),
+                                                                        self.control.clone(),
+                                                                        self.sqlite.clone(),
+                                                                        self.read_saver.clone(),
+                                                                        self.sound.clone(),
+                                                                        reader.id(),
+                                                                        1
+                                                                    );
+                                                                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
+                                                                        Ok(j) => {
+                                                                            if let Ok(mut join) = self.joiners.lock() {
+                                                                                join.push(j);
+                                                                            }
+                                                                        },
+                                                                        Err(e) => {
+                                                                            println!("Error connecting to reader: {e}");
+                                                                        }
+                                                                    }
+                                                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
+                                                                    if let Ok(c_socks) = self.control_sockets.lock() {
+                                                                        for sock in c_socks.iter() {
+                                                                            if let Some(sock) = sock {
+                                                                                _ = socket::write_reader_list(&sock, &u_readers);
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                u_readers.push(reader);
+                                                            }
+                                                        }
+                                                    }
+                                                    _ => {
+                                                        println!("Auto connect is working right now.");
+                                                        self.sound.notify_custom(SoundType::StartupInProgress);
+                                                    }
+                                                }
+                                            }
                                         },
-                                        1 => { // Settings
-                                            self.current_menu[0] = 1;
+                                        MAIN_SETTINGS => { // Settings
+                                            self.current_menu[0] = SETTINGS_MENU;
                                             self.current_menu[1] = 0;
                                             self.update_settings();
                                         }
-                                        2 => { // About
-                                            self.current_menu[0] = 3;
+                                        MAIN_ABOUT => { // About
+                                            self.current_menu[0] = ABOUT_MENU;
                                             self.current_menu[1] = 0;
                                         },
-                                        3 => { // Shutdown
-                                            // TODO Deal with shutdown
+                                        MAIN_SHUTDOWN => { // Shutdown
+                                            #[cfg(target_os = "linux")]
+                                            {
+                                                let _ = lcd.clear();
+                                                let _ = lcd.backlight(false);
+                                                let _ = lcd.show_display(false);
+                                            }
+                                            if let Ok(mut ka) = self.keepalive.lock() {
+                                                println!("Starting program stop sequence.");
+                                                *ka = false;
+                                            }
+                                            // play a shutdown command since the shutdown 
+                                            if let Ok(control) = self.control.lock() {
+                                                if control.play_sound {
+                                                    control.sound_board.play_shutdown(control.volume);
+                                                }
+                                            }
+                                            // send shutdown command to the OS
+                                            println!("Sending OS shutdown command if on Linux.");
+                                            match std::env::consts::OS {
+                                                "linux" => {
+                                                    match std::process::Command::new("sudo").arg("shutdown").arg("-h").arg("now").spawn() {
+                                                        Ok(_) => {
+                                                            println!("Shutdown command sent to OS successfully.");
+                                                        },
+                                                        Err(e) => {
+                                                            println!("Error sending shutdown command: {e}");
+                                                        }
+                                                    }
+                                                },
+                                                other => {
+                                                    println!("Shutdown not supported on this platform ({other})");
+                                                }
+                                            }
+                                            // connect to ensure the spawning thread will exit the accept call
+                                            _ = TcpStream::connect(format!("127.0.0.1:{}", self.control_port));
+
                                         },
                                         _ => {}
                                     }
                                 },
-                                1 => { // settings
-                                    self.current_menu[0] = 0;
-                                    self.current_menu[1] = 0;
+                                SETTINGS_MENU => { // settings -> saves settings and goes back
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
+                                    self.update_menu();
                                     // notify of settings changes
-                                    if let Some(csock) = &self.control_sockets {
-                                        if let Ok(sq) = self.sqlite.try_lock() {
-                                            let settings = socket::get_settings(&sq);
-                                            if let Ok(socks) = csock.try_lock() {
-                                                for sock_opt in &*socks {
-                                                    if let Some(sock) = sock_opt {
-                                                        _ = socket::write_settings(&sock, &settings);
-                                                    }
+                                    if let Ok(sq) = self.sqlite.try_lock() {
+                                        let settings = socket::get_settings(&sq);
+                                        if let Ok(socks) = self.control_sockets.try_lock() {
+                                            for sock_opt in &*socks {
+                                                if let Some(sock) = sock_opt {
+                                                    _ = socket::write_settings(&sock, &settings);
                                                 }
                                             }
                                         }
                                     }
                                 },
-                                2 => { // currently reading
-                                    self.current_menu[2] = 1;
+                                READING_MENU => { // currently reading
+                                    self.current_menu[2] = 1; // used to allow readers to stop
                                 },
-                                _ => { // 3 => about menu
-                                    self.current_menu[0] = 0;
-                                    self.current_menu[1] = 0;
+                                ABOUT_MENU | STARTUP_MENU => {
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 },
+                                SHUTDOWN_MENU => {
+                                    if self.current_menu[2] == 1 {
+                                        #[cfg(target_os = "linux")]
+                                        {
+                                            let _ = lcd.clear();
+                                            let _ = lcd.backlight(false);
+                                            let _ = lcd.show_display(false);
+                                        }
+                                        if let Ok(mut ka) = self.keepalive.lock() {
+                                            println!("Starting program stop sequence.");
+                                            *ka = false;
+                                        }
+                                        // play a shutdown command since the shutdown 
+                                        if let Ok(control) = self.control.lock() {
+                                            if control.play_sound {
+                                                control.sound_board.play_shutdown(control.volume);
+                                            }
+                                        }
+                                        // send shutdown command to the OS
+                                        println!("Sending OS shutdown command if on Linux.");
+                                        match std::env::consts::OS {
+                                            "linux" => {
+                                                match std::process::Command::new("sudo").arg("shutdown").arg("-h").arg("now").spawn() {
+                                                    Ok(_) => {
+                                                        println!("Shutdown command sent to OS successfully.");
+                                                    },
+                                                    Err(e) => {
+                                                        println!("Error sending shutdown command: {e}");
+                                                    }
+                                                }
+                                            },
+                                            other => {
+                                                println!("Shutdown not supported on this platform ({other})");
+                                            }
+                                        }
+                                        // connect to ensure the spawning thread will exit the accept call
+                                        _ = TcpStream::connect(format!("127.0.0.1:{}", self.control_port));
+                                    } else {
+                                        self.current_menu[0] = MAIN_MENU;
+                                        self.current_menu[1] = MAIN_START_READING;
+                                        self.update_menu();
+                                    }
+                                },
+                                _ => {},
                             }
                         },
                     } 
                 }
                 presses.clear();
-                #[cfg(target_os = "linux")]
-                {
-                    let mut messages: Vec<String> = vec!(self.title_bar.clone());
-                    let _ = lcd.clear();
-                    let _ = lcd.home();
-                    match self.current_menu[0] {
-                        0 => { // main menu, max ix 3
-                            match self.current_menu[1] {
-                                0 | 1 => {
-                                    messages.push(self.main_menu[1].clone()); // Interface writes lines odd lines before even lines,
-                                    messages.push(self.main_menu[0].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
-                                    messages.push(self.main_menu[2].clone());
-                                },
-                                _ => { // 2 | 3
-                                    messages.push(self.main_menu[2].clone());
-                                    messages.push(self.main_menu[1].clone());
-                                    messages.push(self.main_menu[3].clone());
-                                },
-                            };
-                        },
-                        1 => { // settings menu, max ix 7
-                            match self.current_menu[1] {
-                                0 | 1 => {
-                                    messages.push(self.settings_menu[1].clone());
-                                    messages.push(self.settings_menu[0].clone());
-                                    messages.push(self.settings_menu[2].clone());
-                                },
-                                2 => {
-                                    messages.push(self.settings_menu[2].clone());
-                                    messages.push(self.settings_menu[1].clone());
-                                    messages.push(self.settings_menu[3].clone());
-                                },
-                                3 => {
-                                    messages.push(self.settings_menu[3].clone());
-                                    messages.push(self.settings_menu[2].clone());
-                                    messages.push(self.settings_menu[4].clone());
-                                },
-                                4 => {
-                                    messages.push(self.settings_menu[4].clone());
-                                    messages.push(self.settings_menu[3].clone());
-                                    messages.push(self.settings_menu[5].clone());
-                                },
-                                5 => {
-                                    messages.push(self.settings_menu[5].clone());
-                                    messages.push(self.settings_menu[4].clone());
-                                    messages.push(self.settings_menu[6].clone());
-                                },
-                                _ => { // 6 | 7
-                                    messages.push(self.settings_menu[6].clone());
-                                    messages.push(self.settings_menu[5].clone());
-                                    messages.push(self.settings_menu[7].clone());
-                                },
-                            };
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let mut messages: Vec<String> = vec!(self.title_bar.clone());
+                let _ = lcd.clear();
+                let _ = lcd.home();
+                match self.current_menu[0] {
+                    MAIN_MENU => { // main menu, max ix 3
+                        match self.current_menu[1] {
+                            0 | 1 => {
+                                messages.push(self.main_menu[1].clone()); // Interface writes lines odd lines before even lines,
+                                messages.push(self.main_menu[0].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
+                                messages.push(self.main_menu[2].clone());
+                            },
+                            _ => { // 2 | 3
+                                messages.push(self.main_menu[2].clone());
+                                messages.push(self.main_menu[1].clone());
+                                messages.push(self.main_menu[3].clone());
+                            },
+                        };
+                    },
+                    SETTINGS_MENU => { // settings menu, max ix 7
+                        match self.current_menu[1] {
+                            0 | 1 => {
+                                messages.push(self.settings_menu[1].clone());
+                                messages.push(self.settings_menu[0].clone());
+                                messages.push(self.settings_menu[2].clone());
+                            },
+                            2 => {
+                                messages.push(self.settings_menu[2].clone());
+                                messages.push(self.settings_menu[1].clone());
+                                messages.push(self.settings_menu[3].clone());
+                            },
+                            3 => {
+                                messages.push(self.settings_menu[3].clone());
+                                messages.push(self.settings_menu[2].clone());
+                                messages.push(self.settings_menu[4].clone());
+                            },
+                            4 => {
+                                messages.push(self.settings_menu[4].clone());
+                                messages.push(self.settings_menu[3].clone());
+                                messages.push(self.settings_menu[5].clone());
+                            },
+                            5 => {
+                                messages.push(self.settings_menu[5].clone());
+                                messages.push(self.settings_menu[4].clone());
+                                messages.push(self.settings_menu[6].clone());
+                            },
+                            _ => { // 6 | 7
+                                messages.push(self.settings_menu[6].clone());
+                                messages.push(self.settings_menu[5].clone());
+                                messages.push(self.settings_menu[7].clone());
+                            },
+                        };
+                    },
+                    READING_MENU => { // reader is reading
+                        if self.reader_info.len() > 1 {
+                            messages.push(self.reader_info[1].clone());
+                        } else {
+                            messages.push(format!("{:.20}", ""));
                         }
-                        2 => { // reader is reading
-                            if self.reader_info.len() > 0 {
-                                messages.push(self.reader_info[0].clone());
-                            }
-                            if self.reader_info.len() > 1 {
-                                messages.push(self.reader_info[1].clone());
-                            }
+                        if self.reader_info.len() > 0 {
+                            messages.push(self.reader_info[0].clone());
+                        } else {
+                            messages.push(format!("{:.20}", ""));
                         }
-                        3 => { // about menu
-                            messages.push(format!("{:^20.20}", ""));
-                            messages.push(format!("{:^20.20}", env!("CARGO_PKG_VERSION")));
-                            messages.push(format!("{:^20.20}", "Chronokeep Portal"));
-                            messages.push(format!("{:^20.20}", ""));
-                        }
-                        _ => {}
+                        messages.push(format!("{:.20}", ""));
+                    },
+                    ABOUT_MENU => { // about menu
+                        messages.clear();
+                        messages.push(format!("{:^20.20}", ""));
+                        messages.push(format!("{:^20.20}", env!("CARGO_PKG_VERSION")));
+                        messages.push(format!("{:^20.20}", "Chronokeep Portal"));
+                        messages.push(format!("{:^20.20}", ""));
+                    },
+                    STARTUP_MENU => {
+                        messages.clear();
+                        messages.push(format!("{:^20.20}", ""));
+                        messages.push(format!("{:^20.20}", "Please wait."));
+                        messages.push(format!("{:^20.20}", "System Initializing."));
+                        messages.push(format!("{:^20.20}", ""));
                     }
-                    for msg in &*messages {
-                        let _ = write!(lcd, "{msg}");
+                    SHUTDOWN_MENU => {
+                        messages.clear();
+                        messages.push(format!("{:^20.20}", ""));
+                        if self.current_menu[1] == 0 {
+                            messages.push("     YES    > NO    ");
+                        } else {
+                            messages.push("   > YES      NO    ");
+                        }
+                        messages.push(format!("{:^20.20}", "Shutdown System?"));
+                        messages.push(format!("{:^20.20}", ""));
+                    },
+                    SCREEN_OFF => {
+                        let _ = lcd.clear();
+                        let _ = lcd.backlight(false);
+                        let _ = lcd.show_display(false);
                     }
+                    _ => {}
                 }
-                // TODO Update the screen.
+                for msg in &*messages {
+                    let _ = write!(lcd, "{msg}");
+                }
             }
             *waiting = true;
         }
@@ -690,17 +1047,6 @@ impl CharacterDisplay {
     pub fn register_button(&self, button: ButtonPress) {
         if let Ok(mut presses) = self.button_presses.try_lock() {
             presses.push(button);
-        }
-        let (lock, cvar) = &*self.waiter;
-        let mut waiting = lock.lock().unwrap();
-        *waiting = false;
-        cvar.notify_one();
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn stop(&self) {
-        if let Ok(mut keepalive) = self.keepalive.lock() {
-            *keepalive = false;
         }
         let (lock, cvar) = &*self.waiter;
         let mut waiting = lock.lock().unwrap();

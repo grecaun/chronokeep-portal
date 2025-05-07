@@ -52,42 +52,6 @@ pub fn control_loop(
     // Our control port will be semi-random at the start to try to ensure we don't try to get a port in use.
     let control_port = get_available_port();
 
-    // Check if we can start a screen
-    
-    let screen: Arc<Mutex<Option<CharacterDisplay>>> = Arc::new(Mutex::new(None));
-    // Check for screen information
-    #[cfg(target_os = "linux")]
-    {
-        println!("Checking if there's a screen to display information on.");
-        if let Ok(screen_bus) = std::env::var("PORTAL_SCREEN_BUS") {
-            let bus: u8 = screen_bus.parse().unwrap_or(255);
-            if bus < 50 {
-                println!("Screen bus is {bus}.");
-                if let Ok(mut screen) = screen.lock() {
-                    let mut new_screen = CharacterDisplay::new(
-                        keepalive.clone(),
-                        control.clone(),
-                        readers.clone(),
-                        sqlite.clone()
-                    );
-                    *screen = Some(new_screen.clone());
-                    thread::spawn(move|| {
-                        new_screen.run(bus);
-                    });
-                }
-                // Start buttons
-                println!("Starting button thread.");
-                let btns = Buttons::new(
-                    screen.clone(), 
-                    keepalive.clone()
-                );
-                thread::spawn(move|| {
-                    btns.run();
-                });
-            }
-        }
-    }
-
     let socket = match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
         Ok(sock) => sock,
         Err(e) => {
@@ -262,6 +226,49 @@ pub fn control_loop(
     thread::spawn(move|| {
         auto_connector.run();
     });
+    
+    // Check if we can start a screen
+    let screen: Arc<Mutex<Option<CharacterDisplay>>> = Arc::new(Mutex::new(None));
+    // Check for screen information
+    #[cfg(target_os = "linux")]
+    {
+        println!("Checking if there's a screen to display information on.");
+        if let Ok(screen_bus) = std::env::var("PORTAL_SCREEN_BUS") {
+            let bus: u8 = screen_bus.parse().unwrap_or(255);
+            if bus < 50 {
+                println!("Screen bus is {bus}.");
+                if let Ok(mut screen) = screen.lock() {
+                    let mut new_screen = CharacterDisplay::new(
+                        keepalive.clone(),
+                        control.clone(),
+                        readers.clone(),
+                        sqlite.clone(),
+                        control_sockets.clone(),
+                        read_repeaters.clone(),
+                        sight_processor.clone(),
+                        ac_state.clone(),
+                        read_saver.clone(),
+                        sound_notifier.clone(),
+                        joiners.clone(),
+                        control_port
+                    );
+                    *screen = Some(new_screen.clone());
+                    thread::spawn(move|| {
+                        new_screen.run(bus);
+                    });
+                }
+                // Start buttons
+                println!("Starting button thread.");
+                let btns = Buttons::new(
+                    screen.clone(), 
+                    keepalive.clone()
+                );
+                thread::spawn(move|| {
+                    btns.run();
+                });
+            }
+        }
+    }
 
     // play a sound to let the user know we've booted up fully and can accept control connections
     if let Ok(control) = control.lock() {
@@ -309,6 +316,7 @@ pub fn control_loop(
                 let t_ac_state = ac_state.clone();
                 let t_sound_notifier = sound_notifier.clone();
                 let t_read_saver = read_saver.clone();
+                let t_screen = screen.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -345,7 +353,8 @@ pub fn control_loop(
                                 t_uploader,
                                 t_ac_state,
                                 t_read_saver,
-                                t_sound_notifier
+                                t_sound_notifier,
+                                t_screen
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
@@ -459,7 +468,8 @@ fn handle_stream(
     uploader: Arc<uploader::Uploader>,
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
-    sound: Arc<SoundNotifier>
+    sound: Arc<SoundNotifier>,
+    screen: Arc<Mutex<Option<CharacterDisplay>>>
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -809,6 +819,8 @@ fn handle_stream(
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
+                    #[cfg(target_os = "linux")]
+                    screen.update();
                 },
                 requests::Request::ReaderDisconnect { id } | requests::Request::ReaderStop { id }  => {
                     if let Ok(ac) = ac_state.lock() {
@@ -866,8 +878,10 @@ fn handle_stream(
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
+                    #[cfg(target_os = "linux")]
+                    screen.update();
                 },
-                requests::Request::ReaderStartAll => {
+                requests::Request::ReaderStartAll => { // START ALL
                     if let Ok(ac) = ac_state.lock() {
                         match *ac {
                             auto_connect::State::Finished |
@@ -932,8 +946,10 @@ fn handle_stream(
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
+                    #[cfg(target_os = "linux")]
+                    screen.update();
                 },
-                requests::Request::ReaderStopAll => {
+                requests::Request::ReaderStopAll => {  // STOP ALL
                     if let Ok(ac) = ac_state.lock() {
                         match *ac {
                             auto_connect::State::Finished |
@@ -988,6 +1004,8 @@ fn handle_stream(
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
+                    #[cfg(target_os = "linux")]
+                    screen.update();
                 },
                 requests::Request::ReaderGetAll => {
                     if let Ok(u_readers) = readers.lock() {
@@ -1112,6 +1130,13 @@ fn handle_stream(
                         if let Ok(sq) = sqlite.lock() {
                             let settings = get_settings(&sq);
                             no_error = write_settings(&stream, &settings);
+                        }
+                    }
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.update_settings();
+                            #[cfg(target_os = "linux")]
+                            screen.update();
                         }
                     }
                 },
