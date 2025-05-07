@@ -2,7 +2,7 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}, screen::CharacterDisplay};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 60;
 
@@ -25,7 +25,6 @@ pub struct AutoConnector {
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
-    screen: Option<Arc<CharacterDisplay>>,
 }
 
 impl AutoConnector {
@@ -52,7 +51,6 @@ impl AutoConnector {
             sqlite,
             read_saver,
             sound,
-            screen: None
         }
     }
 
@@ -62,10 +60,6 @@ impl AutoConnector {
             output = state.clone();
         }
         output
-    }
-
-    pub fn set_screen(&mut self, screen: Arc<CharacterDisplay>) {
-        self.screen = Some(screen);
     }
 
     pub fn run(&mut self) {
@@ -126,10 +120,6 @@ impl AutoConnector {
             }
         }
         println!("All done connecting to readers.");
-        if let Some(screen) = &self.screen {
-            #[cfg(target_os = "linux")]
-            screen.update();
-        }
         self.sound.notify_custom(SoundType::StartupFinished);
         if let Ok(mut state) = self.state.lock() {
             *state = State::Finished

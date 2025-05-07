@@ -270,6 +270,13 @@ pub fn control_loop(
         }
     }
 
+    // Set screen on all the readers.
+    if let Ok(mut readers) = readers.lock() {
+        for reader in readers.iter_mut() {
+            reader.set_screen(screen.clone());
+        }
+    }
+
     // play a sound to let the user know we've booted up fully and can accept control connections
     if let Ok(control) = control.lock() {
         if control.play_sound {
@@ -623,6 +630,7 @@ fn handle_stream(
                                         Ok(reader) => {
                                             let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
                                             let mut tmp = reader;
+                                            tmp.set_screen(screen.clone());
                                             match sq.save_reader(&tmp) {
                                                 Ok(val) => {
                                                     if let Ok(mut u_readers) = readers.lock() {
@@ -753,6 +761,7 @@ fn handle_stream(
                                                     control_sockets.clone(),
                                                     read_repeaters.clone(),
                                                     sight_processor.clone(),
+                                                    screen.clone()
                                                 ) {
                                                     Ok(mut reader) => {
                                                         let reconnector = Reconnector::new(
@@ -820,7 +829,11 @@ fn handle_stream(
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                     #[cfg(target_os = "linux")]
-                    screen.update();
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.update();
+                        }
+                    }
                 },
                 requests::Request::ReaderDisconnect { id } | requests::Request::ReaderStop { id }  => {
                     if let Ok(ac) = ac_state.lock() {
@@ -879,7 +892,11 @@ fn handle_stream(
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                     #[cfg(target_os = "linux")]
-                    screen.update();
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.update();
+                        }
+                    }
                 },
                 requests::Request::ReaderStartAll => { // START ALL
                     if let Ok(ac) = ac_state.lock() {
@@ -894,6 +911,7 @@ fn handle_stream(
                                             reader.set_control_sockets(control_sockets.clone());
                                             reader.set_read_repeaters(read_repeaters.clone());
                                             reader.set_sight_processor(sight_processor.clone());
+                                            reader.set_screen(screen.clone());
                                             let reconnector = Reconnector::new(
                                                 readers.clone(),
                                                 joiners.clone(),
@@ -947,7 +965,11 @@ fn handle_stream(
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                     #[cfg(target_os = "linux")]
-                    screen.update();
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.update();
+                        }
+                    }
                 },
                 requests::Request::ReaderStopAll => {  // STOP ALL
                     if let Ok(ac) = ac_state.lock() {
@@ -1005,7 +1027,11 @@ fn handle_stream(
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
                     #[cfg(target_os = "linux")]
-                    screen.update();
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.update();
+                        }
+                    }
                 },
                 requests::Request::ReaderGetAll => {
                     if let Ok(u_readers) = readers.lock() {
@@ -1132,10 +1158,10 @@ fn handle_stream(
                             no_error = write_settings(&stream, &settings);
                         }
                     }
+                    #[cfg(target_os = "linux")]
                     if let Ok(mut screen_opt) = screen.lock() {
                         if let Some(screen) = &mut *screen_opt {
                             screen.update_settings();
-                            #[cfg(target_os = "linux")]
                             screen.update();
                         }
                     }
@@ -1147,6 +1173,12 @@ fn handle_stream(
                     }
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                    #[cfg(target_os = "linux")]
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.update();
+                        }
+                    }
                 },
                 requests::Request::Shutdown => {
                     if let Ok(mut ka) = keepalive.lock() {
@@ -1178,6 +1210,13 @@ fn handle_stream(
                     }
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                    #[cfg(target_os = "linux")]
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.set_shutdown();
+                            screen.update();
+                        }
+                    }
                 },
                 requests::Request::Restart => {
                     if let Ok(mut ka) = keepalive.lock() {
@@ -1207,6 +1246,13 @@ fn handle_stream(
                     }
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                    #[cfg(target_os = "linux")]
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.set_shutdown();
+                            screen.update();
+                        }
+                    }
                 },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
@@ -1679,6 +1725,13 @@ fn handle_stream(
                         }
                         AutoUploadQuery::Status => {
                             no_error = write_uploader_status(&stream, uploader.status());
+                        }
+                    }
+                    #[cfg(target_os = "linux")]
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.update_settings();
+                            screen.update();
                         }
                     }
                 },
@@ -2227,6 +2280,13 @@ fn handle_stream(
                         other => {
                             println!("not supported on this platform ({other})");
                             no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
+                        }
+                    }
+                    #[cfg(target_os = "linux")]
+                    if let Ok(mut screen_opt) = screen.lock() {
+                        if let Some(screen) = &mut *screen_opt {
+                            screen.set_shutdown();
+                            screen.update();
                         }
                     }
                 },

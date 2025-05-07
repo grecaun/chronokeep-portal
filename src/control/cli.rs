@@ -461,7 +461,7 @@ fn add_reader(name: &str, kind: &str, ip: &str, port: &str, sqlite: &sqlite::SQL
                 String::from(name),
                 String::from(ip),
                 port,
-                reader::AUTO_CONNECT_FALSE
+                reader::AUTO_CONNECT_FALSE,
             ) {
                 Ok(it) => it,
                 Err(e) => {

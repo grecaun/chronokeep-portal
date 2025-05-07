@@ -8,7 +8,7 @@ use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 use rppal::{hal, i2c::I2c};
 use std::sync::Condvar;
 
-use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector, ANTENNA_STATUS_NONE}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -119,9 +119,9 @@ impl CharacterDisplay {
     pub fn update_title_bar(&mut self, status: uploader::Status, err_count: isize) {
         if let Ok(control) = self.control.lock() {
             if err_count > 9 {
-                self.title_bar = format!("{:.17} 9+", control.name)
+                self.title_bar = format!("{:<17} 9+", control.name)
             } else if err_count > 0 {
-                self.title_bar = format!("{:.17}  {}", control.name, err_count)
+                self.title_bar = format!("{:<17}  {}", control.name, err_count)
             } else {
                 let mut upload_status = " ";
                 if status == Status::Running {
@@ -129,79 +129,34 @@ impl CharacterDisplay {
                 } else if status == Status::Stopped || status == Status::Stopping {
                     upload_status = "-";
                 }
-                self.title_bar = format!("{:.17}  {}", control.name, upload_status)
+                self.title_bar = format!("{:<17}  {}", control.name, upload_status)
             }
         }
     }
 
     pub fn update_readers(&mut self) {
-        let mut lines: Vec<[u8;9]> = Vec::new();
         self.reader_info.clear();
         // Collect all connected readers.
         if let Ok(readers) = self.readers.lock() {
-            // Two readers per line, integer divison rounds towards zero but we want ceiling.
-            let mut num = 0;
             for read in readers.iter() {
-                num += 1;
                 if let Some(is_con) = read.is_connected() {
                     if is_con {
-                        let mut line = [ANTENNA_STATUS_NONE; 9];
-                        line[0] = num;
                         if let Ok(ants) = read.antennas.lock() {
-                            line[1] = ants[0];
-                            line[2] = ants[1];
-                            line[3] = ants[2];
-                            line[4] = ants[3];
-                            line[5] = ants[4];
-                            line[6] = ants[5];
-                            line[7] = ants[6];
-                            line[8] = ants[7];
+                            self.reader_info.push(
+                                format!("{} {}{}{}{}{}{}{}{}",
+                                    read.nickname(),
+                                    reader::helpers::antenna_status_str(ants[0]),
+                                    reader::helpers::antenna_status_str(ants[1]),
+                                    reader::helpers::antenna_status_str(ants[2]),
+                                    reader::helpers::antenna_status_str(ants[3]),
+                                    reader::helpers::antenna_status_str(ants[4]),
+                                    reader::helpers::antenna_status_str(ants[5]),
+                                    reader::helpers::antenna_status_str(ants[6]),
+                                    reader::helpers::antenna_status_str(ants[7]),
+                                ));
                         }
-                        lines.push(line);
                     }
                 }
-            }
-        }
-        // Add all reader lines to the menu.
-        for ix in 0..(lines.len() + 1)/2 {
-            // Doing two lines at a time means the real index is ix*2.
-            // If the number of lines is less than the real index + 1 then there is no second
-            // reader in this set of lines
-            if lines.len() < ix*2+1 {
-                self.reader_info.push(
-                    format!("{:.1}{}{}{}{}{}{}{}{}           ",
-                        lines[ix*2][0],
-                        reader::helpers::antenna_status_str(lines[ix*2][1]),
-                        reader::helpers::antenna_status_str(lines[ix*2][2]),
-                        reader::helpers::antenna_status_str(lines[ix*2][3]),
-                        reader::helpers::antenna_status_str(lines[ix*2][4]),
-                        reader::helpers::antenna_status_str(lines[ix*2][5]),
-                        reader::helpers::antenna_status_str(lines[ix*2][6]),
-                        reader::helpers::antenna_status_str(lines[ix*2][7]),
-                        reader::helpers::antenna_status_str(lines[ix*2][8]),
-                    ))
-            } else {
-                self.reader_info.push(
-                    format!("{}{}{}{}{}{}{}{}{}  {}{}{}{}{}{}{}{}{}",
-                    lines[ix*2][0],
-                    reader::helpers::antenna_status_str(lines[ix*2][1]),
-                    reader::helpers::antenna_status_str(lines[ix*2][2]),
-                    reader::helpers::antenna_status_str(lines[ix*2][3]),
-                    reader::helpers::antenna_status_str(lines[ix*2][4]),
-                    reader::helpers::antenna_status_str(lines[ix*2][5]),
-                    reader::helpers::antenna_status_str(lines[ix*2][6]),
-                    reader::helpers::antenna_status_str(lines[ix*2][7]),
-                    reader::helpers::antenna_status_str(lines[ix*2][8]),
-                    lines[ix*2+1][0],
-                    reader::helpers::antenna_status_str(lines[ix*2+1][1]),
-                    reader::helpers::antenna_status_str(lines[ix*2+1][2]),
-                    reader::helpers::antenna_status_str(lines[ix*2+1][3]),
-                    reader::helpers::antenna_status_str(lines[ix*2+1][4]),
-                    reader::helpers::antenna_status_str(lines[ix*2+1][5]),
-                    reader::helpers::antenna_status_str(lines[ix*2+1][6]),
-                    reader::helpers::antenna_status_str(lines[ix*2+1][7]),
-                    reader::helpers::antenna_status_str(lines[ix*2+1][8]),
-                    ))
             }
         }
     }
@@ -235,15 +190,19 @@ impl CharacterDisplay {
             if control.auto_remote {
                 auto_upload = "yes";
             }
-            self.settings_menu.push(format!("   Sightings   {:>4.4} ", control.sighting_period));
-            self.settings_menu.push(format!("   Read Window {:>4.4} ", control.read_window));
-            self.settings_menu.push(format!("   Chip Type   {:>4.4} ", control.chip_type));
-            self.settings_menu.push(format!("   Play Sounds {:>4.4} ", play_sound));
-            self.settings_menu.push(format!("   Volume      {:>4.4} ", (control.volume * 10.0) as usize));
-            self.settings_menu.push(format!("   Voice    {:>7.7} ", control.sound_board.get_voice().as_str()));
-            self.settings_menu.push(format!("   Auto Upload {:>4.4} ", auto_upload));
-            self.settings_menu.push(format!("   Upload Int  {:>4.4} ", control.upload_interval));
+            self.settings_menu.push(format!("   Sightings   {:>4} ", control.sighting_period));
+            self.settings_menu.push(format!("   Read Window {:>4} ", control.read_window));
+            self.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
+            self.settings_menu.push(format!("   Play Sounds {:>4} ", play_sound));
+            self.settings_menu.push(format!("   Volume      {:>4} ", (control.volume * 10.0) as usize));
+            self.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
+            self.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
+            self.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
         }
+        for line in self.settings_menu.iter_mut() {
+            line.replace_range(1..2, " ");
+        }
+        self.settings_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
     }
 
     pub fn run(&mut self, bus: u8) {
@@ -310,6 +269,15 @@ impl CharacterDisplay {
                                         self.current_menu[1] = MAIN_SHUTDOWN;
                                     }
                                 }
+                                READING_MENU => {
+                                    if self.reader_info.len() > 3 {
+                                        if self.current_menu[1] > 0 {
+                                            self.current_menu[1] -= 1;
+                                        } else {
+                                            self.current_menu[1] = (self.reader_info.len() - 1) as u8;
+                                        }
+                                    }
+                                }
                                 SETTINGS_MENU => {
                                     if self.current_menu[1] > SETTINGS_SIGHTING_PERIOD {
                                         self.current_menu[1] -= 1;
@@ -337,6 +305,15 @@ impl CharacterDisplay {
                                         self.current_menu[1] = MAIN_START_READING;
                                     }
                                 },
+                                READING_MENU => {
+                                    if self.reader_info.len() > 3 {
+                                        if self.current_menu[1] < (self.reader_info.len() - 1) as u8 {
+                                            self.current_menu[1] += 1;
+                                        } else {
+                                            self.current_menu[1] = 0;
+                                        }
+                                    }
+                                }
                                 SETTINGS_MENU => { // settings menu, max ix 7
                                     if self.current_menu[1] < SETTINGS_UPLOAD_INTERVAL {
                                         self.current_menu[1] += 1;
@@ -486,10 +463,10 @@ impl CharacterDisplay {
                                             {
                                                 let _ = lcd.clear();
                                                 let _ = lcd.home();
-                                                let _ = write!(lcd, "{:.20}", "");
-                                                let _ = write!(lcd, "{:.20}", "");
-                                                let _ = write!(lcd, "{:^20.20}", "Starting . . .");
-                                                let _ = write!(lcd, "{:.20}", "");
+                                                let _ = write!(lcd, "{:<20}", "");
+                                                let _ = write!(lcd, "{:<20}", "");
+                                                let _ = write!(lcd, "{:^20}", "Starting . . .");
+                                                let _ = write!(lcd, "{:<20}", "");
                                             }
                                             if let Ok(ac) = self.ac_state.lock() {
                                                 match *ac {
@@ -500,8 +477,6 @@ impl CharacterDisplay {
                                                             for ix in (0..u_readers.len()).rev() {
                                                                 let mut reader = u_readers.remove(ix);
                                                                 if reader.is_connected() != Some(true) {
-                                                                    self.current_menu[0] = READING_MENU;
-                                                                    self.current_menu[1] = 0;
                                                                     reader.set_control_sockets(self.control_sockets.clone());
                                                                     reader.set_read_repeaters(self.read_repeaters.clone());
                                                                     reader.set_sight_processor(self.sight_processor.clone());
@@ -548,12 +523,18 @@ impl CharacterDisplay {
                                                         self.current_menu[1] = 0;
                                                     }
                                                 }
+                                            } else {
+                                                println!("Auto connect is working right now.");
+                                                self.sound.notify_custom(SoundType::StartupInProgress);
+                                                self.current_menu[0] = STARTUP_MENU;
+                                                self.current_menu[1] = 0;
                                             }
                                         },
                                         MAIN_SETTINGS => { // Settings
                                             self.current_menu[0] = SETTINGS_MENU;
                                             self.current_menu[1] = SETTINGS_SIGHTING_PERIOD;
                                             self.update_settings();
+                                            self.update_menu();
                                         }
                                         MAIN_ABOUT => { // About
                                             self.current_menu[0] = ABOUT_MENU;
@@ -567,7 +548,7 @@ impl CharacterDisplay {
                                     }
                                 },
                                 READING_MENU => {
-                                    if self.current_menu[1] == 1 {
+                                    if self.current_menu[2] == 1 {
                                         if let Ok(ac) = self.ac_state.lock() {
                                             match *ac {
                                                 auto_connect::State::Finished |
@@ -579,7 +560,7 @@ impl CharacterDisplay {
                                                                 match reader.stop() {
                                                                     Ok(_) => {},
                                                                     Err(e) => {
-                                                                        println!("Error connecting to reader: {e}");
+                                                                        println!("Error stopping reader: {e}");
                                                                     }
                                                                 }
                                                             }
@@ -587,7 +568,7 @@ impl CharacterDisplay {
                                                                 match reader.disconnect() {
                                                                     Ok(_) => {},
                                                                     Err(e) => {
-                                                                        println!("Error connecting to reader: {e}");
+                                                                        println!("Error disconnecting reader: {e}");
                                                                     }
                                                                 }
                                                             }
@@ -723,6 +704,7 @@ impl CharacterDisplay {
                                             _ => {}
                                         }
                                     }
+                                    self.update_settings();
                                 },
                                 SHUTDOWN_MENU => {
                                     self.current_menu[1] = (self.current_menu[1] + 1) % 2;
@@ -746,10 +728,10 @@ impl CharacterDisplay {
                                             {
                                                 let _ = lcd.clear();
                                                 let _ = lcd.home();
-                                                let _ = write!(lcd, "{:.20}", "");
-                                                let _ = write!(lcd, "{:.20}", "");
+                                                let _ = write!(lcd, "{:<20}", "");
+                                                let _ = write!(lcd, "{:<20}", "");
                                                 let _ = write!(lcd, "{:^20}", "Starting . . .");
-                                                let _ = write!(lcd, "{:.20}", "");
+                                                let _ = write!(lcd, "{:<20}", "");
                                             }
                                             if let Ok(ac) = self.ac_state.lock() {
                                                 match *ac {
@@ -802,14 +784,22 @@ impl CharacterDisplay {
                                                     _ => {
                                                         println!("Auto connect is working right now.");
                                                         self.sound.notify_custom(SoundType::StartupInProgress);
+                                                        self.current_menu[0] = STARTUP_MENU;
+                                                        self.current_menu[1] = 0;
                                                     }
                                                 }
+                                            } else {
+                                                println!("Auto connect is working right now.");
+                                                self.sound.notify_custom(SoundType::StartupInProgress);
+                                                self.current_menu[0] = STARTUP_MENU;
+                                                self.current_menu[1] = 0;
                                             }
                                         },
                                         MAIN_SETTINGS => { // Settings
                                             self.current_menu[0] = SETTINGS_MENU;
                                             self.current_menu[1] = 0;
                                             self.update_settings();
+                                            self.update_menu();
                                         }
                                         MAIN_ABOUT => { // About
                                             self.current_menu[0] = ABOUT_MENU;
@@ -930,6 +920,24 @@ impl CharacterDisplay {
                 }
                 presses.clear();
             }
+            if let Ok(u_readers) = self.readers.lock() {
+                // make sure to iterate through the vec in reverse so we don't have some weird loop issues
+                let mut connected = false;
+                for reader in u_readers.iter() {
+                    if let Some(reading) = reader.is_reading() {
+                        if reading {
+                            self.current_menu[0] = READING_MENU;
+                            self.current_menu[1] = 0;
+                            connected = true;
+                            break;
+                        }
+                    }
+                }
+                if self.current_menu[0] == READING_MENU && !connected {
+                    self.current_menu[0] = MAIN_MENU;
+                    self.current_menu[1] = MAIN_START_READING;
+                }
+            }
             #[cfg(target_os = "linux")]
             {
                 let mut messages: Vec<String> = vec!(self.title_bar.clone());
@@ -985,42 +993,70 @@ impl CharacterDisplay {
                         };
                     },
                     READING_MENU => { // reader is reading
-                        if self.reader_info.len() > 1 {
-                            messages.push(self.reader_info[1].clone());
-                        } else {
-                            messages.push(format!("{:.20}", ""));
+                        self.update_readers();
+                        match self.reader_info.len() {
+                            1 => {
+                                messages.push(format!("{:^20}", self.reader_info[0]));
+                                messages.push(format!("{:^20}", ""));
+                                messages.push(format!("{:^20}", ""));
+                            },
+                            2 => {
+                                messages.push(format!("{:^20}", self.reader_info[0]));
+                                messages.push(format!("{:^20}", ""));
+                                messages.push(format!("{:^20}", self.reader_info[1]));
+                            },
+                            3 => {
+                                messages.push(format!("{:^20}", self.reader_info[1]));
+                                messages.push(format!("{:^20}", self.reader_info[0]));
+                                messages.push(format!("{:^20}", self.reader_info[2]));
+                            },
+                            _ => {
+                                let mut first = 0;
+                                let mut second = 1;
+                                let mut third = 2;
+                                let current_selection = self.current_menu[1] as usize;
+                                let max_ix = self.reader_info.len() - 1;
+                                if current_selection > 1 {
+                                    if current_selection >= max_ix {
+                                        first = max_ix - 2;
+                                        second = max_ix - 1;
+                                        third = max_ix;
+                                    } else {
+                                        first = current_selection - 1;
+                                        second = current_selection;
+                                        third = current_selection + 1;
+                                    }
+                                }
+                                messages.push(format!("{:^20}", self.reader_info[second]));
+                                messages.push(format!("{:^20}", self.reader_info[first]));
+                                messages.push(format!("{:^20}", self.reader_info[third]));
+                            }
                         }
-                        if self.reader_info.len() > 0 {
-                            messages.push(self.reader_info[0].clone());
-                        } else {
-                            messages.push(format!("{:.20}", ""));
-                        }
-                        messages.push(format!("{:.20}", ""));
                     },
                     ABOUT_MENU => { // about menu
                         messages.clear();
-                        messages.push(format!("{:^20.20}", ""));
-                        messages.push(format!("{:^20.20}", env!("CARGO_PKG_VERSION")));
-                        messages.push(format!("{:^20.20}", "Chronokeep Portal"));
-                        messages.push(format!("{:^20.20}", ""));
+                        messages.push(format!("{:^20}", ""));
+                        messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
+                        messages.push(format!("{:^20}", "Chronokeep Portal"));
+                        messages.push(format!("{:^20}", ""));
                     },
                     STARTUP_MENU => {
                         messages.clear();
-                        messages.push(format!("{:^20.20}", ""));
-                        messages.push(format!("{:^20.20}", "Please wait."));
-                        messages.push(format!("{:^20.20}", "System Initializing."));
-                        messages.push(format!("{:^20.20}", ""));
+                        messages.push(format!("{:^20}", ""));
+                        messages.push(format!("{:^20}", "Please wait."));
+                        messages.push(format!("{:^20}", "System Initializing."));
+                        messages.push(format!("{:^20}", ""));
                     }
                     SHUTDOWN_MENU => {
                         messages.clear();
-                        messages.push(format!("{:^20.20}", ""));
+                        messages.push(format!("{:^20}", ""));
                         if self.current_menu[1] == 0 {
-                            messages.push("     YES    > NO    ");
+                            messages.push(String::from("     YES    > NO    "));
                         } else {
-                            messages.push("   > YES      NO    ");
+                            messages.push(String::from("   > YES      NO    "));
                         }
-                        messages.push(format!("{:^20.20}", "Shutdown System?"));
-                        messages.push(format!("{:^20.20}", ""));
+                        messages.push(format!("{:^20}", "Shutdown System?"));
+                        messages.push(format!("{:^20}", ""));
                     },
                     SCREEN_OFF => {
                         let _ = lcd.clear();

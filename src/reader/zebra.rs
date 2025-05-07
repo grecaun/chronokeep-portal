@@ -85,6 +85,7 @@ pub fn connect(
             let t_read_repeaters = reader.read_repeaters.clone();
             let mut t_sight_processor = reader.sight_processor.clone();
             let t_reconnector = reconnector.clone();
+            let t_screen = reader.screen.clone();
 
             let output = thread::spawn(move|| {
                 let buf: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
@@ -110,6 +111,10 @@ pub fn connect(
                         if *keepalive == false {
                             break;
                         };
+                    }
+                    let mut starting_status = ReaderStatus::Unknown;
+                    if let Ok(stat) = t_reader_status.lock()  {
+                        starting_status = stat.clone();
                     }
                     match read(&mut t_stream, buf, leftover_buffer, leftover_num, last_ka_received_at) {
                         Ok(data) => {
@@ -653,6 +658,12 @@ pub fn connect(
                                             println!("error sending antennas to control sockets: {e}")
                                         }
                                     }
+                                    #[cfg(target_os = "linux")]
+                                    if let Ok(screen_opt) = t_screen.lock() {
+                                        if let Some(screen) = &*screen_opt {
+                                            screen.update();
+                                        }
+                                    }
                                 }
                             }
                             if last_ka_received_at < data.last_ka_received_at {
@@ -712,6 +723,22 @@ pub fn connect(
                             },
                             Err(e) => {
                                 println!("Error sending purge tag message. {e}");
+                            }
+                        }
+                    }
+                    #[cfg(target_os = "linux")]
+                    if let Ok(stat) = t_reader_status.lock()  {
+                        // Check if we had a valid starting status and it's changed to Disconnected/Connected
+                        // Then update the screen if we did.
+                        if starting_status != ReaderStatus::Unknown
+                        && starting_status != *stat
+                        && (*stat == ReaderStatus::Connected || *stat == ReaderStatus::Disconnected) {
+                            println!("Screen should start now.");
+                            if let Ok(mut screen_opt) = t_screen.lock() {
+                                if let Some(screen) = &mut *screen_opt {
+                                    println!("Screen found, updating.");
+                                    screen.update();
+                                }
                             }
                         }
                     }
