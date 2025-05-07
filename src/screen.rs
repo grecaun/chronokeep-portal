@@ -553,6 +553,15 @@ impl CharacterDisplay {
                                             match *ac {
                                                 auto_connect::State::Finished |
                                                 auto_connect::State::Unknown => {
+                                                    #[cfg(target_os = "linux")]
+                                                    {
+                                                        let _ = lcd.clear();
+                                                        let _ = lcd.home();
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        let _ = write!(lcd, "{:^20}", "Stopping . . .");
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                    }
                                                     if let Ok(mut u_readers) = self.readers.lock() {
                                                         for ix in (0..u_readers.len()).rev() {
                                                             let mut reader = u_readers.remove(ix);
