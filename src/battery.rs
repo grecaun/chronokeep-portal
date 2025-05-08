@@ -3,18 +3,17 @@ use std::thread;
 use std::time::Duration;
 use ina219::address::Address;
 use ina219::SyncIna219;
-#[cfg(target_os = "linux")]
 use rppal::i2c::I2c;
 
 use crate::control::Control;
-use crate::notifier::{self, Notifier};
+use crate::notifier;
 use crate::screen::CharacterDisplay;
 
 pub struct Checker {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
     screen: Arc<Mutex<Option<CharacterDisplay>>>,
-    notifier: Notifier,
+    notifier: notifier::Notifier,
 }
 
 impl Checker {
@@ -22,7 +21,7 @@ impl Checker {
         keepalive: Arc<Mutex<bool>>,
         control: Arc<Mutex<Control>>,
         screen: Arc<Mutex<Option<CharacterDisplay>>>,
-        notifier: Notifier,
+        notifier: notifier::Notifier,
     ) -> Self {
         Self {
             keepalive,
@@ -34,7 +33,6 @@ impl Checker {
 
     pub fn run(&self) {
         println!("Starting battery checker thread.");
-        #[cfg(target_os = "linux")]
         if let Ok(device) = I2c::with_bus(1) {
             println!("I2C initialized.");
             if let Ok(mut ina) = SyncIna219::new(device, Address::from_byte(0x40).unwrap()) {
@@ -118,7 +116,6 @@ impl Checker {
             }
             control.battery = percentage;
         }
-        #[cfg(target_os = "linux")]
         if let Ok(mut screen_opt) = self.screen.lock() {
             if let Some(screen) = &mut *screen_opt {
                 screen.update_battery();

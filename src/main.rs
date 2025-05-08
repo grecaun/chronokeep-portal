@@ -25,9 +25,8 @@ pub mod sound_board;
 pub mod screen;
 pub mod buttons;
 pub mod notifier;
+#[cfg(target_os = "linux")]
 pub mod battery;
-
-const CONTROL_TYPE: &str = "socket";
 
 fn main() {
     println!("Chronokeep Portal starting up...");
@@ -160,23 +159,7 @@ fn main() {
         println!("Unable to get control mutex for some reason.");
     }
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
-    // Check for command line arguments
-    let args: Vec<String> = env::args().collect();
-    if args.len() > 0 && args[0].as_str() == "daemon" {
-        control::socket::control_loop(sqlite.clone(), &control, keepalive.clone())
-    }  else {
-        match CONTROL_TYPE {
-            "socket" => {
-                control::socket::control_loop(sqlite.clone(), &control, keepalive.clone())
-            },
-            "cli" => {
-                control::cli::control_loop(sqlite.clone(), &control);
-            },
-            other => {
-                println!("'{other}' is not a valid control type.");
-            }
-        }
-    }
+    control::socket::control_loop(sqlite.clone(), &control, keepalive.clone());
     if let Ok(sq) = sqlite.lock() {
         let control: control::Control = control::Control::new(&sq).unwrap();
         let readers = sq.get_readers().unwrap();

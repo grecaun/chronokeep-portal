@@ -8,7 +8,7 @@ use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 use rppal::{hal, i2c::I2c};
 use std::sync::Condvar;
 
-use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -52,6 +52,7 @@ pub struct CharacterDisplay {
     info: Arc<Mutex<DisplayInfo>>,
     control_port: u16,
     current_menu: [u8; 3],
+    notifier: notifier::Notifier,
 }
 
 pub struct DisplayInfo {
@@ -83,6 +84,7 @@ impl CharacterDisplay {
         sound: Arc<SoundNotifier>,
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
         control_port: u16,
+        notifier: notifier::Notifier,
     ) -> Self {
         Self {
             keepalive,
@@ -111,6 +113,7 @@ impl CharacterDisplay {
             sound,
             joiners,
             control_port,
+            notifier
         }
     }
 
@@ -236,6 +239,7 @@ impl CharacterDisplay {
     }
 
     pub fn run(&mut self, bus: u8) {
+        println!("Screen bus set to {bus}");
         #[cfg(target_os = "linux")]
         println!("Attempting to connect to screen on i2c{bus}.");
         #[cfg(target_os = "linux")]
@@ -527,9 +531,17 @@ impl CharacterDisplay {
                                                                         self.read_saver.clone(),
                                                                         self.sound.clone(),
                                                                         reader.id(),
-                                                                        1
+                                                                        1,
+                                                                        self.notifier.clone(),
                                                                     );
-                                                                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
+                                                                    match reader.connect(
+                                                                            &self.sqlite.clone(),
+                                                                            &self.control.clone(),
+                                                                            &self.read_saver.clone(),
+                                                                            self.sound.clone(),
+                                                                            Some(reconnector),
+                                                                            self.notifier.clone(),
+                                                                        ) {
                                                                         Ok(j) => {
                                                                             if let Ok(mut join) = self.joiners.lock() {
                                                                                 join.push(j);
@@ -801,9 +813,17 @@ impl CharacterDisplay {
                                                                         self.read_saver.clone(),
                                                                         self.sound.clone(),
                                                                         reader.id(),
-                                                                        1
+                                                                        1,
+                                                                        self.notifier.clone(),
                                                                     );
-                                                                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
+                                                                    match reader.connect(
+                                                                            &self.sqlite.clone(),
+                                                                            &self.control.clone(),
+                                                                            &self.read_saver.clone(),
+                                                                            self.sound.clone(),
+                                                                            Some(reconnector),
+                                                                            self.notifier.clone(),
+                                                                        ) {
                                                                         Ok(j) => {
                                                                             if let Ok(mut join) = self.joiners.lock() {
                                                                                 join.push(j);

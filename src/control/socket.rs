@@ -1,12 +1,14 @@
 use std::{env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
 #[cfg(target_os = "linux")]
 use crate::buttons::Buttons;
+#[cfg(target_os = "linux")]
+use crate::battery;
 
 use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{battery, control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
 
 use self::notifications::Notification;
 
@@ -193,6 +195,16 @@ pub fn control_loop(
         println!("Unable to get joiners lock.");
     }
 
+    // Start a thread to enable notifications.
+    let notifier = Notifier::new(keepalive.clone(), control.clone());
+    let mut t_notifier = notifier.clone();
+    let n_joiner = thread::spawn(move|| {
+        t_notifier.run();
+    });
+    if let Ok(mut j) = joiners.lock() {
+        j.push(n_joiner);
+    }
+
     // create the auto connector for automatically connecting to readers
     let ac_state = Arc::new(Mutex::new(auto_connect::State::Unknown));
     let mut auto_connector = auto_connect::AutoConnector::new(
@@ -205,7 +217,8 @@ pub fn control_loop(
         control.clone(),
         sqlite.clone(),
         read_saver.clone(),
-        sound_notifier.clone()
+        sound_notifier.clone(),
+        notifier.clone(),
     );
     // start a thread to automatically connect to readers
     thread::spawn(move|| {
@@ -235,7 +248,8 @@ pub fn control_loop(
                         read_saver.clone(),
                         sound_notifier.clone(),
                         joiners.clone(),
-                        control_port
+                        control_port,
+                        notifier.clone(),
                     );
                     *screen = Some(new_screen.clone());
                     thread::spawn(move|| {
@@ -270,21 +284,15 @@ pub fn control_loop(
         }
     };
 
-    // Start a thread to enable notifications.
-    let notifier = Notifier::new(keepalive.clone(), control.clone());
-    let mut t_notifier = notifier.clone();
-    let n_joiner = thread::spawn(move|| {
-        t_notifier.run();
-    });
-    if let Ok(mut j) = joiners.lock() {
-        j.push(n_joiner);
-    }
-
     // Start our code to check the battery level.
+    #[cfg(target_os = "linux")]
     let bat_check = battery::Checker::new(keepalive.clone(), control.clone(), screen.clone(), notifier.clone());
+    #[cfg(target_os = "linux")]
     let b_joiner = thread::spawn(move|| {
+        #[cfg(target_os = "linux")]
         bat_check.run();
     });
+    #[cfg(target_os = "linux")]
     if let Ok(mut j) = joiners.lock() {
         j.push(b_joiner);
     }
@@ -345,6 +353,7 @@ pub fn control_loop(
                 let t_sound_notifier = sound_notifier.clone();
                 let t_read_saver = read_saver.clone();
                 let t_screen = screen.clone();
+                let t_notifier = notifier.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -382,7 +391,8 @@ pub fn control_loop(
                                 t_ac_state,
                                 t_read_saver,
                                 t_sound_notifier,
-                                t_screen
+                                t_screen,
+                                t_notifier,
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
@@ -498,7 +508,8 @@ fn handle_stream(
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
-    screen: Arc<Mutex<Option<CharacterDisplay>>>
+    screen: Arc<Mutex<Option<CharacterDisplay>>>,
+    notifier: notifier::Notifier,
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -797,9 +808,17 @@ fn handle_stream(
                                                             read_saver.clone(),
                                                             sound.clone(),
                                                             reader.id(),
-                                                            1
+                                                            1,
+                                                            notifier.clone(),
                                                         );
-                                                        match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(reconnector)) {
+                                                        match reader.connect(
+                                                                &sqlite.clone(),
+                                                                &control.clone(),
+                                                                &read_saver.clone(),
+                                                                sound.clone(),
+                                                                Some(reconnector),
+                                                                notifier.clone(),
+                                                            ) {
                                                             Ok(j) => {
                                                                 if let Ok(mut join) = joiners.lock() {
                                                                     join.push(j);
@@ -945,9 +964,17 @@ fn handle_stream(
                                                 read_saver.clone(),
                                                 sound.clone(),
                                                 reader.id(),
-                                                1
+                                                1,
+                                                notifier.clone(),
                                             );
-                                            match reader.connect(&sqlite.clone(), &control.clone(), &read_saver.clone(), sound.clone(), Some(reconnector)) {
+                                            match reader.connect(
+                                                    &sqlite.clone(), 
+                                                    &control.clone(),
+                                                    &read_saver.clone(),
+                                                    sound.clone(),
+                                                    Some(reconnector),
+                                                    notifier.clone(),
+                                                ) {
                                                 Ok(j) => {
                                                     if let Ok(mut join) = joiners.lock() {
                                                         join.push(j);
@@ -1125,7 +1152,11 @@ fn handle_stream(
                                 super::SETTING_SIGHTING_PERIOD |
                                 super::SETTING_PLAY_SOUND |
                                 super::SETTING_UPLOAD_INTERVAL |
-                                super::SETTING_VOLUME => {
+                                super::SETTING_VOLUME |
+                                super::SETTING_NTFY_URL |
+                                super::SETTING_NTFY_USER |
+                                super::SETTING_NTFY_PASS |
+                                super::SETTING_NTFY_TOPIC => {
                                     if let Ok(sq) = sqlite.lock() {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
@@ -2557,6 +2588,10 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
         super::SETTING_VOLUME,
         super::SETTING_VOICE,
         super::SETTING_UPLOAD_INTERVAL,
+        super::SETTING_NTFY_URL,
+        super::SETTING_NTFY_USER,
+        super::SETTING_NTFY_PASS,
+        super::SETTING_NTFY_TOPIC,
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

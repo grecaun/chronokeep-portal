@@ -1,16 +1,19 @@
-use std::{sync::{Arc, Condvar, Mutex}, time::Duration};
+use std::{sync::{Arc, Condvar, Mutex, WaitTimeoutResult}, time::Duration};
 
 use reqwest::header::HeaderMap;
 
 use crate::control::Control;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Notification {
     Start,
     Stop,
     BatteryLow,
     BatteryCritical,
     BatteryUnknown,
+    StartReading,
+    StopReading,
+    UnableToStartReading,
     Location,
 }
 
@@ -39,6 +42,10 @@ impl Notifier {
         if let Ok(mut notifications) = self.notifications.lock() {
             notifications.push(note);
         }
+        let (lock, cvar) = &*self.waiter;
+        let mut waiting = lock.lock().unwrap();
+        *waiting = false;
+        cvar.notify_one();
     }
 
     pub fn run(&mut self) {
@@ -62,14 +69,19 @@ impl Notifier {
             }
             let (lock, cvar) = &*self.waiter.clone();
             let mut waiting = lock.lock().unwrap();
+            let mut result: WaitTimeoutResult;
             while *waiting {
-                waiting = cvar.wait(waiting).unwrap();
+                (waiting, result) = cvar.wait_timeout(waiting, Duration::from_secs(15)).unwrap();
+                if result.timed_out() {
+                    break;
+                }
             }
             let mut work_list: Vec<Notification> = vec!();
             if let Ok(mut notifications) = self.notifications.lock() {
                 work_list.append(&mut *notifications);
             }
             for note in work_list.iter() {
+                println!("Notification received: {:?}", note);
                 let mut name = String::from("Chronokeep Portal");
                 let mut url = String::from("");
                 let mut topic = String::from("");
@@ -87,62 +99,76 @@ impl Notifier {
                 let message = match note {
                     Notification::Start => {
                         tag = String::from("green_circle");
-                        format!("{} has started.", name)
+                        format!("{name} has started.")
                     },
                     Notification::Stop => {
                         tag = String::from("red_square");
-                        format!("{} is shutting down.", name)
+                        format!("{name} is shutting down.")
                     },
                     Notification::BatteryLow => {
                         tag = String::from("battery");
                         priority = 4;
-                        format!("Battery is low on {}.", name)
+                        format!("Battery is low on {name}.")
                     },
                     Notification::BatteryCritical => {
                         tag = String::from("battery");
                         priority = 5;
-                        format!("Warning! Battery critical on {}.", name)
+                        format!("Warning! Battery critical on {name}.")
                     },
                     Notification::BatteryUnknown => {
                         tag = String::from("battery");
-                        format!("{} is unable to detect the battery level.", name)
+                        format!("{name} is unable to detect the battery level.")
                     },
                     Notification::Location => {
                         tag = String::from("world_map");
-                        format!("Location for {} is...", name)
+                        format!("Location for {name} is...")
                     },
+                    Notification::StartReading => { // used when Auto Start is set
+                        tag = String::from("medal_sports");
+                        format!("{name} has successfully connected to the reader.")
+                    },
+                    Notification::StopReading => {
+                        tag = String::from("warning");
+                        priority = 5;
+                        format!("A reader on {name} has unexpectedly disconnected.")
+                    },
+                    Notification::UnableToStartReading => {
+                        tag = String::from("warning");
+                        priority = 5;
+                        format!("Unable to connect to a reader on {name}.")
+                    }
                 };
                 if !url.is_empty() && !topic.is_empty() && !user.is_empty() && !pass.is_empty() {
+                    println!("Sending notification...");
                     match http_client.post(format!("{}{}", url, topic))
-                    .headers(construct_headers(message, priority, tag))
-                    .basic_auth(user, Some(pass))
-                    .send() {
-                        Ok(resp) => {
-                            match resp.status() {
-                                reqwest::StatusCode::OK | reqwest::StatusCode::NO_CONTENT => {}, // success
-                                _ => {
-                                    if let Ok(mut notifications) = self.notifications.lock() {
-                                        notifications.push(note.clone());
+                        .headers(construct_headers(priority, tag))
+                        .basic_auth(user, Some(pass))
+                        .body(message)
+                        .send() {
+                            Ok(resp) => {
+                                match resp.status() {
+                                    reqwest::StatusCode::OK | reqwest::StatusCode::NO_CONTENT => {}, // success
+                                    other => {
+                                        println!("Unknown status code trying to send notification: {other}");
                                     }
                                 }
+                            },
+                            Err(e) => {
+                                println!("Error sending notification: {e}");
+                                if let Ok(mut notifications) = self.notifications.lock() {
+                                    notifications.push(note.clone());
+                                }
                             }
-                        },
-                        Err(_) => {
-                            if let Ok(mut notifications) = self.notifications.lock() {
-                                notifications.push(note.clone());
-                            }
-                        }
-                    };
+                        };
                 }
             };
-        }
+        } // end loop
     }
 }
 
-fn construct_headers(message: String, priority: u8, tag: String) -> HeaderMap {
+fn construct_headers(priority: u8, tag: String) -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert("Message", message.parse().unwrap());
-    headers.insert("Priority", format!("{}", priority).parse().unwrap());
-    headers.insert("Tags", tag.parse().unwrap());
+    headers.insert("X-Priority", format!("{}", priority).parse().unwrap());
+    headers.insert("X-Tags", tag.parse().unwrap());
     headers
 }

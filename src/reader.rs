@@ -3,7 +3,7 @@ use std::{io::Write, net::TcpStream, sync::{self, Arc, Mutex}, thread::JoinHandl
 use reconnector::Reconnector;
 use serde::{Deserialize, Serialize};
 
-use crate::{control::{self, socket::MAX_CONNECTED, sound::SoundNotifier}, database::{sqlite, DBError}, processor, screen::CharacterDisplay};
+use crate::{control::{self, socket::MAX_CONNECTED, sound::SoundNotifier}, database::{sqlite, DBError}, notifier, processor, screen::CharacterDisplay};
 
 pub mod zebra;
 pub mod auto_connect;
@@ -37,9 +37,6 @@ pub enum ReaderStatus {
     ConnectingEnableRospec,
     ConnectingStartRospec,
     Connected,
-    StoppingDisableRospec,
-    StoppingDeleteRospec,
-    Stopped,
     Unknown,
 }
 
@@ -299,11 +296,12 @@ impl Reader {
         control: &Arc<Mutex<control::Control>>,
         read_saver: &Arc<processor::ReadSaver>,
         sound: Arc<SoundNotifier>,
-        reconnector: Option<Reconnector>
+        reconnector: Option<Reconnector>,
+        notifier: notifier::Notifier,
     ) -> Result<JoinHandle<()>, &'static str> {
         match self.kind.as_str() {
             READER_KIND_ZEBRA => {
-                zebra::connect(self, sqlite, control, read_saver, sound, reconnector)
+                zebra::connect(self, sqlite, control, read_saver, sound, reconnector, notifier)
             }
             _ => {
                 Err("reader type not supported")

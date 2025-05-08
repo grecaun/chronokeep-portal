@@ -1,6 +1,6 @@
 use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, processor::{self}};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, notifier, processor::{self}};
 
 // Total potential time before reconnect attempts are stopped
 // is WAITING_PERIOD_SECONDS * RECONNECT_ATTEMPTS
@@ -19,7 +19,8 @@ pub struct Reconnector {
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
     id: i64,
-    count: i32
+    count: i32,
+    notifier: notifier::Notifier,
 }
 
 
@@ -35,7 +36,8 @@ impl Reconnector {
         read_saver: Arc<processor::ReadSaver>,
         sound: Arc<SoundNotifier>,
         id: i64,
-        count: i32
+        count: i32,
+        notifier: notifier::Notifier,
     ) -> Reconnector {
         Reconnector {
             readers,
@@ -48,7 +50,8 @@ impl Reconnector {
             read_saver,
             sound,
             id,
-            count
+            count,
+            notifier
         }
     }
 
@@ -77,10 +80,18 @@ impl Reconnector {
                         self.read_saver.clone(),
                         self.sound.clone(),
                         self.id,
-                        1
+                        1,
+                        self.notifier.clone(),
                     );
                     println!("Initializing reader.");
-                    match old_reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
+                    match old_reader.connect(
+                            &self.sqlite.clone(),
+                            &self.control.clone(),
+                            &self.read_saver.clone(),
+                            self.sound.clone(),
+                            Some(reconnector),
+                            self.notifier.clone(),
+                        ) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
@@ -102,7 +113,8 @@ impl Reconnector {
                                 self.read_saver.clone(),
                                 self.sound.clone(),
                                 self.id,
-                                self.count + 1
+                                self.count + 1,
+                                self.notifier.clone(),
                             );
                             drop(readers);
                             new_reconnector.run();
@@ -132,7 +144,8 @@ impl Reconnector {
                             self.read_saver.clone(),
                             self.sound.clone(),
                             self.id,
-                            self.count + 1
+                            self.count + 1,
+                            self.notifier.clone(),
                         );
                         drop(readers);
                         new_reconnector.run();

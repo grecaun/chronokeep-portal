@@ -2,7 +2,7 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, notifier, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 60;
 
@@ -25,6 +25,7 @@ pub struct AutoConnector {
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
+    notifier: notifier::Notifier,
 }
 
 impl AutoConnector {
@@ -38,7 +39,8 @@ impl AutoConnector {
         control: Arc<Mutex<control::Control>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
         read_saver: Arc<processor::ReadSaver>,
-        sound: Arc<SoundNotifier>
+        sound: Arc<SoundNotifier>,
+        notifier: notifier::Notifier,
     ) -> AutoConnector {
         AutoConnector {
             state,
@@ -51,6 +53,7 @@ impl AutoConnector {
             sqlite,
             read_saver,
             sound,
+            notifier,
         }
     }
 
@@ -78,6 +81,7 @@ impl AutoConnector {
             return
         }
         println!("Auto connect is done waiting. Connecting now.");
+        let mut unable_to_connect = false;
         if let Ok(mut readers) = self.readers.lock() {
             for reader in readers.iter_mut() {
                 if reader.auto_connect() == AUTO_CONNECT_TRUE {
@@ -96,9 +100,17 @@ impl AutoConnector {
                         self.read_saver.clone(),
                         self.sound.clone(),
                         reader.id(),
-                        1
+                        1,
+                        self.notifier.clone(),
                     );
-                    match reader.connect(&self.sqlite.clone(), &self.control.clone(), &self.read_saver.clone(), self.sound.clone(), Some(reconnector)) {
+                    match reader.connect(
+                        &self.sqlite.clone(),
+                        &self.control.clone(),
+                        &self.read_saver.clone(),
+                        self.sound.clone(),
+                        Some(reconnector),
+                        self.notifier.clone(),
+                    ) {
                         Ok(j) => {
                             if let Ok(mut join) = self.joiners.lock() {
                                 join.push(j);
@@ -106,6 +118,7 @@ impl AutoConnector {
                         }
                         Err(e) => {
                             println!("Error connecting to reader: {e}");
+                            unable_to_connect = true;
                         }
                     }
                 }
@@ -120,6 +133,11 @@ impl AutoConnector {
             }
         }
         println!("All done connecting to readers.");
+        if unable_to_connect {
+            self.notifier.send_notification(notifier::Notification::UnableToStartReading);
+        } else {
+            self.notifier.send_notification(notifier::Notification::StartReading);
+        }
         self.sound.notify_custom(SoundType::StartupFinished);
         if let Ok(mut state) = self.state.lock() {
             *state = State::Finished

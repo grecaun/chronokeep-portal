@@ -1,7 +1,6 @@
 use crate::{database::{self, sqlite, DBError, Database}, defaults, objects::setting, sound_board::{SoundBoard, Voice}};
 use rand::prelude::random;
 
-pub mod cli;
 pub mod socket;
 pub mod zero_conf;
 pub mod sound;

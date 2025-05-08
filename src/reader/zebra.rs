@@ -1,8 +1,8 @@
 use core::str;
-use std::{collections::HashMap, env, fs::{File, OpenOptions}, io::{ErrorKind, Read, Write}, net::{IpAddr, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, env, fs::{File, OpenOptions}, io::{ErrorKind, Read, Write}, net::{IpAddr, Shutdown, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::{self, get_message_name}, parameter_types::{self, get_llrp_custom_message_name}}, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::{self, get_message_name}, parameter_types::{self, get_llrp_custom_message_name}}, notifier, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{reconnector::Reconnector, ReaderStatus, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
@@ -30,7 +30,8 @@ pub fn connect(
     control: &Arc<Mutex<control::Control>>,
     read_saver: &Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
-    reconnector: Option<Reconnector>
+    reconnector: Option<Reconnector>,
+    notifier: notifier::Notifier,
 ) -> Result<JoinHandle<()>, &'static str> {
     let ip_addr = match IpAddr::from_str(&reader.ip_address) {
         Ok(addr) => addr,
@@ -85,6 +86,7 @@ pub fn connect(
             let t_read_repeaters = reader.read_repeaters.clone();
             let mut t_sight_processor = reader.sight_processor.clone();
             let t_reconnector = reconnector.clone();
+            #[cfg(target_os = "linux")]
             let t_screen = reader.screen.clone();
 
             let output = thread::spawn(move|| {
@@ -112,7 +114,9 @@ pub fn connect(
                             break;
                         };
                     }
+                    #[cfg(target_os = "linux")]
                     let mut starting_status = ReaderStatus::Unknown;
+                    #[cfg(target_os = "linux")]
                     if let Ok(stat) = t_reader_status.lock()  {
                         starting_status = stat.clone();
                     }
@@ -358,18 +362,7 @@ pub fn connect(
                                                 if success {
                                                     attempt = 0;
                                                     match *stat {
-                                                        ReaderStatus::StoppingDisableRospec => {
-                                                            *stat = ReaderStatus::StoppingDeleteRospec;
-                                                            match send_delete_rospec(&mut t_stream, &msg_id) {
-                                                                Ok(_) => {
-                                                                    println!("-- Delete Rospec request on connection sent.")
-                                                                },
-                                                                Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
-                                                                    eprintln!("error sending delete rospec message: {e}")
-                                                                },
-                                                            }
-                                                        }
+                                                        ReaderStatus::Disconnected => {}
                                                         _ => {
                                                             *stat = ReaderStatus::Disconnected;
                                                             println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
@@ -380,17 +373,7 @@ pub fn connect(
                                                         *stat = ReaderStatus::Disconnected;
                                                     } else {
                                                         match *stat {
-                                                            ReaderStatus::StoppingDisableRospec => {
-                                                                match send_disable_rospec(&mut t_stream, &msg_id) {
-                                                                    Ok(_) => {
-                                                                        println!("-- Disable Rospec request on connection sent.")
-                                                                    },
-                                                                    Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
-                                                                        eprintln!("error sending disable rospec message: {e}")
-                                                                    },
-                                                                }
-                                                            }
+                                                            ReaderStatus::Disconnected => {}
                                                             _ => {
                                                                 *stat = ReaderStatus::Disconnected;
                                                                 println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
@@ -419,7 +402,8 @@ pub fn connect(
                                                                     eprintln!("error sending add rospec message: {e}")
                                                                 },
                                                             }
-                                                        }
+                                                        },
+                                                        ReaderStatus::Disconnected => {},
                                                         _ => {
                                                             *stat = ReaderStatus::Disconnected;
                                                             println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
@@ -441,6 +425,7 @@ pub fn connect(
                                                                     },
                                                                 }
                                                             },
+                                                            ReaderStatus::Disconnected => {},
                                                             _ => {
                                                                 *stat = ReaderStatus::Disconnected;
                                                                 println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
@@ -682,6 +667,7 @@ pub fn connect(
                                 ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
                                     println!("connection aborted/reset");
                                     reconnect = true;
+                                    notifier.send_notification(notifier::Notification::StopReading);
                                     break;
                                 }
                                 // TimedOut == Windows, WouldBlock == Linux
@@ -707,6 +693,7 @@ pub fn connect(
                                     if right_now - 5 > last_ka_received_at {
                                         println!("no keep alive message received in the last 5 seconds");
                                         reconnect = true;
+                                        notifier.send_notification(notifier::Notification::StopReading);
                                         break;
                                     }
                                 },
@@ -733,10 +720,8 @@ pub fn connect(
                         if starting_status != ReaderStatus::Unknown
                         && starting_status != *stat
                         && (*stat == ReaderStatus::Connected || *stat == ReaderStatus::Disconnected) {
-                            println!("Screen should start now.");
                             if let Ok(mut screen_opt) = t_screen.lock() {
                                 if let Some(screen) = &mut *screen_opt {
-                                    println!("Screen found, updating.");
                                     screen.update();
                                 }
                             }
@@ -771,26 +756,6 @@ fn send_delete_access_spec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<
     };
     // delete all access spec
     let buf = requests::delete_access_spec(&local_id, &0);
-    match tcp_stream.write_all(&buf) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
-    return Ok(())
-}
-
-fn send_disable_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
-    let local_id = match msg_id.lock() {
-        Ok(id) => *id,
-        Err(_) => 0,
-    };
-    // delete all rospec
-    let buf = requests::disable_rospec(&local_id, &0);
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
@@ -885,18 +850,16 @@ fn send_start_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>)
 }
 
 pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
-    if let Ok(r) = reader.status.lock() {
+    if let Ok(mut r) = reader.status.lock() {
         if ReaderStatus::Connected != *r {
             return Err("not reading")
         }
+        *r = ReaderStatus::Disconnected;
     } else {
         return Err("unable to check if we're actually reading")
     }
     let msg_id = reader.get_next_id();
     if let Ok(stream) = reader.socket.lock() {
-        //if let Ok(mut r) = reader.status.lock() {
-        //    *r = ReaderStatus::Stopping;
-        //}
         match &*stream {
             Some(s) => {
                 let mut w_stream = match s.try_clone() {
@@ -909,13 +872,11 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
                     }
                     Err(e) => return Err(e),
                 }
+                w_stream.shutdown(Shutdown::Both).expect("stream shutdown failed");
             },
             None => {
                 return Err("not connected")
             }
-        }
-        if let Ok(mut r) = reader.status.lock() {
-            *r = ReaderStatus::Stopped;
         }
         Ok(())
     } else {
@@ -929,10 +890,11 @@ fn stop(
     nickname: &String,
     msg_mtx: &Arc<sync::Mutex<u32>>
 ) {
-    if let Ok(r) = status.lock() {
+    if let Ok(mut r) = status.lock() {
         if ReaderStatus::Disconnected == *r {
             return
         }
+        *r = ReaderStatus::Disconnected;
     }
     let mut msg_id = 0;
     if let Ok(id) = msg_mtx.lock() {
@@ -942,6 +904,7 @@ fn stop(
         Ok(_) => println!("No longer reading from reader {}", nickname),
         Err(_) => (),
     }
+    socket.shutdown(Shutdown::Both).expect("stream shutdown failed");
 }
 
 fn save_reads(
