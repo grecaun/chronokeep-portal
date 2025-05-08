@@ -2,7 +2,7 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
 
 use serde::Serialize;
 
-use crate::{control::{socket::{write_uploader_status, MAX_CONNECTED}, Control}, database::{sqlite, Database}, defaults, network::api, objects::read};
+use crate::{control::{socket::{write_uploader_status, MAX_CONNECTED}, Control}, database::{sqlite, Database}, defaults, network::api, objects::read, screen::CharacterDisplay};
 use crate::remote::remote_util;
 
 #[derive(Clone, PartialEq, Serialize, Debug)]
@@ -19,7 +19,8 @@ pub struct Uploader {
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     status: Arc<Mutex<Status>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
-    control: Arc<Mutex<Control>>
+    control: Arc<Mutex<Control>>,
+    screen: Arc<Mutex<Option<CharacterDisplay>>>,
 }
 
 impl Uploader {
@@ -27,7 +28,8 @@ impl Uploader {
         keepalive: Arc<Mutex<bool>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
-        control: Arc<Mutex<Control>>
+        control: Arc<Mutex<Control>>,
+        screen: Arc<Mutex<Option<CharacterDisplay>>>,
     ) -> Uploader {
         Uploader {
             server_keepalive: keepalive,
@@ -35,7 +37,8 @@ impl Uploader {
             sqlite,
             status: Arc::new(Mutex::new(Status::Stopped)),
             control_sockets,
-            control
+            control,
+            screen,
         }
     }
 
@@ -63,10 +66,11 @@ impl Uploader {
             *r = Status::Stopping
         }
         // let everyone know we're stopping
-        self.update_control_socks();
+        self.update_control_socks(0);
     }
 
     pub fn run(&self) {
+        let mut err_count: usize = 0;
         // check if we're already running, exit if so, otherwise set to running
         if let Ok(mut r) = self.status.lock() {
             if *r == Status::Running {
@@ -75,7 +79,7 @@ impl Uploader {
             *r = Status::Running;
         }
         // let everyone know we're running
-        self.update_control_socks();
+        self.update_control_socks(err_count);
         // set local keepalive to true to keep running until told to stop
         if let Ok(mut ka) = self.local_keepalive.lock() {
             *ka = true;
@@ -90,7 +94,7 @@ impl Uploader {
                 if let Ok(mut r) = self.status.lock() {
                     *r = Status::Stopped;
                     // let everyone know we're stopped
-                    self.update_control_socks();
+                    self.update_control_socks(err_count);
                 }
                 println!("Unable to get our http client. Auto upload terminating.");
                 return;
@@ -153,7 +157,7 @@ impl Uploader {
             // upload any reads we found in the database if we found our remote API
             if let Some(api) = upload_api {
                 if to_upload.len() > 0 {
-                    let modified_reads = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                    let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload);
                     if let Ok(mut sq) = self.sqlite.lock() {
                         match sq.update_reads_status(&modified_reads) {
                             Ok(_) => {},
@@ -161,6 +165,12 @@ impl Uploader {
                                 println!("Error updating uploaded reads: {e}");
                             }
                         }
+                    }
+                    if e_count > 0 {
+                        err_count += e_count;
+
+                    } else if err_count != 0 {
+                        err_count = 0;
                     }
                 }
             }
@@ -176,18 +186,23 @@ impl Uploader {
             *r = Status::Stopped;
         }
         // let everyone know we're stopped
-        self.update_control_socks();
+        self.update_control_socks(0);
         println!("Auto upload of reads finished.")
     }
 
-    fn update_control_socks(&self) {
+    fn update_control_socks(&self, err_count: usize) {
         // let all the control sockets know of our status
+        let stat = self.status();
         if let Ok(c_socks) = self.control_sockets.lock() {
-            let stat = self.status();
             for sock in c_socks.iter() {
                 if let Some(sock) = sock {
                     _ = write_uploader_status(&sock, stat.clone());
                 }
+            }
+        }
+        if let Ok(mut screen_opt) = self.screen.lock() {
+            if let Some(screen) = &mut *screen_opt {
+                screen.update_upload_status(stat, err_count);
             }
         }
     }

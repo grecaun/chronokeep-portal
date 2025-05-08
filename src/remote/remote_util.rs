@@ -5,9 +5,10 @@ pub fn upload_all_reads(
     http_client: &reqwest::blocking::Client,
     api: &api::Api,
     reads: Vec<read::Read>
-) -> Vec<read::Read>
+) -> (Vec<read::Read>, usize)
 {
     let mut modified_reads: Vec<read::Read> = Vec::new();
+    let mut err_count: usize = 0;
     // only upload in chunks of 50
     if reads.len() > 50 {
         //println!("Attempting to upload {} reads.", reads.len());
@@ -40,10 +41,12 @@ pub fn upload_all_reads(
                         }
                     } else {
                         println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, 50);
+                        err_count += 1;
                     }
                 },
                 Err(e) => {
                     println!("Error uploading reads: {:?}", e);
+                    err_count += 1;
                 }
             }
             loop_counter = loop_counter + 1;
@@ -75,10 +78,12 @@ pub fn upload_all_reads(
                     }
                 } else {
                     println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, amt);
+                    err_count += 1;
                 }
             },
             Err(e) => {
                 println!("Error uploading reads: {:?}", e);
+                err_count += 1;
             }
         }
     } else if reads.len() > 0 {
@@ -105,12 +110,14 @@ pub fn upload_all_reads(
                     }
                 } else {
                     println!("Error uploading reads. Count doesn't match. {} uploaded, expected {}", count, reads.len());
+                    err_count += 1;
                 }
             },
             Err(e) => {
                 println!("Error uploading reads: {:?}", e);
+                err_count += 1;
             }
         }
     }
-    return modified_reads;
+    return (modified_reads, err_count);
 }

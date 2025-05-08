@@ -34,6 +34,7 @@ pub struct Control {
     pub ntfy_user: String,
     pub ntfy_pass: String,
     pub ntfy_topic: String,
+    pub battery: u8,
 }
 
 impl Control {
@@ -83,6 +84,7 @@ impl Control {
             ntfy_user: String::from(""),
             ntfy_pass: String::from(""),
             ntfy_topic: String::from(""),
+            battery: 0
         };
         match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
             Ok(s) => {

@@ -90,13 +90,13 @@ impl CharacterDisplay {
             sight_processor,
             waiter: Arc::new((Mutex::new(true), Condvar::new())),
             button_presses: Arc::new(Mutex::new(Vec::new())),
-            title_bar: String::from(""),
+            title_bar: format!("{:<20}", "Chronokeep"),
             reader_info: Vec::new(),
             main_menu: vec![
                 " > Start Reading    ".to_string(),
-                "   Settings         ".into(),
-                "   About            ".into(),
-                "   Shutdown         ".into(),
+                "   Settings         ".to_string(),
+                "   About            ".to_string(),
+                "   Shutdown         ".to_string(),
             ],
             settings_menu: Vec::new(),
             current_menu: [0, 0, 0],
@@ -116,21 +116,31 @@ impl CharacterDisplay {
         self.current_menu[0] = SCREEN_OFF;
     }
 
-    pub fn update_title_bar(&mut self, status: uploader::Status, err_count: isize) {
-        if let Ok(control) = self.control.lock() {
-            if err_count > 9 {
-                self.title_bar = format!("{:<17} 9+", control.name)
-            } else if err_count > 0 {
-                self.title_bar = format!("{:<17}  {}", control.name, err_count)
-            } else {
-                let mut upload_status = " ";
-                if status == Status::Running {
-                    upload_status = "+";
-                } else if status == Status::Stopped || status == Status::Stopping {
-                    upload_status = "-";
-                }
-                self.title_bar = format!("{:<17}  {}", control.name, upload_status)
+    pub fn update_upload_status(&mut self, status: uploader::Status, err_count: usize) {
+        if err_count > 99 {
+            self.title_bar.replace_range(14..16, "99");
+        } else if err_count > 0 {
+            self.title_bar.replace_range(14..16, format!("{:>2}", err_count).as_str());
+        } else {
+            let mut upload_status = "?";
+            if status == Status::Running {
+                upload_status = "+";
+            } else if status == Status::Stopped || status == Status::Stopping {
+                upload_status = "-";
             }
+            self.title_bar.replace_range(15..16, upload_status);
+        }
+    }
+
+    pub fn update_battery(&mut self) {
+        if let Ok(control) = self.control.lock() {
+            self.title_bar.replace_range(17..20, format!("{:>3}", control.battery).as_str());
+        }
+    }
+
+    pub fn update_name(&mut self) {
+        if let Ok(control) = self.control.lock() {
+            self.title_bar.replace_range(0..13, format!("{:<13}", control.name).as_str());
         }
     }
 
@@ -235,7 +245,7 @@ impl CharacterDisplay {
             if let Err(e) = lcd.home() {
                 println!("Error homing cursor. {e}");
             }
-            self.update_title_bar(uploader::Status::Unknown, 0);
+            self.update_name();
             let mut messages: Vec<String> = vec!(self.title_bar.clone());
             messages.push(self.main_menu[1].clone());
             messages.push(self.main_menu[0].clone());

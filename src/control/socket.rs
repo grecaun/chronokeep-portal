@@ -6,7 +6,7 @@ use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
+use crate::{battery, control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
 
 use self::notifications::Notification;
 
@@ -167,21 +167,6 @@ pub fn control_loop(
         },
     }
 
-    // create our reads uploader struct for auto uploading if the user wants to
-    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone(), control.clone()));
-    if let Ok(control) = control.lock() {
-        if control.auto_remote == true {
-            println!("Starting auto upload thread.");
-            let t_uploader = uploader.clone();
-            let t_joiner = thread::spawn(move|| {
-                t_uploader.run();
-            });
-            if let Ok(mut j) = joiners.lock() {
-                j.push(t_joiner);
-            }
-        }
-    };
-
     // start a thread to play sounds if we are told we want to
     let mut sound = sound::Sounds::new(
         control.clone(),
@@ -268,6 +253,30 @@ pub fn control_loop(
                 });
             }
         }
+    }
+
+    // create our reads uploader struct for auto uploading if the user wants to
+    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone(), control.clone(), screen.clone()));
+    if let Ok(control) = control.lock() {
+        if control.auto_remote == true {
+            println!("Starting auto upload thread.");
+            let t_uploader = uploader.clone();
+            let t_joiner = thread::spawn(move|| {
+                t_uploader.run();
+            });
+            if let Ok(mut j) = joiners.lock() {
+                j.push(t_joiner);
+            }
+        }
+    };
+
+    // Start our code to check the battery level.
+    let bat_check = battery::Checker::new(keepalive.clone(), control.clone(), screen.clone());
+    let b_joiner = thread::spawn(move|| {
+        bat_check.run();
+    });
+    if let Ok(mut j) = joiners.lock() {
+        j.push(b_joiner);
     }
 
     // Set screen on all the readers.
@@ -1663,7 +1672,7 @@ fn handle_stream(
                     // upload any reads we found in the database if we found our remote API
                     if let Some(api) = upload_api {
                         if to_upload.len() > 0 {
-                            let modified_reads = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                            let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
                             if let Ok(mut sq) = sqlite.lock() {
                                 match sq.update_reads_status(&modified_reads) {
                                     Ok(_) => {},

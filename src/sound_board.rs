@@ -19,6 +19,9 @@ pub const EMILY_INTRODUCTION:           &'static [u8] = include_bytes!("sounds/e
 pub const EMILY_STARTUP_FINISHED:       &'static [u8] = include_bytes!("sounds/emily-startup-finished.mp3");
 pub const EMILY_STARTUP_IN_PROGRESS:    &'static [u8] = include_bytes!("sounds/emily-startup-in-progress.mp3");
 pub const EMILY_CUSTOM_NOT_AVAILABLE:   &'static [u8] = include_bytes!("sounds/emily-custom-not-available.mp3");
+//pub const EMILY_BATTERY_LOW:            &'static [u8] = include_bytes!("sounds/emily-battery-low.mp3");
+//pub const EMILY_BATTERY_UNKNOWN:        &'static [u8] = include_bytes!("sounds/emily-battery-unknown.mp3");
+//pub const EMILY_BATTERY_CRITICAL:       &'static [u8] = include_bytes!("sounds/emily-battery-critical.mp3");
 
 pub const MICHAEL_START:                &'static [u8] = include_bytes!("sounds/michael-started.mp3");
 pub const MICHAEL_SHUTDOWN:             &'static [u8] = include_bytes!("sounds/michael-shutdown.mp3");
@@ -36,6 +39,9 @@ pub const MICHAEL_INTRODUCTION:         &'static [u8] = include_bytes!("sounds/m
 pub const MICHAEL_STARTUP_FINISHED:     &'static [u8] = include_bytes!("sounds/michael-startup-finished.mp3");
 pub const MICHAEL_STARTUP_IN_PROGRESS:  &'static [u8] = include_bytes!("sounds/michael-startup-in-progress.mp3");
 pub const MICHAEL_CUSTOM_NOT_AVAILABLE: &'static [u8] = include_bytes!("sounds/michael-custom-not-available.mp3");
+//pub const MICHAEL_BATTERY_LOW:          &'static [u8] = include_bytes!("sounds/michael-battery-low.mp3");
+//pub const MICHAEL_BATTERY_UNKNOWN:      &'static [u8] = include_bytes!("sounds/michael-battery-unknown.mp3");
+//pub const MICHAEL_BATTERY_CRITICAL:     &'static [u8] = include_bytes!("sounds/michael-battery-critical.mp3");
 
 pub const CUSTOM_START:                 &'static str = "./sound/started.mp3";
 pub const CUSTOM_SHUTDOWN:              &'static str = "./sound/shutdown.mp3";
@@ -52,6 +58,9 @@ pub const CUSTOM_VOLUME_10:             &'static str = "./sound/volume-10.mp3";
 pub const CUSTOM_INTRODUCTION:          &'static str = "./sound/introduction.mp3";
 pub const CUSTOM_STARTUP_FINISHED:      &'static str = "./sound/startup-finished.mp3";
 pub const CUSTOM_STARTUP_IN_PROGRESS:   &'static str = "./sound/startup-in-progress.mp3";
+//pub const CUSTOM_BATTERY_LOW:           &'static str = "./sounds/custom-battery-low.mp3";
+//pub const CUSTOM_BATTERY_UNKNOWN:       &'static str = "./sounds/custom-battery-unknown.mp3";
+//pub const CUSTOM_BATTERY_CRITICAL:      &'static str = "./sounds/custom-battery-critical.mp3";
 
 pub const BEEP_FREQUENCY: f32 = 1000.0;
 pub const BEEP_DURATION: u64 = 75; //75
