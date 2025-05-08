@@ -15,6 +15,7 @@ pub enum Notification {
     StopReading,
     UnableToStartReading,
     Location,
+    Shutdown,
 }
 
 #[derive(Clone)]
@@ -136,6 +137,10 @@ impl Notifier {
                         tag = String::from("warning");
                         priority = 5;
                         format!("Unable to connect to a reader on {name}.")
+                    },
+                    Notification::Shutdown => {
+                        tag = String::from("stop_sign");
+                        format!("{name} is shutting down.")
                     }
                 };
                 if !url.is_empty() && !topic.is_empty() && !user.is_empty() && !pass.is_empty() {

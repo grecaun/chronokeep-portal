@@ -2428,6 +2428,7 @@ fn handle_stream(
         }
     }
     write_disconnect(&stream);
+    notifier.send_notification(notifier::Notification::Shutdown);
     _ = stream.shutdown(Shutdown::Both);
     if let Ok(mut c_socks) = control_sockets.lock() {
         c_socks[index] = None;

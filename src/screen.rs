@@ -551,16 +551,17 @@ impl CharacterDisplay {
                                                                             println!("Error connecting to reader: {e}");
                                                                         }
                                                                     }
-                                                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                                                    if let Ok(c_socks) = self.control_sockets.lock() {
-                                                                        for sock in c_socks.iter() {
-                                                                            if let Some(sock) = sock {
-                                                                                _ = socket::write_reader_list(&sock, &u_readers);
-                                                                            }
-                                                                        }
-                                                                    }
                                                                 }
                                                                 u_readers.push(reader);
+                                                            }
+                                                            println!("Notifying control sockets about change in status. (Start2)");
+                                                            thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
+                                                            if let Ok(c_socks) = self.control_sockets.lock() {
+                                                                for sock in c_socks.iter() {
+                                                                    if let Some(sock) = sock {
+                                                                        _ = socket::write_reader_list(&sock, &u_readers);
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -834,15 +835,17 @@ impl CharacterDisplay {
                                                                         }
                                                                     }
                                                                     thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                                                    if let Ok(c_socks) = self.control_sockets.lock() {
-                                                                        for sock in c_socks.iter() {
-                                                                            if let Some(sock) = sock {
-                                                                                _ = socket::write_reader_list(&sock, &u_readers);
-                                                                            }
-                                                                        }
-                                                                    }
                                                                 }
                                                                 u_readers.push(reader);
+                                                            }
+                                                            println!("Notifying control sockets about change in status. (Start)");
+                                                            thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
+                                                            if let Ok(c_socks) = self.control_sockets.lock() {
+                                                                for sock in c_socks.iter() {
+                                                                    if let Some(sock) = sock {
+                                                                        _ = socket::write_reader_list(&sock, &u_readers);
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                     }

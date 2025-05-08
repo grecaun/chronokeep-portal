@@ -72,7 +72,6 @@ pub fn connect(
             let mut t_stream = tcp_stream;
             let t_mutex = reader.keepalive.clone();
             let msg_id = reader.msg_id.clone();
-            let status = reader.status.clone();
             let t_reader_name = reader.nickname.clone();
             let t_sqlite = sqlite.clone();
             let t_control = control.clone();
@@ -114,9 +113,7 @@ pub fn connect(
                             break;
                         };
                     }
-                    #[cfg(target_os = "linux")]
                     let mut starting_status = ReaderStatus::Unknown;
-                    #[cfg(target_os = "linux")]
                     if let Ok(stat) = t_reader_status.lock()  {
                         starting_status = stat.clone();
                     }
@@ -362,7 +359,18 @@ pub fn connect(
                                                 if success {
                                                     attempt = 0;
                                                     match *stat {
-                                                        ReaderStatus::Disconnected => {}
+                                                        ReaderStatus::StoppingDisableRospec => {
+                                                            *stat = ReaderStatus::StoppingDeleteRospec;
+                                                            match send_delete_rospec(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Delete Rospec request on disconnect sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending delete rospec message: {e}")
+                                                                },
+                                                            }
+                                                        }
                                                         _ => {
                                                             *stat = ReaderStatus::Disconnected;
                                                             println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
@@ -373,7 +381,18 @@ pub fn connect(
                                                         *stat = ReaderStatus::Disconnected;
                                                     } else {
                                                         match *stat {
-                                                            ReaderStatus::Disconnected => {}
+                                                            ReaderStatus::StoppingDisableRospec => {
+                                                                *stat = ReaderStatus::StoppingDeleteRospec;
+                                                                match send_delete_rospec(&mut t_stream, &msg_id) {
+                                                                    Ok(_) => {
+                                                                        println!("-- Delete Rospec request on disconnect sent.")
+                                                                    },
+                                                                    Err(e) => {
+                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        eprintln!("error sending delete rospec message: {e}")
+                                                                    },
+                                                                }
+                                                            }
                                                             _ => {
                                                                 *stat = ReaderStatus::Disconnected;
                                                                 println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
@@ -403,7 +422,10 @@ pub fn connect(
                                                                 },
                                                             }
                                                         },
-                                                        ReaderStatus::Disconnected => {},
+                                                        ReaderStatus::StoppingDeleteRospec => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("-- Reader successfully disconnected.")
+                                                        },
                                                         _ => {
                                                             *stat = ReaderStatus::Disconnected;
                                                             println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
@@ -425,7 +447,10 @@ pub fn connect(
                                                                     },
                                                                 }
                                                             },
-                                                            ReaderStatus::Disconnected => {},
+                                                            ReaderStatus::StoppingDeleteRospec => {
+                                                                *stat = ReaderStatus::Disconnected;
+                                                                println!("-- Reader successfully disconnected.")
+                                                            },
                                                             _ => {
                                                                 *stat = ReaderStatus::Disconnected;
                                                                 println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
@@ -560,7 +585,7 @@ pub fn connect(
                                                             ReaderStatus::ConnectingStartRospec => {
                                                                 match send_start_rospec(&mut t_stream, &msg_id) {
                                                                     Ok(_) => {
-                                                                        println!("-- Start Rospect request on connection sent.")
+                                                                        println!("-- Start Rospec request on connection sent.")
                                                                     },
                                                                     Err(e) => {
                                                                         *stat = ReaderStatus::Disconnected;
@@ -657,7 +682,11 @@ pub fn connect(
                             let right_now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                             if right_now - 5 > last_ka_received_at {
                                 println!("no keep alive message received in the last 5 seconds");
-                                reconnect = true;
+                                if let Ok(stat) = t_reader_status.lock() {
+                                    if *stat != ReaderStatus::Disconnected && *stat != ReaderStatus::StoppingDeleteRospec && *stat != ReaderStatus::StoppingDisableRospec {
+                                        reconnect = true;
+                                    }
+                                }
                                 break;
                             }
                         },
@@ -713,16 +742,27 @@ pub fn connect(
                             }
                         }
                     }
-                    #[cfg(target_os = "linux")]
                     if let Ok(stat) = t_reader_status.lock()  {
                         // Check if we had a valid starting status and it's changed to Disconnected/Connected
                         // Then update the screen if we did.
                         if starting_status != ReaderStatus::Unknown
                         && starting_status != *stat
-                        && (*stat == ReaderStatus::Connected || *stat == ReaderStatus::Disconnected) {
-                            if let Ok(mut screen_opt) = t_screen.lock() {
-                                if let Some(screen) = &mut *screen_opt {
-                                    screen.update();
+                        {
+                            // Changed to disconnected then close the socket.
+                            if *stat == ReaderStatus::Disconnected {
+                                #[cfg(target_os = "linux")]
+                                if let Ok(mut screen_opt) = t_screen.lock() {
+                                    if let Some(screen) = &mut *screen_opt {
+                                        screen.update();
+                                    }
+                                }
+                                break;
+                            } else if *stat == ReaderStatus::Connected {
+                                #[cfg(target_os = "linux")]
+                                if let Ok(mut screen_opt) = t_screen.lock() {
+                                    if let Some(screen) = &mut *screen_opt {
+                                        screen.update();
+                                    }
                                 }
                             }
                         }
@@ -731,18 +771,21 @@ pub fn connect(
                         End of reading loop
                      */
                 }
-                stop(&mut t_stream, &status, &t_reader_name, &msg_id);
-                finalize(&mut t_stream, &msg_id, &status, last_ka_received_at);
+                stop(&mut t_stream, &t_reader_status, &t_reader_name, &msg_id);
+                finalize(&mut t_stream, &msg_id, &t_reader_status, last_ka_received_at);
                 save_reads(&mut read_map, &t_control, &t_sqlite, t_reader_name.as_str());
-                if let Ok(mut con) = status.lock() {
+                if let Err(e) = t_stream.shutdown(Shutdown::Both) {
+                    println!("Error shutting down socket. {e}");
+                }
+                if let Ok(mut con) = t_reader_status.lock() {
                     *con = ReaderStatus::Disconnected;
                 }
-                println!("Thread reading from this reader has now closed.");
                 if reconnect == true {
                     if let Some(rec) = t_reconnector {
                         rec.run();
                     }
                 }
+                println!("Thread reading from this reader has now closed.");
             });
             Ok(output)
         },
@@ -854,7 +897,7 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
         if ReaderStatus::Connected != *r {
             return Err("not reading")
         }
-        *r = ReaderStatus::Disconnected;
+        *r = ReaderStatus::StoppingDisableRospec;
     } else {
         return Err("unable to check if we're actually reading")
     }
@@ -872,7 +915,6 @@ pub fn stop_reader(reader: &mut super::Reader) -> Result<(), &'static str> {
                     }
                     Err(e) => return Err(e),
                 }
-                w_stream.shutdown(Shutdown::Both).expect("stream shutdown failed");
             },
             None => {
                 return Err("not connected")
@@ -894,7 +936,7 @@ fn stop(
         if ReaderStatus::Disconnected == *r {
             return
         }
-        *r = ReaderStatus::Disconnected;
+        *r = ReaderStatus::StoppingDisableRospec;
     }
     let mut msg_id = 0;
     if let Ok(id) = msg_mtx.lock() {
@@ -904,7 +946,6 @@ fn stop(
         Ok(_) => println!("No longer reading from reader {}", nickname),
         Err(_) => (),
     }
-    socket.shutdown(Shutdown::Both).expect("stream shutdown failed");
 }
 
 fn save_reads(
@@ -1148,11 +1189,12 @@ fn stop_reading(t_stream: &mut TcpStream, msg_id: u32) -> Result<(), &'static st
         Err(_) => return Err("unable to write to stream"),
     }
     // delete rospec
-    let msg = requests::delete_rospec(&(msg_id + 1), &0);
+    /*let msg = requests::delete_rospec(&(msg_id + 1), &0);
     match t_stream.write_all(&msg) {
-        Ok(_) => Ok(()),
+        Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
-    }
+    } */
+    Ok(())
 }
 
 fn finalize(
@@ -1191,7 +1233,11 @@ fn finalize(
                 }
             }
         },
-        Err(e) => println!("Error closing connection. {e}"),
+        Err(e) => {
+            if e.kind() != ErrorKind::BrokenPipe {
+                println!("Error closing connection. {e}")
+            }
+        },
     }
 }
 
@@ -1364,7 +1410,11 @@ fn read(
                                 let response = requests::keepalive_ack(&leftover_type.id);
                                 match tcp_stream.write_all(&response) {
                                     Ok(_) => (),
-                                    Err(e) => eprintln!("Error responding to keepalive. {e}"),
+                                    Err(e) => {
+                                        if e.kind() != ErrorKind::BrokenPipe {
+                                            eprintln!("Error responding to keepalive. {e}")
+                                        }
+                                    },
                                 }
                             },
                             llrp::message_types::RO_ACCESS_REPORT => {
@@ -1490,7 +1540,11 @@ fn read(
                                 let response = requests::keepalive_ack(&info.id);
                                 match tcp_stream.write_all(&response) {
                                     Ok(_) => (),
-                                    Err(e) => println!("Error responding to keepalive. {e}"),
+                                    Err(e) => {
+                                        if e.kind() != ErrorKind::BrokenPipe {
+                                            eprintln!("Error responding to keepalive. {e}")
+                                        }
+                                    },
                                 }
                             },
                             llrp::message_types::RO_ACCESS_REPORT => {

@@ -37,6 +37,8 @@ pub enum ReaderStatus {
     ConnectingEnableRospec,
     ConnectingStartRospec,
     Connected,
+    StoppingDisableRospec,
+    StoppingDeleteRospec,
     Unknown,
 }
 
