@@ -296,7 +296,6 @@ impl CharacterDisplay {
                 for press in &*presses {
                     match press {
                         ButtonPress::Up => {
-                            println!("Up button registered.");
                             match self.current_menu[0] {
                                 MAIN_MENU => {
                                     if self.current_menu[1] > MAIN_START_READING {
@@ -337,7 +336,6 @@ impl CharacterDisplay {
                             self.update_menu();
                         },
                         ButtonPress::Down => {
-                            println!("Down button registered.");
                             match self.current_menu[0] {
                                 MAIN_MENU => { // main menu, max ix 3
                                     if self.current_menu[1] < MAIN_SHUTDOWN {
@@ -378,7 +376,6 @@ impl CharacterDisplay {
                             self.update_menu();
                         },
                         ButtonPress::Left => {
-                            println!("Left button registered.");
                             match self.current_menu[0] {
                                 SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
@@ -500,7 +497,6 @@ impl CharacterDisplay {
                             self.current_menu[2] = 0;
                         },
                         ButtonPress::Right => {
-                            println!("Right button registered.");
                             match self.current_menu[0] {
                                 MAIN_MENU => { // similar to enter function
                                     match self.current_menu[1] {
@@ -783,7 +779,6 @@ impl CharacterDisplay {
                             self.current_menu[2] = 0;
                         },
                         ButtonPress::Enter => {
-                            println!("Enter button registered.");
                             match self.current_menu[0] {
                                 MAIN_MENU => { // main
                                     match self.current_menu[1] {
