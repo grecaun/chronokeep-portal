@@ -83,7 +83,6 @@ impl Checker {
     }
 
     fn set_percentage(&self, voltage: u16) {
-        println!("Bus voltage is {}", voltage);
         // Voltage is in mV, charging is ~ 14600
         // 100% - 13600
         //  90% - 13400
@@ -107,13 +106,14 @@ impl Checker {
         } else { // 0% to 10%, each 200 mV is 1%
             ((voltage - 10000) / 200) as u8
         };
-        println!("Battery level is {}", percentage);
         if let Ok(mut control) = self.control.lock() {
             control.battery = percentage;
         }
+        #[cfg(target_os = "linux")]
         if let Ok(mut screen_opt) = self.screen.lock() {
             if let Some(screen) = &mut *screen_opt {
                 screen.update_battery();
+                screen.update();
             }
         }
     }

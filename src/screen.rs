@@ -45,16 +45,20 @@ pub struct CharacterDisplay {
     sight_processor: Arc<SightingsProcessor>,
     waiter: Arc<(Mutex<bool>, Condvar)>,
     button_presses: Arc<Mutex<Vec<ButtonPress>>>,
-    title_bar: String,
-    reader_info: Vec<String>,
-    main_menu: Vec<String>,
-    settings_menu: Vec<String>,
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    info: Arc<Mutex<DisplayInfo>>,
     control_port: u16,
     current_menu: [u8; 3],
+}
+
+pub struct DisplayInfo {
+    title_bar: String,
+    reader_info: Vec<String>,
+    main_menu: Vec<String>,
+    settings_menu: Vec<String>,
 }
 
 pub enum ButtonPress {
@@ -90,15 +94,17 @@ impl CharacterDisplay {
             sight_processor,
             waiter: Arc::new((Mutex::new(true), Condvar::new())),
             button_presses: Arc::new(Mutex::new(Vec::new())),
-            title_bar: format!("{:<20}", "Chronokeep"),
-            reader_info: Vec::new(),
-            main_menu: vec![
-                " > Start Reading    ".to_string(),
-                "   Settings         ".to_string(),
-                "   About            ".to_string(),
-                "   Shutdown         ".to_string(),
-            ],
-            settings_menu: Vec::new(),
+            info: Arc::new(Mutex::new(DisplayInfo {
+                title_bar: format!("{:<20}", "Chronokeep"),
+                reader_info: Vec::new(),
+                main_menu: vec![
+                    " > Start Reading    ".to_string(),
+                    "   Settings         ".to_string(),
+                    "   About            ".to_string(),
+                    "   Shutdown         ".to_string(),
+                ],
+                settings_menu: Vec::new(),
+            })),
             current_menu: [0, 0, 0],
             ac_state,
             read_saver,
@@ -117,53 +123,67 @@ impl CharacterDisplay {
     }
 
     pub fn update_upload_status(&mut self, status: uploader::Status, err_count: usize) {
-        if err_count > 99 {
-            self.title_bar.replace_range(14..16, "99");
-        } else if err_count > 0 {
-            self.title_bar.replace_range(14..16, format!("{:>2}", err_count).as_str());
-        } else {
-            let mut upload_status = "?";
-            if status == Status::Running {
-                upload_status = "+";
-            } else if status == Status::Stopped || status == Status::Stopping {
-                upload_status = "-";
+        if let Ok(mut info) = self.info.lock() {
+            if err_count > 99 {
+                info.title_bar.replace_range(14..16, "99");
+            } else if err_count > 0 {
+                info.title_bar.replace_range(14..16, format!("{:>2}", err_count).as_str());
+            } else {
+                let mut upload_status = "?";
+                if status == Status::Running {
+                    upload_status = "+";
+                } else if status == Status::Stopped || status == Status::Stopping {
+                    upload_status = "-";
+                }
+                info.title_bar.replace_range(15..16, upload_status);
             }
-            self.title_bar.replace_range(15..16, upload_status);
         }
     }
 
     pub fn update_battery(&mut self) {
-        if let Ok(control) = self.control.lock() {
-            self.title_bar.replace_range(17..20, format!("{:>3}", control.battery).as_str());
+        if let Ok(mut info) = self.info.lock() {
+            if let Ok(control) = self.control.lock() {
+                if control.battery > 150 {
+                    info.title_bar.replace_range(17..20, "+++");
+                } else if control.battery >= 100 {
+                    info.title_bar.replace_range(17..20, "100");
+                } else {
+                    info.title_bar.replace_range(17..20, format!("{:>3}", control.battery).as_str());
+                }
+            }
         }
     }
 
     pub fn update_name(&mut self) {
-        if let Ok(control) = self.control.lock() {
-            self.title_bar.replace_range(0..13, format!("{:<13}", control.name).as_str());
+        if let Ok(mut info) = self.info.lock() {
+            if let Ok(control) = self.control.lock() {
+                info.title_bar.replace_range(0..13, format!("{:<13}", control.name).as_str());
+            }
         }
     }
 
     pub fn update_readers(&mut self) {
-        self.reader_info.clear();
-        // Collect all connected readers.
-        if let Ok(readers) = self.readers.lock() {
-            for read in readers.iter() {
-                if let Some(is_con) = read.is_connected() {
-                    if is_con {
-                        if let Ok(ants) = read.antennas.lock() {
-                            self.reader_info.push(
-                                format!("{} {}{}{}{}{}{}{}{}",
-                                    read.nickname(),
-                                    reader::helpers::antenna_status_str(ants[0]),
-                                    reader::helpers::antenna_status_str(ants[1]),
-                                    reader::helpers::antenna_status_str(ants[2]),
-                                    reader::helpers::antenna_status_str(ants[3]),
-                                    reader::helpers::antenna_status_str(ants[4]),
-                                    reader::helpers::antenna_status_str(ants[5]),
-                                    reader::helpers::antenna_status_str(ants[6]),
-                                    reader::helpers::antenna_status_str(ants[7]),
-                                ));
+        if let Ok(mut info) = self.info.lock() {
+            info.reader_info.clear();
+            // Collect all connected readers.
+            if let Ok(readers) = self.readers.lock() {
+                for read in readers.iter() {
+                    if let Some(is_con) = read.is_connected() {
+                        if is_con {
+                            if let Ok(ants) = read.antennas.lock() {
+                                info.reader_info.push(
+                                    format!("{} {}{}{}{}{}{}{}{}",
+                                        read.nickname(),
+                                        reader::helpers::antenna_status_str(ants[0]),
+                                        reader::helpers::antenna_status_str(ants[1]),
+                                        reader::helpers::antenna_status_str(ants[2]),
+                                        reader::helpers::antenna_status_str(ants[3]),
+                                        reader::helpers::antenna_status_str(ants[4]),
+                                        reader::helpers::antenna_status_str(ants[5]),
+                                        reader::helpers::antenna_status_str(ants[6]),
+                                        reader::helpers::antenna_status_str(ants[7]),
+                                    ));
+                            }
                         }
                     }
                 }
@@ -172,47 +192,51 @@ impl CharacterDisplay {
     }
 
     pub fn update_menu(&mut self) {
-        match self.current_menu[0] {
-            MAIN_MENU => { // main menu, max ix 3
-                for line in self.main_menu.iter_mut() {
-                    line.replace_range(1..2, " ");
+        if let Ok(mut info) = self.info.lock() {
+            match self.current_menu[0] {
+                MAIN_MENU => { // main menu, max ix 3
+                    for line in info.main_menu.iter_mut() {
+                        line.replace_range(1..2, " ");
+                    }
+                    info.main_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
+                },
+                SETTINGS_MENU => { // settings menu, max ix 7
+                    for line in info.settings_menu.iter_mut() {
+                        line.replace_range(1..2, " ");
+                    }
+                    info.settings_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
                 }
-                self.main_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
-            },
-            SETTINGS_MENU => { // settings menu, max ix 7
-                for line in self.settings_menu.iter_mut() {
-                    line.replace_range(1..2, " ");
-                }
-                self.settings_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
+                _ => {}
             }
-            _ => {}
         }
     }
 
     pub fn update_settings(&mut self) {
-        self.settings_menu.clear();
-        if let Ok(control) = self.control.lock() {
-            let mut play_sound = "no";
-            if control.play_sound {
-                play_sound = "yes";
+        if let Ok(mut info) = self.info.lock() {
+            info.settings_menu.clear();
+            if let Ok(control) = self.control.lock() {
+                let mut play_sound = "no";
+                if control.play_sound {
+                    play_sound = "yes";
+                }
+                let mut auto_upload = "no";
+                if control.auto_remote {
+                    auto_upload = "yes";
+                }
+                info.settings_menu.push(format!("   Sightings   {:>4} ", control.sighting_period));
+                info.settings_menu.push(format!("   Read Window {:>4} ", control.read_window));
+                info.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
+                info.settings_menu.push(format!("   Play Sounds {:>4} ", play_sound));
+                info.settings_menu.push(format!("   Volume      {:>4} ", (control.volume * 10.0) as usize));
+                info.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
+                info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
+                info.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
             }
-            let mut auto_upload = "no";
-            if control.auto_remote {
-                auto_upload = "yes";
+            for line in info.settings_menu.iter_mut() {
+                line.replace_range(1..2, " ");
             }
-            self.settings_menu.push(format!("   Sightings   {:>4} ", control.sighting_period));
-            self.settings_menu.push(format!("   Read Window {:>4} ", control.read_window));
-            self.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
-            self.settings_menu.push(format!("   Play Sounds {:>4} ", play_sound));
-            self.settings_menu.push(format!("   Volume      {:>4} ", (control.volume * 10.0) as usize));
-            self.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
-            self.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
-            self.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
+            info.settings_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
         }
-        for line in self.settings_menu.iter_mut() {
-            line.replace_range(1..2, " ");
-        }
-        self.settings_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
     }
 
     pub fn run(&mut self, bus: u8) {
@@ -246,12 +270,14 @@ impl CharacterDisplay {
                 println!("Error homing cursor. {e}");
             }
             self.update_name();
-            let mut messages: Vec<String> = vec!(self.title_bar.clone());
-            messages.push(self.main_menu[1].clone());
-            messages.push(self.main_menu[0].clone());
-            messages.push(self.main_menu[2].clone());
-            for msg in &*messages {
-                let _ = write!(lcd, "{msg}");
+            if let Ok(info) = self.info.lock() {
+                let mut messages: Vec<String> = vec!(info.title_bar.clone());
+                messages.push(info.main_menu[1].clone());
+                messages.push(info.main_menu[0].clone());
+                messages.push(info.main_menu[2].clone());
+                for msg in &*messages {
+                    let _ = write!(lcd, "{msg}");
+                }
             }
         }
         loop {
@@ -280,11 +306,13 @@ impl CharacterDisplay {
                                     }
                                 }
                                 READING_MENU => {
-                                    if self.reader_info.len() > 3 {
-                                        if self.current_menu[1] > 0 {
-                                            self.current_menu[1] -= 1;
-                                        } else {
-                                            self.current_menu[1] = (self.reader_info.len() - 1) as u8;
+                                    if let Ok(info) = self.info.lock() {
+                                        if info.reader_info.len() > 3 {
+                                            if self.current_menu[1] > 0 {
+                                                self.current_menu[1] -= 1;
+                                            } else {
+                                                self.current_menu[1] = (info.reader_info.len() - 1) as u8;
+                                            }
                                         }
                                     }
                                 }
@@ -316,11 +344,13 @@ impl CharacterDisplay {
                                     }
                                 },
                                 READING_MENU => {
-                                    if self.reader_info.len() > 3 {
-                                        if self.current_menu[1] < (self.reader_info.len() - 1) as u8 {
-                                            self.current_menu[1] += 1;
-                                        } else {
-                                            self.current_menu[1] = 0;
+                                    if let Ok(info) = self.info.lock() {
+                                        if info.reader_info.len() > 3 {
+                                            if self.current_menu[1] < (info.reader_info.len() - 1) as u8 {
+                                                self.current_menu[1] += 1;
+                                            } else {
+                                                self.current_menu[1] = 0;
+                                            }
                                         }
                                     }
                                 }
@@ -925,96 +955,104 @@ impl CharacterDisplay {
             }
             #[cfg(target_os = "linux")]
             {
-                let mut messages: Vec<String> = vec!(self.title_bar.clone());
-                let _ = lcd.clear();
+                let mut messages: Vec<String> = vec!();
+                if let Ok(info) = self.info.lock() {
+                    messages.push(info.title_bar.clone())
+                }
                 let _ = lcd.home();
                 match self.current_menu[0] {
                     MAIN_MENU => { // main menu, max ix 3
-                        match self.current_menu[1] {
-                            0 | 1 => {
-                                messages.push(self.main_menu[1].clone()); // Interface writes lines odd lines before even lines,
-                                messages.push(self.main_menu[0].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
-                                messages.push(self.main_menu[2].clone());
-                            },
-                            _ => { // 2 | 3
-                                messages.push(self.main_menu[2].clone());
-                                messages.push(self.main_menu[1].clone());
-                                messages.push(self.main_menu[3].clone());
-                            },
-                        };
+                        if let Ok(info) = self.info.lock() {
+                            match self.current_menu[1] {
+                                0 | 1 => {
+                                    messages.push(info.main_menu[1].clone()); // Interface writes lines odd lines before even lines,
+                                    messages.push(info.main_menu[0].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
+                                    messages.push(info.main_menu[2].clone());
+                                },
+                                _ => { // 2 | 3
+                                    messages.push(info.main_menu[2].clone());
+                                    messages.push(info.main_menu[1].clone());
+                                    messages.push(info.main_menu[3].clone());
+                                },
+                            };
+                        }
                     },
                     SETTINGS_MENU => { // settings menu, max ix 7
-                        match self.current_menu[1] {
-                            0 | 1 => {
-                                messages.push(self.settings_menu[1].clone());
-                                messages.push(self.settings_menu[0].clone());
-                                messages.push(self.settings_menu[2].clone());
-                            },
-                            2 => {
-                                messages.push(self.settings_menu[2].clone());
-                                messages.push(self.settings_menu[1].clone());
-                                messages.push(self.settings_menu[3].clone());
-                            },
-                            3 => {
-                                messages.push(self.settings_menu[3].clone());
-                                messages.push(self.settings_menu[2].clone());
-                                messages.push(self.settings_menu[4].clone());
-                            },
-                            4 => {
-                                messages.push(self.settings_menu[4].clone());
-                                messages.push(self.settings_menu[3].clone());
-                                messages.push(self.settings_menu[5].clone());
-                            },
-                            5 => {
-                                messages.push(self.settings_menu[5].clone());
-                                messages.push(self.settings_menu[4].clone());
-                                messages.push(self.settings_menu[6].clone());
-                            },
-                            _ => { // 6 | 7
-                                messages.push(self.settings_menu[6].clone());
-                                messages.push(self.settings_menu[5].clone());
-                                messages.push(self.settings_menu[7].clone());
-                            },
-                        };
+                        if let Ok(info) = self.info.lock() {
+                            match self.current_menu[1] {
+                                0 | 1 => {
+                                    messages.push(info.settings_menu[1].clone());
+                                    messages.push(info.settings_menu[0].clone());
+                                    messages.push(info.settings_menu[2].clone());
+                                },
+                                2 => {
+                                    messages.push(info.settings_menu[2].clone());
+                                    messages.push(info.settings_menu[1].clone());
+                                    messages.push(info.settings_menu[3].clone());
+                                },
+                                3 => {
+                                    messages.push(info.settings_menu[3].clone());
+                                    messages.push(info.settings_menu[2].clone());
+                                    messages.push(info.settings_menu[4].clone());
+                                },
+                                4 => {
+                                    messages.push(info.settings_menu[4].clone());
+                                    messages.push(info.settings_menu[3].clone());
+                                    messages.push(info.settings_menu[5].clone());
+                                },
+                                5 => {
+                                    messages.push(info.settings_menu[5].clone());
+                                    messages.push(info.settings_menu[4].clone());
+                                    messages.push(info.settings_menu[6].clone());
+                                },
+                                _ => { // 6 | 7
+                                    messages.push(info.settings_menu[6].clone());
+                                    messages.push(info.settings_menu[5].clone());
+                                    messages.push(info.settings_menu[7].clone());
+                                },
+                            };
+                        }
                     },
                     READING_MENU => { // reader is reading
                         self.update_readers();
-                        match self.reader_info.len() {
-                            1 => {
-                                messages.push(format!("{:^20}", self.reader_info[0]));
-                                messages.push(format!("{:^20}", ""));
-                                messages.push(format!("{:^20}", ""));
-                            },
-                            2 => {
-                                messages.push(format!("{:^20}", self.reader_info[0]));
-                                messages.push(format!("{:^20}", ""));
-                                messages.push(format!("{:^20}", self.reader_info[1]));
-                            },
-                            3 => {
-                                messages.push(format!("{:^20}", self.reader_info[1]));
-                                messages.push(format!("{:^20}", self.reader_info[0]));
-                                messages.push(format!("{:^20}", self.reader_info[2]));
-                            },
-                            _ => {
-                                let mut first = 0;
-                                let mut second = 1;
-                                let mut third = 2;
-                                let current_selection = self.current_menu[1] as usize;
-                                let max_ix = self.reader_info.len() - 1;
-                                if current_selection > 1 {
-                                    if current_selection >= max_ix {
-                                        first = max_ix - 2;
-                                        second = max_ix - 1;
-                                        third = max_ix;
-                                    } else {
-                                        first = current_selection - 1;
-                                        second = current_selection;
-                                        third = current_selection + 1;
+                        if let Ok(info) = self.info.lock() {
+                            match info.reader_info.len() {
+                                1 => {
+                                    messages.push(format!("{:^20}", info.reader_info[0]));
+                                    messages.push(format!("{:^20}", ""));
+                                    messages.push(format!("{:^20}", ""));
+                                },
+                                2 => {
+                                    messages.push(format!("{:^20}", info.reader_info[0]));
+                                    messages.push(format!("{:^20}", ""));
+                                    messages.push(format!("{:^20}", info.reader_info[1]));
+                                },
+                                3 => {
+                                    messages.push(format!("{:^20}", info.reader_info[1]));
+                                    messages.push(format!("{:^20}", info.reader_info[0]));
+                                    messages.push(format!("{:^20}", info.reader_info[2]));
+                                },
+                                _ => {
+                                    let mut first = 0;
+                                    let mut second = 1;
+                                    let mut third = 2;
+                                    let current_selection = self.current_menu[1] as usize;
+                                    let max_ix = info.reader_info.len() - 1;
+                                    if current_selection > 1 {
+                                        if current_selection >= max_ix {
+                                            first = max_ix - 2;
+                                            second = max_ix - 1;
+                                            third = max_ix;
+                                        } else {
+                                            first = current_selection - 1;
+                                            second = current_selection;
+                                            third = current_selection + 1;
+                                        }
                                     }
+                                    messages.push(format!("{:^20}", info.reader_info[second]));
+                                    messages.push(format!("{:^20}", info.reader_info[first]));
+                                    messages.push(format!("{:^20}", info.reader_info[third]));
                                 }
-                                messages.push(format!("{:^20}", self.reader_info[second]));
-                                messages.push(format!("{:^20}", self.reader_info[first]));
-                                messages.push(format!("{:^20}", self.reader_info[third]));
                             }
                         }
                     },
