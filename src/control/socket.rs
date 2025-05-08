@@ -281,6 +281,12 @@ pub fn control_loop(
             if let Ok(mut j) = joiners.lock() {
                 j.push(t_joiner);
             }
+        } else {
+            if let Ok(mut screen) = screen.lock() {
+                if let Some(screen) = &mut *screen {
+                    screen.update_upload_status(uploader::Status::Stopped, 0);
+                }
+            }
         }
     };
 

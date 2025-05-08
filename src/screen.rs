@@ -124,17 +124,17 @@ impl CharacterDisplay {
     pub fn update_upload_status(&mut self, status: uploader::Status, err_count: usize) {
         if let Ok(mut info) = self.info.lock() {
             if err_count > 99 {
-                info.title_bar.replace_range(14..16, "99");
+                info.title_bar.replace_range(15..17, "99");
             } else if err_count > 0 {
-                info.title_bar.replace_range(14..16, format!("{:>2}", err_count).as_str());
+                info.title_bar.replace_range(15..17, format!("{:>2}", err_count).as_str());
             } else {
-                let mut upload_status = "?";
+                let mut upload_status = "??";
                 if status == Status::Running {
-                    upload_status = "+";
+                    upload_status = "++";
                 } else if status == Status::Stopped || status == Status::Stopping {
-                    upload_status = "-";
+                    upload_status = "--";
                 }
-                info.title_bar.replace_range(15..16, upload_status);
+                info.title_bar.replace_range(15..17, upload_status);
             }
         }
     }
@@ -143,11 +143,13 @@ impl CharacterDisplay {
         if let Ok(mut info) = self.info.lock() {
             if let Ok(control) = self.control.lock() {
                 if control.battery > 150 {
-                    info.title_bar.replace_range(17..20, "+++");
-                } else if control.battery >= 100 {
-                    info.title_bar.replace_range(17..20, "100");
+                    info.title_bar.replace_range(18..20, "++");
+                } else if control.battery >= 40 {
+                    info.title_bar.replace_range(18..20, "ok");
+                } else if control.battery >= 20 {
+                    info.title_bar.replace_range(18..20, "--");
                 } else {
-                    info.title_bar.replace_range(17..20, format!("{:>3}", control.battery).as_str());
+                    info.title_bar.replace_range(18..20, "xx");
                 }
             }
         }
@@ -156,7 +158,7 @@ impl CharacterDisplay {
     pub fn update_name(&mut self) {
         if let Ok(mut info) = self.info.lock() {
             if let Ok(control) = self.control.lock() {
-                info.title_bar.replace_range(0..13, format!("{:<13}", control.name).as_str());
+                info.title_bar.replace_range(0..14, format!("{:<14}", control.name).as_str());
             }
         }
     }
