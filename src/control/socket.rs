@@ -422,7 +422,7 @@ pub fn control_loop(
             }
         }
     }
-    notifier.send_notification(notifier::Notification::Stop);
+    notifier.send_notification(notifier::Notification::Shutdown);
     println!("Shutting down control thread.");
     println!("Stopping readers.");
     if let Ok(mut r) = readers.lock() {
@@ -2434,7 +2434,6 @@ fn handle_stream(
         }
     }
     write_disconnect(&stream);
-    notifier.send_notification(notifier::Notification::Shutdown);
     _ = stream.shutdown(Shutdown::Both);
     if let Ok(mut c_socks) = control_sockets.lock() {
         c_socks[index] = None;
