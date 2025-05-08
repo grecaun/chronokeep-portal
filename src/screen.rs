@@ -328,7 +328,10 @@ impl CharacterDisplay {
                                     self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 }
-                                _ => {}, // 2 = currently reading, do nothing, 4 = shutdown happening
+                                SHUTDOWN_MENU => {
+                                    self.current_menu[1] = (self.current_menu[1] + 1) % 2;
+                                },
+                                _ => {}, // 2 = currently reading, do nothing
                             }
                             self.current_menu[2] = 0; // current_menu[2] is only used for proper stop reading command
                             self.update_menu();
@@ -366,7 +369,10 @@ impl CharacterDisplay {
                                     self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 }
-                                _ => {}, // 2 = currently reading, do nothing, 4 = shutdown happening
+                                SHUTDOWN_MENU => {
+                                    self.current_menu[1] = (self.current_menu[1] + 1) % 2;
+                                },
+                                _ => {}, // 2 = currently reading, do nothing
                             }
                             self.current_menu[2] = 0;
                             self.update_menu();
