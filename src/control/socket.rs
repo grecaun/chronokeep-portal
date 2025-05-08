@@ -304,9 +304,11 @@ pub fn control_loop(
     }
 
     // Set screen on all the readers.
-    if let Ok(mut readers) = readers.lock() {
-        for reader in readers.iter_mut() {
+    if let Ok(mut u_readers) = readers.lock() {
+        for reader in u_readers.iter_mut() {
             reader.set_screen(screen.clone());
+            reader.set_control_sockets(control_sockets.clone());
+            reader.set_readers(readers.clone());
         }
     }
 
@@ -618,7 +620,7 @@ fn handle_stream(
                         repeaters[index] = sightings;
                     }
                     if let Ok(u_readers) = readers.try_lock() {
-                        no_error = write_connection_successful(&mut stream, name, reads, sightings, &u_readers, &uploader);
+                        no_error = write_connection_successful(&mut stream, name, reads, sightings, &*u_readers, &uploader);
                     } else {
                         no_error = write_error(&mut stream, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
                     }
@@ -633,7 +635,7 @@ fn handle_stream(
                             // for readers is not finished (or before it's started)
                             auto_connect::State::Waiting => {
                                 if let Ok(u_readers) = readers.lock() {
-                                    no_error = write_reader_list(&mut stream, &u_readers);
+                                    no_error = write_reader_list(&mut stream, &*u_readers);
                                 }
                             }
                             _ => {
@@ -692,11 +694,11 @@ fn handle_stream(
                                                                 if let Some(sock) = sock {
                                                                     // we might be writing to other sockets
                                                                     // so errors here shouldn't close our connection
-                                                                    _ = write_reader_list(&sock, &u_readers);
+                                                                    _ = write_reader_list(&sock, &*u_readers);
                                                                 }
                                                             }
                                                         } else {
-                                                            no_error = write_reader_list(&stream, &u_readers);
+                                                            no_error = write_reader_list(&stream, &*u_readers);
                                                         }
                                                     }
                                                 },
@@ -760,11 +762,11 @@ fn handle_stream(
                                             if let Some(sock) = sock {
                                                 // we might be writing to other sockets
                                                 // so errors here shouldn't close our connection
-                                                _ = write_reader_list(&sock, &u_readers);
+                                                _ = write_reader_list(&sock, &*u_readers);
                                             }
                                         }
                                     } else {
-                                        no_error = write_reader_list(&stream, &u_readers);
+                                        no_error = write_reader_list(&stream, &*u_readers);
                                     }
                                 }
                             }
@@ -800,7 +802,8 @@ fn handle_stream(
                                                     control_sockets.clone(),
                                                     read_repeaters.clone(),
                                                     sight_processor.clone(),
-                                                    screen.clone()
+                                                    screen.clone(),
+                                                    readers.clone(),
                                                 ) {
                                                     Ok(mut reader) => {
                                                         let reconnector = Reconnector::new(
@@ -852,16 +855,6 @@ fn handle_stream(
                                             no_error = write_error(&stream, errors::Errors::NotFound);
                                         }
                                     };
-                                    thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                    if let Ok(c_socks) = control_sockets.lock() {
-                                        for sock in c_socks.iter() {
-                                            if let Some(sock) = sock {
-                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
-                                            }
-                                        }
-                                    } else {
-                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
-                                    }
                                 }
                             }
                             _ => {
@@ -919,11 +912,11 @@ fn handle_stream(
                                     if let Ok(c_socks) = control_sockets.lock() {
                                         for sock in c_socks.iter() {
                                             if let Some(sock) = sock {
-                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                                no_error = write_reader_list(&sock, &*u_readers) && no_error;
                                             }
                                         }
                                     } else {
-                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
+                                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
                                     }
                                 }
                             }
@@ -956,6 +949,7 @@ fn handle_stream(
                                         let mut reader = u_readers.remove(ix);
                                         if reader.is_connected() != Some(true) {
                                             reader.set_control_sockets(control_sockets.clone());
+                                            reader.set_readers(readers.clone());
                                             reader.set_read_repeaters(read_repeaters.clone());
                                             reader.set_sight_processor(sight_processor.clone());
                                             reader.set_screen(screen.clone());
@@ -1000,11 +994,11 @@ fn handle_stream(
                                     if let Ok(c_socks) = control_sockets.lock() {
                                         for sock in c_socks.iter() {
                                             if let Some(sock) = sock {
-                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                                no_error = write_reader_list(&sock, &*u_readers) && no_error;
                                             }
                                         }
                                     } else {
-                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
+                                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
                                     }
                                 }
                             },
@@ -1062,11 +1056,11 @@ fn handle_stream(
                                     if let Ok(c_socks) = control_sockets.lock() {
                                         for sock in c_socks.iter() {
                                             if let Some(sock) = sock {
-                                                no_error = write_reader_list(&sock, &u_readers) && no_error;
+                                                no_error = write_reader_list(&sock, &*u_readers) && no_error;
                                             }
                                         }
                                     } else {
-                                        no_error = write_reader_list(&stream, &u_readers) && no_error;
+                                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
                                     }
                                 }
                             },
@@ -1090,7 +1084,7 @@ fn handle_stream(
                 },
                 requests::Request::ReaderGetAll => {
                     if let Ok(u_readers) = readers.lock() {
-                        no_error = write_reader_list(&stream, &u_readers) && no_error;
+                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
                     }
                 }
                 requests::Request::SettingsGet => {
@@ -1104,7 +1098,7 @@ fn handle_stream(
                         match sq.get_apis() {
                             Ok(apis) => {
                                 if let Ok(u_readers) = readers.lock() {
-                                    no_error = write_all_settings(&stream, &settings, &u_readers, &apis, uploader.status());
+                                    no_error = write_all_settings(&stream, &settings, &*u_readers, &apis, uploader.status());
                                 } else {
                                     no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error getting the readers mutex") });
                                 }
@@ -2656,7 +2650,7 @@ pub(crate) fn write_settings(
 fn write_all_settings(
     stream: &TcpStream,
     settings: &Vec<setting::Setting>,
-    u_readers: &MutexGuard<Vec<reader::Reader>>,
+    u_readers: &Vec<reader::Reader>,
     apis: &Vec<Api>,
     status: uploader::Status
 ) -> bool {
@@ -2724,7 +2718,7 @@ fn write_all_settings(
 
 pub fn write_reader_list(
     stream: &TcpStream,
-    u_readers: &MutexGuard<Vec<reader::Reader>>
+    u_readers: &Vec<reader::Reader>
 ) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
     for r in u_readers.iter() {
@@ -3085,7 +3079,7 @@ fn write_connection_successful(
     name: String,
     reads: bool,
     sightings: bool,
-    u_readers: &MutexGuard<Vec<reader::Reader>>,
+    u_readers: &Vec<reader::Reader>,
     uploader: &Arc<Uploader>
 ) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();

@@ -67,6 +67,7 @@ impl Reconnector {
                     let mut old_reader = readers.remove(ix);
                     println!("Reconnecting to reader {}.", old_reader.nickname());
                     old_reader.set_control_sockets(self.control_sockets.clone());
+                    old_reader.set_readers(self.readers.clone());
                     old_reader.set_read_repeaters(self.read_repeaters.clone());
                     old_reader.set_sight_processor(self.sight_processor.clone());
                     let reconnector = Reconnector::new(

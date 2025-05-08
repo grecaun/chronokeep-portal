@@ -522,6 +522,7 @@ impl CharacterDisplay {
                                                                 let mut reader = u_readers.remove(ix);
                                                                 if reader.is_connected() != Some(true) {
                                                                     reader.set_control_sockets(self.control_sockets.clone());
+                                                                    reader.set_readers(self.readers.clone());
                                                                     reader.set_read_repeaters(self.read_repeaters.clone());
                                                                     reader.set_sight_processor(self.sight_processor.clone());
                                                                     let reconnector = Reconnector::new(
@@ -557,15 +558,6 @@ impl CharacterDisplay {
                                                                     }
                                                                 }
                                                                 u_readers.push(reader);
-                                                            }
-                                                            println!("Notifying control sockets about change in status. (Start2)");
-                                                            thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                                            if let Ok(c_socks) = self.control_sockets.lock() {
-                                                                for sock in c_socks.iter() {
-                                                                    if let Some(sock) = sock {
-                                                                        _ = socket::write_reader_list(&sock, &u_readers);
-                                                                    }
-                                                                }
                                                             }
                                                         }
                                                     }
@@ -635,14 +627,6 @@ impl CharacterDisplay {
                                                                 }
                                                             }
                                                             u_readers.push(reader);
-                                                        }
-                                                        thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                                        if let Ok(c_socks) = self.control_sockets.lock() {
-                                                            for sock in c_socks.iter() {
-                                                                if let Some(sock) = sock {
-                                                                    _ = socket::write_reader_list(&sock, &u_readers);
-                                                                }
-                                                            }
                                                         }
                                                     }
                                                 },
@@ -804,6 +788,7 @@ impl CharacterDisplay {
                                                                 let mut reader = u_readers.remove(ix);
                                                                 if reader.is_connected() != Some(true) {
                                                                     reader.set_control_sockets(self.control_sockets.clone());
+                                                                    reader.set_readers(self.readers.clone());
                                                                     reader.set_read_repeaters(self.read_repeaters.clone());
                                                                     reader.set_sight_processor(self.sight_processor.clone());
                                                                     let reconnector = Reconnector::new(
@@ -840,15 +825,6 @@ impl CharacterDisplay {
                                                                     thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
                                                                 }
                                                                 u_readers.push(reader);
-                                                            }
-                                                            println!("Notifying control sockets about change in status. (Start)");
-                                                            thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                                            if let Ok(c_socks) = self.control_sockets.lock() {
-                                                                for sock in c_socks.iter() {
-                                                                    if let Some(sock) = sock {
-                                                                        _ = socket::write_reader_list(&sock, &u_readers);
-                                                                    }
-                                                                }
                                                             }
                                                         }
                                                     }

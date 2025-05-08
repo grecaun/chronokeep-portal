@@ -22,7 +22,7 @@ pub const ANTENNA_STATUS_NONE: u8 = 0;
 pub const ANTENNA_STATUS_DISCONNECTED: u8 = 1;
 pub const ANTENNA_STATUS_CONNECTED: u8 = 2;
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ReaderStatus {
     Disconnected,
     ConnectingKeepalive,
@@ -78,6 +78,8 @@ pub struct Reader {
     sight_processor: Option<Arc<processor::SightingsProcessor>>,
     #[serde(skip)]
     screen: Arc<Mutex<Option<CharacterDisplay>>>,
+    #[serde(skip)]
+    readers: Arc<Mutex<Vec<Reader>>>,
 }
 
 impl Reader {
@@ -106,6 +108,7 @@ impl Reader {
             sight_processor: None,
             antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
             screen: Arc::new(Mutex::new(None)),
+            readers: Arc::new(Mutex::new(Vec::new()))
         }
     }
 
@@ -138,6 +141,7 @@ impl Reader {
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
         sight_processor: Arc<processor::SightingsProcessor>,
         screen: Arc<Mutex<Option<CharacterDisplay>>>,
+        readers: Arc<Mutex<Vec<Reader>>>,
     ) -> Result<Reader, DBError> {
         match kind.as_str() {
             READER_KIND_ZEBRA => {
@@ -158,6 +162,7 @@ impl Reader {
                     sight_processor: Some(sight_processor),
                     antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
                     screen,
+                    readers
                 })
             },
             READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
@@ -224,6 +229,10 @@ impl Reader {
 
     pub fn set_sight_processor(&mut self, s_processor: Arc<processor::SightingsProcessor>) {
         self.sight_processor = Some(s_processor)
+    }
+
+    pub fn set_readers(&mut self, readers: Arc<Mutex<Vec<Reader>>>) {
+        self.readers = readers
     }
 
     pub fn set_screen(&mut self, screen: Arc<Mutex<Option<CharacterDisplay>>>) {

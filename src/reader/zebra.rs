@@ -80,8 +80,8 @@ pub fn connect(
             let t_read_saver = read_saver.clone();
             let t_reader_status = reader.status.clone();
             let t_reader_status_retries = reader.status_retries.clone();
-
             let t_control_sockets = reader.control_sockets.clone();
+            let t_readers = reader.readers.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
             let mut t_sight_processor = reader.sight_processor.clone();
             let t_reconnector = reconnector.clone();
@@ -570,6 +570,7 @@ pub fn connect(
                                                     match *stat {
                                                         ReaderStatus::ConnectingStartRospec => {
                                                             *stat = ReaderStatus::Connected;
+                                                            println!("-- Reader status set to connected.")
                                                             // inform control sockets of reader connection change?
                                                         }
                                                         _ => {
@@ -742,6 +743,7 @@ pub fn connect(
                             }
                         }
                     }
+                    let mut send_reader_list = false;
                     if let Ok(stat) = t_reader_status.lock()  {
                         // Check if we had a valid starting status and it's changed to Disconnected/Connected
                         // Then update the screen if we did.
@@ -758,10 +760,23 @@ pub fn connect(
                                 }
                                 break;
                             } else if *stat == ReaderStatus::Connected {
+                                send_reader_list = true;
                                 #[cfg(target_os = "linux")]
                                 if let Ok(mut screen_opt) = t_screen.lock() {
                                     if let Some(screen) = &mut *screen_opt {
                                         screen.update();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if send_reader_list {
+                        if let Ok(u_readers) = t_readers.lock() {
+                            if let Ok(c_socks) = t_control_sockets.lock() {
+                                for sock in c_socks.iter() {
+                                    if let Some(sock) = sock {
+                                        println!("Sending reader list!");
+                                        _ = socket::write_reader_list(&sock, &*u_readers);
                                     }
                                 }
                             }

@@ -2,7 +2,7 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::
 
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::sqlite, notifier, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
+use crate::{control::{self, socket::MAX_CONNECTED, sound::{SoundNotifier, SoundType}}, database::sqlite, notifier, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 60;
 
@@ -87,6 +87,7 @@ impl AutoConnector {
                 if reader.auto_connect() == AUTO_CONNECT_TRUE {
                     println!("Connecting to reader {}.", reader.nickname());
                     reader.set_control_sockets(self.control_sockets.clone());
+                    reader.set_readers(self.readers.clone());
                     reader.set_read_repeaters(self.read_repeaters.clone());
                     reader.set_sight_processor(self.sight_processor.clone());
                     let reconnector = Reconnector::new(
@@ -120,14 +121,6 @@ impl AutoConnector {
                             println!("Error connecting to reader: {e}");
                             unable_to_connect = true;
                         }
-                    }
-                }
-            }
-            println!("Sending reader updates to connected sockets.");
-            if let Ok(c_socks) = self.control_sockets.lock() {
-                for sock in c_socks.iter() {
-                    if let Some(sock) = sock {
-                        _ = socket::write_reader_list(&sock, &readers);
                     }
                 }
             }

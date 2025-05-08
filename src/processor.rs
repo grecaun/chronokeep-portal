@@ -5,12 +5,9 @@ use crate::{control::{socket::{self, MAX_CONNECTED}, SETTING_SIGHTING_PERIOD}, d
 pub struct SightingsProcessor {
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     sighting_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-
     sqlite: Arc<Mutex<sqlite::SQLite>>,
-
     keepalive: Arc<Mutex<bool>>,
     running: Arc<Mutex<bool>>,
-
     semaphore: Arc<(Mutex<bool>, Condvar)>
 }
 
