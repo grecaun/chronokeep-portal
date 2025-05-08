@@ -7,12 +7,14 @@ use ina219::SyncIna219;
 use rppal::i2c::I2c;
 
 use crate::control::Control;
+use crate::notifier::{self, Notifier};
 use crate::screen::CharacterDisplay;
 
 pub struct Checker {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
     screen: Arc<Mutex<Option<CharacterDisplay>>>,
+    notifier: Notifier,
 }
 
 impl Checker {
@@ -20,11 +22,13 @@ impl Checker {
         keepalive: Arc<Mutex<bool>>,
         control: Arc<Mutex<Control>>,
         screen: Arc<Mutex<Option<CharacterDisplay>>>,
+        notifier: Notifier,
     ) -> Self {
         Self {
             keepalive,
             control,
             screen,
+            notifier,
         }
     }
 
@@ -107,6 +111,11 @@ impl Checker {
             ((voltage - 10000) / 200) as u8
         };
         if let Ok(mut control) = self.control.lock() {
+            if control.battery > 30 && percentage <= 30 {
+                self.notifier.send_notification(notifier::Notification::BatteryLow);
+            } else if control.battery > 15 && percentage <= 15 {
+                self.notifier.send_notification(notifier::Notification::BatteryUnknown);
+            }
             control.battery = percentage;
         }
         #[cfg(target_os = "linux")]

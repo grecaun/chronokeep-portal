@@ -6,7 +6,7 @@ use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{battery, control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
+use crate::{battery, control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
 
 use self::notifications::Notification;
 
@@ -270,8 +270,18 @@ pub fn control_loop(
         }
     };
 
+    // Start a thread to enable notifications.
+    let notifier = Notifier::new(keepalive.clone(), control.clone());
+    let mut t_notifier = notifier.clone();
+    let n_joiner = thread::spawn(move|| {
+        t_notifier.run();
+    });
+    if let Ok(mut j) = joiners.lock() {
+        j.push(n_joiner);
+    }
+
     // Start our code to check the battery level.
-    let bat_check = battery::Checker::new(keepalive.clone(), control.clone(), screen.clone());
+    let bat_check = battery::Checker::new(keepalive.clone(), control.clone(), screen.clone(), notifier.clone());
     let b_joiner = thread::spawn(move|| {
         bat_check.run();
     });
@@ -292,6 +302,8 @@ pub fn control_loop(
             control.sound_board.play_started(control.volume);
         }
     }
+
+    notifier.send_notification(notifier::Notification::Start);
 
     loop {
         if let Ok(ka) = keepalive.lock() {
@@ -394,6 +406,7 @@ pub fn control_loop(
             }
         }
     }
+    notifier.send_notification(notifier::Notification::Stop);
     println!("Shutting down control thread.");
     println!("Stopping readers.");
     if let Ok(mut r) = readers.lock() {

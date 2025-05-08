@@ -114,10 +114,6 @@ impl CharacterDisplay {
         }
     }
 
-    pub fn set_control_sockets(&mut self, sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>) {
-        self.control_sockets = sockets;
-    }
-
     pub fn set_shutdown(&mut self) {
         self.current_menu[0] = SCREEN_OFF;
     }

@@ -24,7 +24,7 @@ pub mod processor;
 pub mod sound_board;
 pub mod screen;
 pub mod buttons;
-pub mod notifications;
+pub mod notifier;
 pub mod battery;
 
 const CONTROL_TYPE: &str = "socket";
