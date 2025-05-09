@@ -51,8 +51,8 @@ impl Notifier {
 
     pub fn run(&mut self) {
         let http_client: reqwest::blocking::Client;
-        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30))
-                                    .connect_timeout(Duration::from_secs(30)).build() {
+        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(10))
+                                    .connect_timeout(Duration::from_secs(10)).build() {
             Ok(client) => {
                 http_client = client;
             },
@@ -72,11 +72,13 @@ impl Notifier {
             let mut waiting = lock.lock().unwrap();
             let mut result: WaitTimeoutResult;
             while *waiting {
-                (waiting, result) = cvar.wait_timeout(waiting, Duration::from_secs(15)).unwrap();
+                (waiting, result) = cvar.wait_timeout(waiting, Duration::from_secs(30)).unwrap();
                 if result.timed_out() {
                     break;
                 }
             }
+            *waiting = true;
+            drop(waiting);
             let mut work_list: Vec<Notification> = vec!();
             if let Ok(mut notifications) = self.notifications.lock() {
                 work_list.append(&mut *notifications);

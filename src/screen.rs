@@ -294,6 +294,8 @@ impl CharacterDisplay {
             while *waiting {
                 waiting = cvar.wait(waiting).unwrap();
             }
+            *waiting = true;
+            drop(waiting);
             if let Ok(mut presses) = self.button_presses.clone().try_lock() {
                 for press in &*presses {
                     match press {
@@ -1090,7 +1092,6 @@ impl CharacterDisplay {
                     let _ = write!(lcd, "{msg}");
                 }
             }
-            *waiting = true;
         }
         #[cfg(target_os = "linux")]
         {
