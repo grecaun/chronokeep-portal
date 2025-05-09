@@ -72,7 +72,7 @@ if ! [[ -e ${PORTAL_DEST} ]]; then
     echo "------------------------------------------------"
     sudo mkdir ${PORTAL_DEST}
 fi;
-if ![[ -e ${PORTAL_DEST}logs/ ]]; then
+if ! [[ -e ${PORTAL_DEST}logs/ ]]; then
     echo "----------- Creating logs directory. -----------"
     echo "------------------------------------------------"
     sudo mkdir ${PORTAL_DEST}logs/
@@ -85,6 +85,13 @@ if ! [[ -e ${PORTAL_DEST}run.sh ]]; then
     echo | sudo tee -a ${PORTAL_DEST}run.sh
     echo "export PORTAL_UPDATE_SCRIPT=\"${PORTAL_DEST}update.sh\"" | sudo tee -a ${PORTAL_DEST}run.sh
     echo "export PORTAL_DATABASE_PATH=\"${PORTAL_DEST}chronokeep-portal.sqlite\"" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_SCREEN_BUS=1" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_LEFT_BUTTON=11" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_UP_BUTTON=5" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_DOWN_BUTTON=6" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_RIGHT_BUTTON=13" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_ENTER_BUTTON=26" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "export PORTAL_ZEBRA_SHIFT=True" | sudo tee -a ${PORTAL_DEST}run.sh
     echo | sudo tee -a ${PORTAL_DEST}run.sh
     echo "now=`date +\"%Y-%m-%d\"`"
     echo "${PORTAL_DEST}chronokeep-portal | ts '[%Y-%m-%d %H:%M:%S]' >> ${PORTAL_DEST}logs/\${now}-portal.log 2>&1" | sudo tee -a ${PORTAL_DEST}run.sh
