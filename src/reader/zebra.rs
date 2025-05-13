@@ -136,69 +136,69 @@ pub fn connect(
                                         llrp::message_types::SET_READER_CONFIG_RESPONSE => {
                                             attempt += 1;
                                             if let Ok(mut stat) = t_reader_status.lock() {
-                                            if success {
-                                                attempt = 0;
-                                                match *stat {
-                                                    ReaderStatus::ConnectingKeepalive => {
-                                                        *stat = ReaderStatus::ConnectingPurgeTags;
-                                                        match send_purge_tags(&mut t_stream, &msg_id) {
-                                                            Ok(_) => {
-                                                                println!("-- Purge Tags request on connection sent.")
-                                                            },
-                                                            Err(e) => {
-                                                                *stat = ReaderStatus::Disconnected;
-                                                                eprintln!("error sending purge tags message: {e}")
-                                                            },
-                                                        }
-                                                    },
-                                                    ReaderStatus::ConnectingSetNoFilter => {
-                                                        *stat = ReaderStatus::ConnectingSetReaderConfig;
-                                                        match send_set_reader_config(&mut t_stream, &msg_id) {
-                                                            Ok(_) => {
-                                                                println!("-- Set Reader Config request on connection sent.")
-                                                            },
-                                                            Err(e) => {
-                                                                *stat = ReaderStatus::Disconnected;
-                                                                eprintln!("error sending set reader config message: {e}")
-                                                            },
-                                                        }
-                                                    },
-                                                    ReaderStatus::ConnectingSetReaderConfig => {
-                                                        *stat = ReaderStatus::ConnectingDeleteAccessSpec;
-                                                        // ENABLE_EVENTS_AND_REPORTS and GET_READER_CONFIG fail to report success from the reader
-                                                        match send_enable_events_and_reports(&mut t_stream, &msg_id) {
-                                                            Ok(_) => {
-                                                                println!("-- Send Enable Events and Reports request on connection sent.")
-                                                            },
-                                                            Err(e) => {
-                                                                *stat = ReaderStatus::Disconnected;
-                                                                eprintln!("error sending enable events and reports message: {e}")
-                                                            },
-                                                        }
-                                                        match send_get_reader_config(&mut t_stream, &msg_id) {
-                                                            Ok(_) => {
-                                                                println!("-- Get Reader Config request on connection sent.")
-                                                            },
-                                                            Err(e) => {
-                                                                *stat = ReaderStatus::Disconnected;
-                                                                eprintln!("error sending get reader config message: {e}")
-                                                            },
-                                                        }
-                                                        match send_delete_access_spec(&mut t_stream, &msg_id) {
-                                                            Ok(_) => {
-                                                                println!("-- Delete Access Spec request on connection sent.")
-                                                            },
-                                                            Err(e) => {
-                                                                *stat = ReaderStatus::Disconnected;
-                                                                eprintln!("error sending delete access spec message: {e}")
-                                                            },
-                                                        }
-                                                    },
-                                                    _ => {
-                                                        *stat = ReaderStatus::Disconnected;
-                                                        println!("unknown reader status while processing SET_READER_CONFIG_RESPONSE")
-                                                    },
-                                                }
+                                                if success {
+                                                    attempt = 0;
+                                                    match *stat {
+                                                        ReaderStatus::ConnectingKeepalive => {
+                                                            *stat = ReaderStatus::ConnectingPurgeTags;
+                                                            match send_purge_tags(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Purge Tags request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending purge tags message: {e}")
+                                                                },
+                                                            }
+                                                        },
+                                                        ReaderStatus::ConnectingSetNoFilter => {
+                                                            *stat = ReaderStatus::ConnectingSetReaderConfig;
+                                                            match send_set_reader_config(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Set Reader Config request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending set reader config message: {e}")
+                                                                },
+                                                            }
+                                                        },
+                                                        ReaderStatus::ConnectingSetReaderConfig => {
+                                                            *stat = ReaderStatus::ConnectingDeleteAccessSpec;
+                                                            // ENABLE_EVENTS_AND_REPORTS and GET_READER_CONFIG fail to report success from the reader
+                                                            match send_enable_events_and_reports(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Send Enable Events and Reports request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending enable events and reports message: {e}")
+                                                                },
+                                                            }
+                                                            match send_get_reader_config(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Get Reader Config request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending get reader config message: {e}")
+                                                                },
+                                                            }
+                                                            match send_delete_access_spec(&mut t_stream, &msg_id) {
+                                                                Ok(_) => {
+                                                                    println!("-- Delete Access Spec request on connection sent.")
+                                                                },
+                                                                Err(e) => {
+                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    eprintln!("error sending delete access spec message: {e}")
+                                                                },
+                                                            }
+                                                        },
+                                                        _ => {
+                                                            *stat = ReaderStatus::Disconnected;
+                                                            println!("unknown reader status while processing SET_READER_CONFIG_RESPONSE")
+                                                        },
+                                                    }
                                                 } else {
                                                     if attempt > 5 {
                                                         *stat = ReaderStatus::Disconnected;
@@ -816,7 +816,10 @@ pub fn connect(
 
 fn send_delete_access_spec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // delete all access spec
@@ -825,18 +828,15 @@ fn send_delete_access_spec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_delete_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // delete all rospec
@@ -845,18 +845,15 @@ fn send_delete_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_add_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // add rospec
@@ -865,18 +862,15 @@ fn send_add_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_enable_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // enable rospec
@@ -885,18 +879,15 @@ fn send_enable_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_start_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // start rospec
@@ -904,12 +895,6 @@ fn send_start_rospec(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>)
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
-    }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
     }
     return Ok(())
 }
@@ -1095,17 +1080,15 @@ fn process_tags(
     };
     // get the read window from 1/10 of a second to milliseconds
     let mut window = (defaults::DEFAULT_READ_WINDOW as u128) * 100000;
+    let mut chip_type = String::from(defaults::DEFAULT_CHIP_TYPE);
     if let Ok(control) = control.lock() {
         window = (control.read_window as u128) * 100000;
+        control.chip_type.clone_into(&mut chip_type);
     }
     let one_second = 1000000;
     // sort tags so the earliest seen are first
     tags.sort_by(|a, b| a.portal_time.cmp(&b.portal_time));
     let mut reads: Vec<read::Read> = Vec::new();
-    let mut chip_type = String::from(defaults::DEFAULT_CHIP_TYPE);
-    if let Ok(control) = control.lock() {
-        control.chip_type.clone_into(&mut chip_type);
-    }
     for tag in tags {
         // check if the map contains the tag
         if map.contains_key(&tag.tag) {
@@ -1263,7 +1246,10 @@ fn finalize(
 
 fn send_set_keepalive(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // set reader configuration     - set keepalive
@@ -1272,18 +1258,15 @@ fn send_set_keepalive(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // purge tags
@@ -1292,18 +1275,15 @@ fn send_purge_tags(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_set_no_filter(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // purge tags
@@ -1312,18 +1292,15 @@ fn send_set_no_filter(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_set_reader_config(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // set reader configuration     - normal config
@@ -1332,18 +1309,15 @@ fn send_set_reader_config(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 fn send_enable_events_and_reports(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // enable events and reports
@@ -1352,19 +1326,16 @@ fn send_enable_events_and_reports(tcp_stream: &mut TcpStream, msg_id: &Arc<sync:
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
-    }
     return Ok(())
 }
 
 
 fn send_get_reader_config(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u32>>) -> Result<(), &'static str> {
     let local_id = match msg_id.lock() {
-        Ok(id) => *id,
+        Ok(mut id) => {
+            *id += 1;
+            *id - 1
+        },
         Err(_) => 0,
     };
     // get antenna properties (config == 2)
@@ -1374,12 +1345,6 @@ fn send_get_reader_config(tcp_stream: &mut TcpStream, msg_id: &Arc<sync::Mutex<u
     match tcp_stream.write_all(&buf) {
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
-    }
-    // update message id
-    if let Ok(mut id) = msg_id.lock() {
-        *id += 1;
-    } else {
-        return Err("unable to get id lock")
     }
     return Ok(())
 }

@@ -182,7 +182,7 @@ impl Uploader {
             }
             // sleep for AUTO_UPLOAD_PAUSE seconds
             thread::sleep(Duration::from_secs(upload_pause));
-        }
+        } // end auto upload loop
         if let Ok(mut r) = self.status.lock() {
             *r = Status::Stopped;
         }

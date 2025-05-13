@@ -454,7 +454,9 @@ impl ReadSaver {
                 lock.lock().unwrap(),
                 |notify| *notify == false
             ) {
-                Ok(_) => {
+                Ok(mut notify) => {
+                    *notify = false; // we've been notified, reset semaphore to waiting state
+                    drop(notify);    // drop the semaphore so we don't block other threads that may have tried to save while we're working
                     // save reads if they exist
                     let mut tmp_reads = Vec::<read::Read>::new();
                     if let Ok(mut reads) = self.reads.lock() {
@@ -463,9 +465,7 @@ impl ReadSaver {
                     if tmp_reads.len() > 0 {
                         if let Ok(mut db) = self.sqlite.lock() {
                             match db.save_reads(&tmp_reads) {
-                                Ok(_num) => {
-                                    //println!("Saved {num} reads.");
-                                },
+                                Ok(_num) => { },
                                 Err(e) => {
                                     println!("Error saving reads. {e}");
                                     if let Ok(mut reads) = self.reads.lock() {
@@ -480,10 +480,6 @@ impl ReadSaver {
                     println!("unable to aquire semaphore: {e}");
                     break;
                 }
-            }
-            // set notify mutex to false since we've finished
-            if let Ok(mut notify) = lock.lock() {
-                *notify = false
             }
         }
         if let Ok(mut run) = self.running.lock() {
