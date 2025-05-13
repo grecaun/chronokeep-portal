@@ -1,19 +1,23 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ina219::address::Address;
 use ina219::SyncIna219;
 use rppal::i2c::I2c;
+use chrono::Utc;
+use std::net::TcpStream;
 
-use crate::control::Control;
-use crate::notifier;
-use crate::screen::CharacterDisplay;
+use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, screen::CharacterDisplay, notifier};
 
 pub struct Checker {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
     screen: Arc<Mutex<Option<CharacterDisplay>>>,
     notifier: notifier::Notifier,
+    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    sqlite: Arc<Mutex<sqlite::SQLite>>,
+    last_low: u64,
+    last_crit: u64,
 }
 
 impl Checker {
@@ -22,16 +26,22 @@ impl Checker {
         control: Arc<Mutex<Control>>,
         screen: Arc<Mutex<Option<CharacterDisplay>>>,
         notifier: notifier::Notifier,
+        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        sqlite: Arc<Mutex<sqlite::SQLite>>,
     ) -> Self {
         Self {
             keepalive,
             control,
             screen,
             notifier,
+            control_sockets,
+            sqlite,
+            last_low: 0,
+            last_crit: 0,
         }
     }
 
-    pub fn run(&self) {
+    pub fn run(&mut self) {
         println!("Starting battery checker thread.");
         if let Ok(device) = I2c::with_bus(1) {
             println!("I2C initialized.");
@@ -84,7 +94,7 @@ impl Checker {
         }
     }
 
-    fn set_percentage(&self, voltage: u16) {
+    fn set_percentage(&mut self, voltage: u16) {
         // Voltage is in mV, charging is ~ 14600
         // 100% - 13600
         //  90% - 13400
@@ -109,10 +119,18 @@ impl Checker {
             ((voltage - 10000) / 200) as u8
         };
         if let Ok(mut control) = self.control.lock() {
-            if control.battery > 30 && percentage <= 30 {
+            let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(t) => { t.as_secs() }
+                Err(_) => { 0 }
+            };
+            if control.battery > 30 && percentage <= 30 && now > self.last_low + 60 {
                 self.notifier.send_notification(notifier::Notification::BatteryLow);
-            } else if control.battery > 15 && percentage <= 15 {
-                self.notifier.send_notification(notifier::Notification::BatteryUnknown);
+                self.send_notification(APINotification::BatteryLow);
+                self.last_low = now;
+            } else if control.battery > 15 && percentage <= 15 && now > self.last_crit + 60 {
+                self.notifier.send_notification(notifier::Notification::BatteryCritical);
+                self.send_notification(APINotification::BatteryCritical);
+                self.last_crit = now;
             }
             control.battery = percentage;
         }
@@ -120,6 +138,37 @@ impl Checker {
             if let Some(screen) = &mut *screen_opt {
                 screen.update_battery();
                 screen.update();
+            }
+        }
+    }
+
+    fn send_notification(&self, notification: APINotification) {
+        let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+        if let Ok(c_socks) = self.control_sockets.lock() {
+            println!("notifying connected sockets");
+            for sock in c_socks.iter() {
+                if let Some(s) = sock {
+                    _ = socket::write_notification(&s, &notification, &time);
+                }
+            }
+        }
+        if let Ok(control) = self.control.lock() {
+            if control.auto_remote {
+                if let Ok(sq) = self.sqlite.lock() {
+                    match sq.get_apis() {
+                        Ok(apis) => {
+                            for api in apis {
+                                if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                    self.notifier.send_api_notification(&api, notification);
+                                    break;
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            println!("Error trying to get apis: {e}");
+                        }
+                    }
+                }
             }
         }
     }

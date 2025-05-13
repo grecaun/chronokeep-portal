@@ -292,7 +292,7 @@ pub fn control_loop(
 
     // Start our code to check the battery level.
     #[cfg(target_os = "linux")]
-    let bat_check = battery::Checker::new(keepalive.clone(), control.clone(), screen.clone(), notifier.clone());
+    let mut bat_check = battery::Checker::new(keepalive.clone(), control.clone(), screen.clone(), notifier.clone(), control_sockets.clone(), sqlite.clone());
     #[cfg(target_os = "linux")]
     let b_joiner = thread::spawn(move|| {
         #[cfg(target_os = "linux")]
@@ -2431,7 +2431,7 @@ fn get_available_port() -> u16 {
     }
 }
 
-fn write_notification(
+pub fn write_notification(
     stream: &TcpStream,
     notification: &notifications::APINotification,
     time: &String
