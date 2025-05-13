@@ -432,6 +432,14 @@ pub fn control_loop(
             _ = reader.disconnect();
         }
     }
+    if let Ok(c_socks) = control_sockets.lock() {
+        for sock in c_socks.iter() {
+            if let Some(sock) = sock {
+                _ = write_notification(&sock, &APINotification::ShuttingDown, &format!("now"));
+                _ = write_disconnect(&sock)
+            }
+        }
+    }
     println!("Stopping sightings processor.");
     sight_processor.stop();
     sight_processor.notify();
