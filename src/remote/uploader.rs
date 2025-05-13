@@ -1,5 +1,6 @@
 use std::{net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
 
+use reqwest::StatusCode;
 use serde::Serialize;
 
 use crate::{control::{socket::{write_uploader_status, MAX_CONNECTED}, Control}, database::{sqlite, Database}, defaults, network::api, objects::read, screen::CharacterDisplay};
@@ -123,34 +124,61 @@ impl Uploader {
             let mut to_upload: Vec<read::Read> = Vec::new();
             let mut upload_api: Option<api::Api> = None;
             // get our reads and then upload them
-            if let Ok(sq) = self.sqlite.lock() {
-                match sq.get_apis() {
-                    Ok(apis) => {
-                        let mut found = false;
-                        for api in apis {
-                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                found = true;
-                                upload_api = Some(api.clone());
-                                match sq.get_not_uploaded_reads() {
-                                    Ok(mut reads) => {
-                                        to_upload.append(&mut reads);
-                                    },
-                                    Err(e) => {
-                                        println!("Error getting reads to upload: {e}");
+            // check error count
+            // if there are 2 or more errors then don't try to grab the database mutex, instead check net first
+            // if the chronokeep results api health endpoint isn't reachable then the rest of the internet
+            // is probably not reachable
+            // one error could just be random, two means it's happened multiple times in a row
+            // and a check to the health endpoint is a quick way to save some work
+            let mut attempt_upload = true;
+            if err_count > 1 {
+                attempt_upload = false;
+                match http_client.get("https://api.chronokeep.com/health").send() {
+                    Ok(resp) => {
+                        match resp.status() {
+                            StatusCode::OK | StatusCode::NO_CONTENT => {
+                                attempt_upload = true;
+                            }
+                            _ => {
+                                err_count += 1;
+                            }
+                        }
+                    },
+                    Err(_) => {
+                        err_count += 1;
+                    }
+                }
+            }
+            if attempt_upload {
+                if let Ok(sq) = self.sqlite.lock() {
+                    match sq.get_apis() {
+                        Ok(apis) => {
+                            let mut found = false;
+                            for api in apis {
+                                if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                    found = true;
+                                    upload_api = Some(api.clone());
+                                    match sq.get_not_uploaded_reads() {
+                                        Ok(mut reads) => {
+                                            to_upload.append(&mut reads);
+                                        },
+                                        Err(e) => {
+                                            println!("Error getting reads to upload: {e}");
+                                        }
                                     }
+                                    // should only be one REMOTE or REMOTE_SELF type of API in the database
+                                    // so we can break
+                                    break;
                                 }
-                                // should only be one REMOTE or REMOTE_SELF type of API in the database
-                                // so we can break
+                            }
+                            if found == false {
+                                println!("No remote API set up.");
                                 break;
                             }
                         }
-                        if found == false {
-                            println!("No remote API set up.");
-                            break;
+                        Err(e) => {
+                            println!("Unable to get apis: {e}");
                         }
-                    }
-                    Err(e) => {
-                        println!("Unable to get apis: {e}");
                     }
                 }
             }
