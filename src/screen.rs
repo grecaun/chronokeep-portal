@@ -128,13 +128,13 @@ impl CharacterDisplay {
             } else if err_count > 0 {
                 info.title_bar.replace_range(14..16, format!("{:>2}", err_count).as_str());
             } else {
-                let mut upload_status = "?";
+                let mut upload_status = " ?";
                 if status == Status::Running {
-                    upload_status = "+";
+                    upload_status = " +";
                 } else if status == Status::Stopped || status == Status::Stopping {
-                    upload_status = "-";
+                    upload_status = " -";
                 }
-                info.title_bar.replace_range(15..16, upload_status);
+                info.title_bar.replace_range(14..16, upload_status);
             }
         }
     }
@@ -144,9 +144,9 @@ impl CharacterDisplay {
             if let Ok(control) = self.control.lock() {
                 if control.battery > 150 {
                     info.title_bar.replace_range(17..20, "chg");
-                } else if control.battery >= 40 {
-                    info.title_bar.replace_range(18..20, "ok");
-                } else if control.battery >= 20 {
+                } else if control.battery >= 30 {
+                    info.title_bar.replace_range(17..20, " ok");
+                } else if control.battery >= 15 {
                     info.title_bar.replace_range(17..20, "low");
                 } else {
                     info.title_bar.replace_range(17..20, "cri");

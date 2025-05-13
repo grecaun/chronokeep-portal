@@ -103,6 +103,7 @@ pub fn connect(
                 let mut purge_count: usize = 0;
                 let mut last_ka_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                 let mut reconnect = false;
+                let mut unsaved_reads: Vec<read::Read> = Vec::new();
                 loop {
                     /*
                         Start of reading loop
@@ -614,7 +615,7 @@ pub fn connect(
                                 t_sound.notify_one();
                                 count += data.tags.len();
                                 let mut tags = data.tags;
-                                match process_tags(&mut read_map, &mut tags, &t_control, &t_read_saver, t_reader_name.as_str()) {
+                                match process_tags(&mut read_map, &mut tags, &mut unsaved_reads, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                     Ok(new_reads) => {
                                         if new_reads.len() > 0 {
                                             match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -702,7 +703,7 @@ pub fn connect(
                                 }
                                 // TimedOut == Windows, WouldBlock == Linux
                                 ErrorKind::TimedOut | ErrorKind::WouldBlock => {
-                                    match process_tags(&mut read_map, &mut Vec::new(), &t_control, &t_read_saver, t_reader_name.as_str()) {
+                                    match process_tags(&mut read_map, &mut Vec::new(), &mut unsaved_reads, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                         Ok(new_reads) => {
                                             if new_reads.len() > 0 {
                                                 match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
@@ -789,6 +790,12 @@ pub fn connect(
                 stop(&mut t_stream, &t_reader_status, &t_reader_name, &msg_id);
                 finalize(&mut t_stream, &msg_id, &t_reader_status, last_ka_received_at);
                 save_reads(&mut read_map, &t_control, &t_sqlite, t_reader_name.as_str());
+                if let Ok(mut db) = t_sqlite.lock() {
+                    match db.save_reads(&unsaved_reads) {
+                        Ok(_num) => { },
+                        Err(e) => println!("Error saving reads. {e}"),
+                    }
+                }
                 if let Err(e) = t_stream.shutdown(Shutdown::Both) {
                     println!("Error shutting down socket. {e}");
                 }
@@ -991,7 +998,6 @@ fn save_reads(
         ));
     }
     if reads.len() > 0 {
-        
         match sqlite.lock() {
             Ok(mut db) => {
                 match db.save_reads(&reads) {
@@ -1078,6 +1084,7 @@ fn send_new(
 fn process_tags(
     map: &mut HashMap<u128, (u128, TagData)>,
     tags: &mut Vec<TagData>,
+    unsaved_reads: &mut Vec<read::Read>,
     control: &Arc<Mutex<control::Control>>,
     read_saver: &Arc<processor::ReadSaver>,
     r_name: &str
@@ -1187,10 +1194,14 @@ fn process_tags(
     for to_remove in removed {
         map.remove(&to_remove);
     }
-    if reads.len() > 0 {
+    if reads.len() > 0 || unsaved_reads.len() > 0 {
+        let cloned_reads = &mut reads.clone();
+        unsaved_reads.append(cloned_reads);
         // upload reads to database
-        if let Err(_) = read_saver.save_reads(&reads) {
+        if let Err(_) = read_saver.save_reads(unsaved_reads) {
             println!("something went wrong saving reads");
+        } else { // was able to add reads to save queue
+            unsaved_reads.clear();
         }
     }
     Ok(reads)
@@ -1203,12 +1214,6 @@ fn stop_reading(t_stream: &mut TcpStream, msg_id: u32) -> Result<(), &'static st
         Ok(_) => (),
         Err(_) => return Err("unable to write to stream"),
     }
-    // delete rospec
-    /*let msg = requests::delete_rospec(&(msg_id + 1), &0);
-    match t_stream.write_all(&msg) {
-        Ok(_) => (),
-        Err(_) => return Err("unable to write to stream"),
-    } */
     Ok(())
 }
 

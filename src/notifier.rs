@@ -1,8 +1,9 @@
 use std::{sync::{Arc, Condvar, Mutex, WaitTimeoutResult}, time::Duration};
 
-use reqwest::header::HeaderMap;
+use chrono::Utc;
+use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 
-use crate::control::Control;
+use crate::{control::{socket::notifications::APINotification, Control}, network::api::Api, objects::notification::RemoteNotification, remote};
 
 #[derive(Clone, Debug)]
 pub enum Notification {
@@ -23,6 +24,7 @@ pub struct Notifier {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
     notifications: Arc<Mutex<Vec<Notification>>>,
+    api_notifications: Arc<Mutex<Vec<(Api, APINotification)>>>,
     waiter: Arc<(Mutex<bool>, Condvar)>,
 }
 
@@ -35,6 +37,7 @@ impl Notifier {
             keepalive,
             control,
             notifications: Arc::new(Mutex::new(vec!())),
+            api_notifications: Arc::new(Mutex::new(vec!())),
             waiter: Arc::new((Mutex::new(true), Condvar::new())),
         }
     }
@@ -49,10 +52,20 @@ impl Notifier {
         cvar.notify_one();
     }
 
+    pub fn send_api_notification(&self, api: &Api, note: APINotification) {
+        if let Ok(mut notifications) = self.api_notifications.lock() {
+            notifications.push((api.clone(), note));
+        }
+        let (lock, cvar) = &*self.waiter;
+        let mut waiting = lock.lock().unwrap();
+        *waiting = false;
+        cvar.notify_one();
+    }
+
     pub fn run(&mut self) {
         let http_client: reqwest::blocking::Client;
-        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(10))
-                                    .connect_timeout(Duration::from_secs(10)).build() {
+        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
+                                    .connect_timeout(Duration::from_secs(5)).build() {
             Ok(client) => {
                 http_client = client;
             },
@@ -84,7 +97,6 @@ impl Notifier {
                 work_list.append(&mut *notifications);
             }
             for note in work_list.iter() {
-                println!("Notification received: {:?}", note);
                 let mut name = String::from("Chronokeep Portal");
                 let mut url = String::from("");
                 let mut topic = String::from("");
@@ -169,6 +181,34 @@ impl Notifier {
                         };
                 }
             };
+            let mut api_list: Vec<(Api, APINotification)> = vec!();
+            if let Ok(mut notifications) = self.api_notifications.lock() {
+                api_list.append(&mut notifications);
+            }
+            for (api, note) in api_list.iter() {
+                let url = api.uri();
+                let _ = match http_client.post(format!("{url}notifications/save"))
+                    .headers(construct_api_headers(api.token()))
+                    .json(&remote::requests::SaveNotificationRequest {
+                        notification: RemoteNotification {
+                            kind: note.clone(),
+                            when: Utc::now().naive_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+                        }
+                    })
+                    .send() {
+                        Ok(response) => {
+                            match response.status() {
+                                reqwest::StatusCode::OK | reqwest::StatusCode::NO_CONTENT => {},
+                                default => {
+                                    println!("invalid status code returned: {default}")
+                                },
+                            }
+                        },
+                        Err(e) => {
+                            println!("error trying to talk to api: {e}")
+                        }
+                    };
+            }
         } // end loop
     }
 }
@@ -177,5 +217,12 @@ fn construct_headers(priority: u8, tag: String) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert("X-Priority", format!("{}", priority).parse().unwrap());
     headers.insert("X-Tags", tag.parse().unwrap());
+    headers
+}
+
+fn construct_api_headers(key: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
+    headers.insert(AUTHORIZATION, format!("Bearer {key}").parse().unwrap());
     headers
 }

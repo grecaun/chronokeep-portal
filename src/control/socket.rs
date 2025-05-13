@@ -8,9 +8,9 @@ use chrono::{Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{bibchip, event::Event, notification::RemoteNotification, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{bibchip, event::Event, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
 
-use self::notifications::Notification;
+use self::notifications::APINotification;
 
 use super::{sound::SoundNotifier, zero_conf::ZeroConf};
 
@@ -436,9 +436,6 @@ pub fn control_loop(
     sight_processor.stop();
     sight_processor.notify();
     println!("Finished control thread shutdown.");
-    let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(30))
-        .connect_timeout(Duration::from_secs(30)).build()
-        .unwrap_or(reqwest::blocking::Client::new());
     if let Ok(control) = control.lock() {
         if control.auto_remote {
             if let Ok(sq) = sqlite.lock() {
@@ -446,13 +443,7 @@ pub fn control_loop(
                     Ok(apis) => {
                         for api in apis {
                             if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                //println!("Uploading notification ({}) to {}", notification, api.nickname());
-                                match save_remote_notification(&http_client, &api, &Notification::ShuttingDown) {
-                                    Ok(()) => {},
-                                    Err(e) => {
-                                        println!("Error trying to send notification to remote api: {:?}", e);
-                                    }
-                                }
+                                notifier.send_api_notification(&api, APINotification::ShuttingDown);
                                 break;
                             }
                         }
@@ -2364,13 +2355,7 @@ fn handle_stream(
                                             Ok(apis) => {
                                                 for api in apis {
                                                     if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                                        //println!("Uploading notification ({}) to {}", notification, api.nickname());
-                                                        match save_remote_notification(&http_client, &api, &notification) {
-                                                            Ok(()) => {},
-                                                            Err(e) => {
-                                                                println!("Error trying to send notification to remote api: {:?}", e);
-                                                            }
-                                                        }
+                                                        notifier.send_api_notification(&api, notification);
                                                         break;
                                                     }
                                                 }
@@ -2448,7 +2433,7 @@ fn get_available_port() -> u16 {
 
 fn write_notification(
     stream: &TcpStream,
-    notification: &notifications::Notification,
+    notification: &notifications::APINotification,
     time: &String
 ) -> bool {
     match serde_json::to_writer(stream, &responses::Responses::Notification {
@@ -3361,36 +3346,6 @@ fn construct_headers(key: &str) -> HeaderMap {
     headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
     headers.insert(AUTHORIZATION, format!("Bearer {key}").parse().unwrap());
     headers
-}
-
-pub fn save_remote_notification(
-    http_client: &reqwest::blocking::Client,
-    api: &Api,
-    notification: &Notification
-) -> Result<(), errors::Errors> {
-    let url = api.uri();
-    let response = match http_client.post(format!("{url}notifications/save"))
-        .headers(construct_headers(api.token()))
-        .json(&remote::requests::SaveNotificationRequest {
-            notification: RemoteNotification {
-                kind: notification.clone(),
-                when: Utc::now().naive_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-            }
-        })
-        .send() {
-            Ok(resp) => resp,
-            Err(e) => {
-                println!("error trying to talk to api: {e}");
-                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
-            }
-        };
-        match response.status() {
-            reqwest::StatusCode::OK | reqwest::StatusCode::NO_CONTENT => {},
-            default => {
-                return Err(errors::Errors::ServerError { message: format!("invalid status code returned: {default}") })
-            },
-        }
-        Ok(())
 }
 
 pub fn upload_reads(

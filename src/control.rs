@@ -62,6 +62,18 @@ impl Control {
         if self.upload_interval != new_control.upload_interval {
             self.upload_interval = new_control.upload_interval   
         }
+        if self.ntfy_url != new_control.ntfy_url {
+            self.ntfy_url = new_control.ntfy_url   
+        }
+        if self.ntfy_user != new_control.ntfy_user {
+            self.ntfy_user = new_control.ntfy_user   
+        }
+        if self.ntfy_pass != new_control.ntfy_pass {
+            self.ntfy_pass = new_control.ntfy_pass   
+        }
+        if self.ntfy_topic != new_control.ntfy_topic {
+            self.ntfy_topic = new_control.ntfy_topic   
+        }
         if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
             return self.sound_board.change_voice(new_control.sound_board.get_voice())
         }

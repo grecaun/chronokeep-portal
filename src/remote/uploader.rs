@@ -94,7 +94,7 @@ impl Uploader {
                 if let Ok(mut r) = self.status.lock() {
                     *r = Status::Stopped;
                     // let everyone know we're stopped
-                    self.update_control_socks(err_count);
+                    self.update_control_socks(0);
                 }
                 println!("Unable to get our http client. Auto upload terminating.");
                 return;
@@ -168,9 +168,10 @@ impl Uploader {
                     }
                     if e_count > 0 {
                         err_count += e_count;
-
+                        self.update_control_socks(err_count);
                     } else if err_count != 0 {
                         err_count = 0;
+                        self.update_control_socks(err_count);
                     }
                 }
             }

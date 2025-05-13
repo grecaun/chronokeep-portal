@@ -1,6 +1,5 @@
 use crate::{control::socket, network::api, objects::read};
 
-
 pub fn upload_all_reads(
     http_client: &reqwest::blocking::Client,
     api: &api::Api,

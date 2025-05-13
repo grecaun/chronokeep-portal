@@ -399,7 +399,7 @@ impl ReadSaver {
     }
 
     pub fn save_reads(&self, in_reads: &Vec<read::Read>) -> Result<(), &str> {
-        if let Ok(mut reads) = self.reads.lock() {
+        if let Ok(mut reads) = self.reads.try_lock() {
             reads.append(&mut in_reads.clone());
         } else {
             return Err("error getting reads mutext")

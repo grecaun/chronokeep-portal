@@ -128,7 +128,7 @@ pub enum Request {
     // Request to update the software.
     Update,
     SetNoficiation {
-        kind: notifications::Notification,
+        kind: notifications::APINotification,
     },
 }
 

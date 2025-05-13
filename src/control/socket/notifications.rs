@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all="SCREAMING_SNAKE_CASE")]
-pub enum Notification {
+pub enum APINotification {
     UpsDisconnected,
     UpsConnected,
     UpsOnBattery,
@@ -12,4 +12,6 @@ pub enum Notification {
     Restarting,
     HighTemp,
     MaxTemp,
+    BatteryLow,
+    BatteryCritical,
 }
