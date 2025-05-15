@@ -6,6 +6,8 @@ use ina219::SyncIna219;
 use rppal::i2c::I2c;
 use chrono::Utc;
 use std::net::TcpStream;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, screen::CharacterDisplay, notifier};
 
@@ -43,6 +45,8 @@ impl Checker {
 
     pub fn run(&mut self) {
         println!("Starting battery checker thread.");
+        let start = SystemTime::now();
+        let mut file = OpenOptions::new().append(true).create(true).open("/portal/logs/battery.txt").expect("Unable to open file.");
         if let Ok(device) = I2c::with_bus(1) {
             println!("I2C initialized.");
             if let Ok(mut ina) = SyncIna219::new(device, Address::from_byte(0x40).unwrap()) {
@@ -68,6 +72,15 @@ impl Checker {
                             thread::sleep(conversion_time);
                             if let Ok(Some(_)) = ina.next_measurement() {
                                 if let Ok(voltage) = ina.bus_voltage() {
+                                    match start.elapsed() {
+                                        Ok(t) => {
+                                            match writeln!(&mut file, "{} - Voltage: {}", t.as_secs(), voltage) {
+                                                Ok(_) => {}
+                                                Err(e) => { println!("Error trying to write to file. {e}") }
+                                            }
+                                        },
+                                        Err(_) => { }
+                                    }
                                     self.set_percentage(voltage.voltage_mv());
                                 } else {
                                     println!("Error checking voltage.");
@@ -95,7 +108,7 @@ impl Checker {
     }
 
     fn set_percentage(&mut self, voltage: u16) {
-        // Voltage is in mV, charging is ~ 14600
+        // Voltage is in mV, charging is > 14000 ?
         // 100% - 13600
         //  90% - 13400
         //  80% - 13300
@@ -118,11 +131,11 @@ impl Checker {
         } else { // 0% to 10%, each 200 mV is 1%
             ((voltage - 10000) / 200) as u8
         };
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(t) => { t.as_secs() }
+            Err(_) => { 0 }
+        };
         if let Ok(mut control) = self.control.lock() {
-            let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Ok(t) => { t.as_secs() }
-                Err(_) => { 0 }
-            };
             if control.battery > 30 && percentage <= 30 && now > self.last_low + 60 {
                 self.notifier.send_notification(notifier::Notification::BatteryLow);
                 self.send_notification(APINotification::BatteryLow);

@@ -142,7 +142,7 @@ impl CharacterDisplay {
     pub fn update_battery(&mut self) {
         if let Ok(mut info) = self.info.lock() {
             if let Ok(control) = self.control.lock() {
-                if control.battery > 150 {
+                if control.battery > 135 {
                     info.title_bar.replace_range(17..20, "chg");
                 } else if control.battery >= 30 {
                     info.title_bar.replace_range(17..20, " ok");

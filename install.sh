@@ -93,7 +93,7 @@ if ! [[ -e ${PORTAL_DEST}run.sh ]]; then
     echo "export PORTAL_ENTER_BUTTON=26" | sudo tee -a ${PORTAL_DEST}run.sh
     echo "export PORTAL_ZEBRA_SHIFT=True" | sudo tee -a ${PORTAL_DEST}run.sh
     echo | sudo tee -a ${PORTAL_DEST}run.sh
-    echo "now=`date +\"%Y-%m-%d\"`"
+    echo "now=\`date +%Y-%m-%d\`" | sudo tee -a ${PORTAL_DEST}run.sh
     echo "${PORTAL_DEST}chronokeep-portal | ts '[%Y-%m-%d %H:%M:%S]' >> ${PORTAL_DEST}logs/\${now}-portal.log 2>&1" | sudo tee -a ${PORTAL_DEST}run.sh
     sudo chown $USER:root ${PORTAL_DEST}run.sh
     sudo chmod +x ${PORTAL_DEST}run.sh
