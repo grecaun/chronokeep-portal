@@ -1,14 +1,17 @@
 use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
 
 #[cfg(target_os = "linux")]
+use std::time::SystemTime;
+#[cfg(target_os = "linux")]
 use std::fmt::Write;
+#[cfg(target_os = "linux")]
+use chrono::{DateTime, Local};
 #[cfg(target_os = "linux")]
 use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 #[cfg(target_os = "linux")]
 use rppal::{hal, i2c::I2c};
-use std::sync::Condvar;
 
-use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -33,6 +36,7 @@ pub const SETTINGS_VOLUME: u8 = 4;
 pub const SETTINGS_VOICE: u8 = 5;
 pub const SETTINGS_AUTO_UPLOAD: u8 = 6;
 pub const SETTINGS_UPLOAD_INTERVAL: u8 = 7;
+pub const SETTINGS_ENABLE_NTFY: u8 = 8;
 
 #[derive(Clone)]
 pub struct CharacterDisplay {
@@ -43,7 +47,6 @@ pub struct CharacterDisplay {
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     sight_processor: Arc<SightingsProcessor>,
-    waiter: Arc<(Mutex<bool>, Condvar)>,
     button_presses: Arc<Mutex<Vec<ButtonPress>>>,
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
@@ -94,7 +97,6 @@ impl CharacterDisplay {
             control_sockets,
             read_repeaters,
             sight_processor,
-            waiter: Arc::new((Mutex::new(true), Condvar::new())),
             button_presses: Arc::new(Mutex::new(Vec::new())),
             info: Arc::new(Mutex::new(DisplayInfo {
                 title_bar: format!("{:<20}", "Chronokeep"),
@@ -151,14 +153,6 @@ impl CharacterDisplay {
                 } else {
                     info.title_bar.replace_range(17..20, "cri");
                 }
-            }
-        }
-    }
-
-    pub fn update_name(&mut self) {
-        if let Ok(mut info) = self.info.lock() {
-            if let Ok(control) = self.control.lock() {
-                info.title_bar.replace_range(0..13, format!("{:<13}", control.name).as_str());
             }
         }
     }
@@ -224,6 +218,10 @@ impl CharacterDisplay {
                 if control.auto_remote {
                     auto_upload = "yes";
                 }
+                let mut enable_ntfy = "no";
+                if control.enable_ntfy {
+                    enable_ntfy = "yes";
+                }
                 info.settings_menu.push(format!("   Sightings   {:>4} ", control.sighting_period));
                 info.settings_menu.push(format!("   Read Window {:>4} ", control.read_window));
                 info.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
@@ -232,6 +230,7 @@ impl CharacterDisplay {
                 info.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
                 info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
                 info.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
+                info.settings_menu.push(format!("   Enable NTFY {:>4} ", enable_ntfy));
             }
             for line in info.settings_menu.iter_mut() {
                 line.replace_range(1..2, " ");
@@ -271,8 +270,12 @@ impl CharacterDisplay {
             if let Err(e) = lcd.home() {
                 println!("Error homing cursor. {e}");
             }
-            self.update_name();
             if let Ok(info) = self.info.lock() {
+                let sys_time = SystemTime::now();
+                let date_time: DateTime<Local> = sys_time.into();
+                if let Ok(mut info) = self.info.lock() {
+                    info.title_bar.replace_range(0..13, format!("{:<13}", date_time.format("%m/%d %T")).as_str());
+                }
                 let mut messages: Vec<String> = vec!(info.title_bar.clone());
                 messages.push(info.main_menu[1].clone());
                 messages.push(info.main_menu[0].clone());
@@ -289,13 +292,6 @@ impl CharacterDisplay {
                     break;
                 }
             }
-            let (lock, cvar) = &*self.waiter.clone();
-            let mut waiting = lock.lock().unwrap();
-            while *waiting {
-                waiting = cvar.wait(waiting).unwrap();
-            }
-            *waiting = true;
-            drop(waiting);
             if let Ok(mut presses) = self.button_presses.clone().try_lock() {
                 for press in &*presses {
                     match press {
@@ -323,7 +319,7 @@ impl CharacterDisplay {
                                     if self.current_menu[1] > SETTINGS_SIGHTING_PERIOD {
                                         self.current_menu[1] -= 1;
                                     } else {
-                                        self.current_menu[1] = SETTINGS_UPLOAD_INTERVAL;
+                                        self.current_menu[1] = SETTINGS_ENABLE_NTFY;
                                     }
                                 }
                                 ABOUT_MENU | STARTUP_MENU => {
@@ -359,8 +355,8 @@ impl CharacterDisplay {
                                         }
                                     }
                                 }
-                                SETTINGS_MENU => { // settings menu, max ix 7
-                                    if self.current_menu[1] < SETTINGS_UPLOAD_INTERVAL {
+                                SETTINGS_MENU => { // settings menu, max ix 8 (SETTINGS_ENABLE_NTFY)
+                                    if self.current_menu[1] < SETTINGS_ENABLE_NTFY {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to 0
                                         self.current_menu[1] = SETTINGS_SIGHTING_PERIOD;
@@ -480,6 +476,14 @@ impl CharacterDisplay {
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
                                                             println!("Error saving setting: {e}");
                                                         }
+                                                    }
+                                                }
+                                            }
+                                            SETTINGS_ENABLE_NTFY => {  // Enable NTFY
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    control.enable_ntfy = !control.enable_ntfy;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_ENABLE_NTFY.to_string(), control.enable_ntfy.to_string())) {
+                                                        println!("Error saving setting: {e}");
                                                     }
                                                 }
                                             }
@@ -749,6 +753,14 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
+                                            SETTINGS_ENABLE_NTFY => {  // Enable NTFY
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    control.enable_ntfy = !control.enable_ntfy;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_ENABLE_NTFY.to_string(), control.enable_ntfy.to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
                                             _ => {}
                                         }
                                     }
@@ -955,6 +967,11 @@ impl CharacterDisplay {
             }
             #[cfg(target_os = "linux")]
             {
+                let sys_time = SystemTime::now();
+                let date_time: DateTime<Local> = sys_time.into();
+                if let Ok(mut info) = self.info.lock() {
+                    info.title_bar.replace_range(0..13, format!("{:<13}", date_time.format("%m/%d %T")).as_str());
+                }
                 let mut messages: Vec<String> = vec!();
                 if let Ok(info) = self.info.lock() {
                     messages.push(info.title_bar.clone())
@@ -1092,7 +1109,8 @@ impl CharacterDisplay {
                     let _ = write!(lcd, "{msg}");
                 }
             }
-        }
+            thread::sleep(Duration::from_millis(100));
+        } // End processing loop
         #[cfg(target_os = "linux")]
         {
             let _ = lcd.clear();
@@ -1105,20 +1123,6 @@ impl CharacterDisplay {
     pub fn register_button(&self, button: ButtonPress) {
         if let Ok(mut presses) = self.button_presses.try_lock() {
             presses.push(button);
-        }
-        let (lock, cvar) = &*self.waiter;
-        let mut waiting = lock.lock().unwrap();
-        *waiting = false;
-        cvar.notify_one();
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn update(&self) {
-        {
-            let (lock, cvar) = &*self.waiter;
-            let mut waiting = lock.lock().unwrap();
-            *waiting = false;
-            cvar.notify_one();
         }
     }
 }

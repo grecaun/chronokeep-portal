@@ -150,7 +150,6 @@ impl Checker {
         if let Ok(mut screen_opt) = self.screen.lock() {
             if let Some(screen) = &mut *screen_opt {
                 screen.update_battery();
-                screen.update();
             }
         }
     }

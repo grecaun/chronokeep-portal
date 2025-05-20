@@ -1,5 +1,6 @@
-use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
+use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
 
+use chrono::{DateTime, Local};
 use serde::{Serialize, Deserialize};
 
 use crate::{control::{self, socket::MAX_CONNECTED, sound::{SoundNotifier, SoundType}}, database::sqlite, notifier, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
@@ -127,9 +128,11 @@ impl AutoConnector {
         }
         println!("All done connecting to readers.");
         if unable_to_connect {
-            self.notifier.send_notification(notifier::Notification::UnableToStartReading);
+            let date_time: DateTime<Local> = SystemTime::now().into();
+            self.notifier.send_notification(notifier::Notification::UnableToStartReading, format!("{}", date_time.format("%Y/%m/%d %T")));
         } else {
-            self.notifier.send_notification(notifier::Notification::StartReading);
+            let date_time: DateTime<Local> = SystemTime::now().into();
+            self.notifier.send_notification(notifier::Notification::StartReading, format!("{}", date_time.format("%Y/%m/%d %T")));
         }
         self.sound.notify_custom(SoundType::StartupFinished);
         if let Ok(mut state) = self.state.lock() {

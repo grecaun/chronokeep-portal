@@ -4,7 +4,7 @@ use crate::buttons::Buttons;
 #[cfg(target_os = "linux")]
 use crate::battery;
 
-use chrono::{Local, TimeZone, Utc};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
@@ -319,7 +319,8 @@ pub fn control_loop(
         }
     }
 
-    notifier.send_notification(notifier::Notification::Start);
+    let date_time: DateTime<Local> = SystemTime::now().into();
+    notifier.send_notification(notifier::Notification::Start, format!("{}", date_time.format("%Y/%m/%d %T")));
 
     loop {
         if let Ok(ka) = keepalive.lock() {
@@ -424,7 +425,8 @@ pub fn control_loop(
             }
         }
     }
-    notifier.send_notification(notifier::Notification::Shutdown);
+    let date_time: DateTime<Local> = SystemTime::now().into();
+    notifier.send_notification(notifier::Notification::Shutdown, format!("{}", date_time.format("%Y/%m/%d %T")));
     println!("Shutting down control thread.");
     println!("Stopping readers.");
     if let Ok(mut r) = readers.lock() {
@@ -867,12 +869,6 @@ fn handle_stream(
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.update();
-                        }
-                    }
                 },
                 requests::Request::ReaderDisconnect { id } | requests::Request::ReaderStop { id }  => {
                     if let Ok(ac) = ac_state.lock() {
@@ -929,12 +925,6 @@ fn handle_stream(
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
-                    }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.update();
-                        }
                     }
                 },
                 requests::Request::ReaderStartAll => { // START ALL
@@ -1012,12 +1002,6 @@ fn handle_stream(
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
                     }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.update();
-                        }
-                    }
                 },
                 requests::Request::ReaderStopAll => {  // STOP ALL
                     if let Ok(ac) = ac_state.lock() {
@@ -1073,12 +1057,6 @@ fn handle_stream(
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
                         no_error = write_error(&stream, errors::Errors::StartingUp)
-                    }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.update();
-                        }
                     }
                 },
                 requests::Request::ReaderGetAll => {
@@ -1155,7 +1133,8 @@ fn handle_stream(
                                 super::SETTING_NTFY_URL |
                                 super::SETTING_NTFY_USER |
                                 super::SETTING_NTFY_PASS |
-                                super::SETTING_NTFY_TOPIC => {
+                                super::SETTING_NTFY_TOPIC | 
+                                super::SETTING_ENABLE_NTFY => {
                                     if let Ok(sq) = sqlite.lock() {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
@@ -1210,13 +1189,6 @@ fn handle_stream(
                             no_error = write_settings(&stream, &settings);
                         }
                     }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.update_settings();
-                            screen.update();
-                        }
-                    }
                 },
                 requests::Request::Quit => {
                     if let Ok(mut ka) = keepalive.lock() {
@@ -1225,12 +1197,6 @@ fn handle_stream(
                     }
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.update();
-                        }
-                    }
                 },
                 requests::Request::Shutdown => {
                     if let Ok(mut ka) = keepalive.lock() {
@@ -1262,13 +1228,6 @@ fn handle_stream(
                     }
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.set_shutdown();
-                            screen.update();
-                        }
-                    }
                 },
                 requests::Request::Restart => {
                     if let Ok(mut ka) = keepalive.lock() {
@@ -1298,13 +1257,6 @@ fn handle_stream(
                     }
                     // connect to ensure the spawning thread will exit the accept call
                     _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.set_shutdown();
-                            screen.update();
-                        }
-                    }
                 },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
@@ -1777,13 +1729,6 @@ fn handle_stream(
                         }
                         AutoUploadQuery::Status => {
                             no_error = write_uploader_status(&stream, uploader.status());
-                        }
-                    }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.update_settings();
-                            screen.update();
                         }
                     }
                 },
@@ -2334,13 +2279,6 @@ fn handle_stream(
                             no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
                         }
                     }
-                    #[cfg(target_os = "linux")]
-                    if let Ok(mut screen_opt) = screen.lock() {
-                        if let Some(screen) = &mut *screen_opt {
-                            screen.set_shutdown();
-                            screen.update();
-                        }
-                    }
                 },
                 requests::Request::SetNoficiation { kind: notification } => {
                     if let Ok(sock) = stream.local_addr() {
@@ -2585,6 +2523,7 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
         super::SETTING_NTFY_USER,
         super::SETTING_NTFY_PASS,
         super::SETTING_NTFY_TOPIC,
+        super::SETTING_ENABLE_NTFY,
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

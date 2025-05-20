@@ -2,6 +2,8 @@ use core::str;
 use std::{collections::HashMap, env, fs::{File, OpenOptions}, io::{ErrorKind, Read, Write}, net::{IpAddr, Shutdown, SocketAddr, TcpStream}, str::FromStr, sync::{self, Arc, Mutex}, thread::{self, JoinHandle}, time::{SystemTime, UNIX_EPOCH}};
 use std::time::Duration;
 
+use chrono::{DateTime, Local};
+
 use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::{self, get_message_name}, parameter_types::{self, get_llrp_custom_message_name}}, notifier, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{reconnector::Reconnector, ReaderStatus, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
@@ -670,12 +672,6 @@ pub fn connect(
                                             println!("error sending antennas to control sockets: {e}")
                                         }
                                     }
-                                    #[cfg(target_os = "linux")]
-                                    if let Ok(screen_opt) = t_screen.lock() {
-                                        if let Some(screen) = &*screen_opt {
-                                            screen.update();
-                                        }
-                                    }
                                 }
                             }
                             if last_ka_received_at < data.last_ka_received_at {
@@ -698,7 +694,8 @@ pub fn connect(
                                 ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset => {
                                     println!("connection aborted/reset");
                                     reconnect = true;
-                                    notifier.send_notification(notifier::Notification::StopReading);
+                                    let date_time: DateTime<Local> = SystemTime::now().into();
+                                    notifier.send_notification(notifier::Notification::StopReading, format!("{}", date_time.format("%Y/%m/%d %T")));
                                     break;
                                 }
                                 // TimedOut == Windows, WouldBlock == Linux
@@ -724,7 +721,8 @@ pub fn connect(
                                     if right_now - 5 > last_ka_received_at {
                                         println!("no keep alive message received in the last 5 seconds");
                                         reconnect = true;
-                                        notifier.send_notification(notifier::Notification::StopReading);
+                                        let date_time: DateTime<Local> = SystemTime::now().into();
+                                        notifier.send_notification(notifier::Notification::StopReading, format!("{}", date_time.format("%Y/%m/%d %T")));
                                         break;
                                     }
                                 },
@@ -753,21 +751,9 @@ pub fn connect(
                         {
                             // Changed to disconnected then close the socket.
                             if *stat == ReaderStatus::Disconnected {
-                                #[cfg(target_os = "linux")]
-                                if let Ok(mut screen_opt) = t_screen.lock() {
-                                    if let Some(screen) = &mut *screen_opt {
-                                        screen.update();
-                                    }
-                                }
                                 break;
                             } else if *stat == ReaderStatus::Connected {
                                 send_reader_list = true;
-                                #[cfg(target_os = "linux")]
-                                if let Ok(mut screen_opt) = t_screen.lock() {
-                                    if let Some(screen) = &mut *screen_opt {
-                                        screen.update();
-                                    }
-                                }
                             }
                         }
                     }

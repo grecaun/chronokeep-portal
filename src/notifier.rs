@@ -23,7 +23,7 @@ pub enum Notification {
 pub struct Notifier {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
-    notifications: Arc<Mutex<Vec<Notification>>>,
+    notifications: Arc<Mutex<Vec<(Notification, String)>>>,
     api_notifications: Arc<Mutex<Vec<(Api, APINotification)>>>,
     waiter: Arc<(Mutex<bool>, Condvar)>,
 }
@@ -42,9 +42,9 @@ impl Notifier {
         }
     }
 
-    pub fn send_notification(&self, note: Notification) {
+    pub fn send_notification(&self, note: Notification, time: String) {
         if let Ok(mut notifications) = self.notifications.lock() {
-            notifications.push(note);
+            notifications.push((note, time));
         }
         let (lock, cvar) = &*self.waiter;
         let mut waiting = lock.lock().unwrap();
@@ -92,72 +92,74 @@ impl Notifier {
             }
             *waiting = true;
             drop(waiting);
-            let mut work_list: Vec<Notification> = vec!();
+            let mut work_list: Vec<(Notification, String)> = vec!();
             if let Ok(mut notifications) = self.notifications.lock() {
                 work_list.append(&mut *notifications);
             }
-            for note in work_list.iter() {
+            for (note, time) in work_list.iter() {
                 let mut name = String::from("Chronokeep Portal");
                 let mut url = String::from("");
                 let mut topic = String::from("");
                 let mut user = String::from("");
                 let mut pass = String::from("");
+                let mut enabled: bool = false;
                 if let Ok(control) = self.control.lock() {
                     name = control.name.clone();
                     url = control.ntfy_url.clone();
                     topic = control.ntfy_topic.clone();
                     user = control.ntfy_user.clone();
                     pass = control.ntfy_pass.clone();
+                    enabled = control.enable_ntfy;
                 }
                 let mut priority: u8 = 3;
                 let tag: String;
                 let message = match note {
                     Notification::Start => {
                         tag = String::from("green_circle");
-                        format!("{name} has started.")
+                        format!("{time} - {name} has started.")
                     },
                     Notification::Stop => {
                         tag = String::from("red_square");
-                        format!("{name} is shutting down.")
+                        format!("{time} - {name} is shutting down.")
                     },
                     Notification::BatteryLow => {
                         tag = String::from("battery");
                         priority = 4;
-                        format!("Battery is low on {name}.")
+                        format!("{time} - Battery is low on {name}.")
                     },
                     Notification::BatteryCritical => {
                         tag = String::from("battery");
                         priority = 5;
-                        format!("Warning! Battery critical on {name}.")
+                        format!("{time} - Warning! Battery critical on {name}.")
                     },
                     Notification::BatteryUnknown => {
                         tag = String::from("battery");
-                        format!("{name} is unable to detect the battery level.")
+                        format!("{time} - {name} is unable to detect the battery level.")
                     },
                     Notification::Location => {
                         tag = String::from("world_map");
-                        format!("Location for {name} is...")
+                        format!("{time} - Location for {name} is...")
                     },
                     Notification::StartReading => { // used when Auto Start is set
                         tag = String::from("medal_sports");
-                        format!("{name} has successfully connected to the reader.")
+                        format!("{time} - {name} has successfully connected to the reader.")
                     },
                     Notification::StopReading => {
                         tag = String::from("warning");
                         priority = 5;
-                        format!("A reader on {name} has unexpectedly disconnected.")
+                        format!("{time} - A reader on {name} has unexpectedly disconnected.")
                     },
                     Notification::UnableToStartReading => {
                         tag = String::from("warning");
                         priority = 5;
-                        format!("Unable to connect to a reader on {name}.")
+                        format!("{time} - Unable to connect to a reader on {name}.")
                     },
                     Notification::Shutdown => {
                         tag = String::from("stop_sign");
-                        format!("{name} is shutting down.")
+                        format!("{time} - {name} is shutting down.")
                     }
                 };
-                if !url.is_empty() && !topic.is_empty() && !user.is_empty() && !pass.is_empty() {
+                if enabled && !url.is_empty() && !topic.is_empty() && !user.is_empty() && !pass.is_empty() {
                     println!("Sending notification...");
                     match http_client.post(format!("{}{}", url, topic))
                         .headers(construct_headers(priority, tag))
@@ -175,7 +177,7 @@ impl Notifier {
                             Err(e) => {
                                 println!("Error sending notification: {e}");
                                 if let Ok(mut notifications) = self.notifications.lock() {
-                                    notifications.push(note.clone());
+                                    notifications.push((note.clone(), time.clone()));
                                 }
                             }
                         };

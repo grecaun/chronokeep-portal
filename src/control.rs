@@ -18,6 +18,7 @@ pub const SETTING_NTFY_URL: &str = "SETTING_NTFY_URL";
 pub const SETTING_NTFY_USER: &str = "SETTING_NTFY_USER";
 pub const SETTING_NTFY_PASS: &str = "SETTING_NTFY_PASS";
 pub const SETTING_NTFY_TOPIC: &str = "SETTING_NTFY_TOPIC";
+pub const SETTING_ENABLE_NTFY: &str = "SETTING_ENABLE_NTFY";
 
 pub struct Control {
     pub name: String,
@@ -33,6 +34,7 @@ pub struct Control {
     pub ntfy_user: String,
     pub ntfy_pass: String,
     pub ntfy_topic: String,
+    pub enable_ntfy: bool,
     pub battery: u8,
 }
 
@@ -74,6 +76,9 @@ impl Control {
         if self.ntfy_topic != new_control.ntfy_topic {
             self.ntfy_topic = new_control.ntfy_topic   
         }
+        if self.enable_ntfy != new_control.enable_ntfy {
+            self.enable_ntfy = new_control.enable_ntfy
+        }
         if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
             return self.sound_board.change_voice(new_control.sound_board.get_voice())
         }
@@ -95,6 +100,7 @@ impl Control {
             ntfy_user: String::from(""),
             ntfy_pass: String::from(""),
             ntfy_topic: String::from(""),
+            enable_ntfy: defaults::DEFAULT_ENABLE_NTFY,
             battery: 0
         };
         match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
@@ -362,6 +368,28 @@ impl Control {
                     Err(e) => return Err(e)
                 }
             }
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_ENABLE_NTFY) {
+            Ok(s) => {
+                let ar: bool = s.value().eq_ignore_ascii_case("true");
+                output.auto_remote = ar;
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_ENABLE_NTFY),
+                    format!("{}", defaults::DEFAULT_ENABLE_NTFY),
+                )) {
+                    Ok(s) => {
+                        let ar: bool = s.value().eq_ignore_ascii_case("true");
+                        output.auto_remote = ar;
+                        println!("Enable ntfy successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            },
             Err(e) => {
                 return Err(e)
             }
