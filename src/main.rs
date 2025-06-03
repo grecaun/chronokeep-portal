@@ -142,6 +142,51 @@ fn main() {
                         println!("error saving chip type {e}");
                     }
                 }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_NTFY_URL),
+                    val.ntfy_url
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving ntfy url {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_NTFY_USER),
+                    val.ntfy_user
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving ntfy user {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_NTFY_PASS),
+                    val.ntfy_pass
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving ntfy pass {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_NTFY_TOPIC),
+                    val.ntfy_topic
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving ntfy topic {e}");
+                    }
+                }
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(control::SETTING_ENABLE_NTFY),
+                    val.enable_ntfy.to_string()
+                )) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("error saving enable ntfy {e}");
+                    }
+                }
             },
             Err(_) => (),
         };
@@ -174,6 +219,11 @@ fn main() {
             voice: control.sound_board.get_voice(),
             auto_remote: control.auto_remote,
             upload_interval: control.upload_interval,
+            ntfy_url: control.ntfy_url,
+            ntfy_user: control.ntfy_user,
+            ntfy_pass: control.ntfy_pass,
+            ntfy_topic: control.ntfy_topic,
+            enable_ntfy: control.enable_ntfy,
             readers,
             api
         };

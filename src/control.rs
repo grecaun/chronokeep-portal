@@ -374,8 +374,8 @@ impl Control {
         }
         match sqlite.get_setting(SETTING_ENABLE_NTFY) {
             Ok(s) => {
-                let ar: bool = s.value().eq_ignore_ascii_case("true");
-                output.auto_remote = ar;
+                let e_ntfy: bool = s.value().eq_ignore_ascii_case("true");
+                output.enable_ntfy = e_ntfy;
             },
             Err(DBError::NotFound) => {
                 match sqlite.set_setting(&setting::Setting::new(
@@ -383,8 +383,8 @@ impl Control {
                     format!("{}", defaults::DEFAULT_ENABLE_NTFY),
                 )) {
                     Ok(s) => {
-                        let ar: bool = s.value().eq_ignore_ascii_case("true");
-                        output.auto_remote = ar;
+                        let e_ntfy: bool = s.value().eq_ignore_ascii_case("true");
+                        output.enable_ntfy = e_ntfy;
                         println!("Enable ntfy successfully set to '{}'.", s.value());
                     },
                     Err(e) => return Err(e)

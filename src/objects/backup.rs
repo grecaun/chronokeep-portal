@@ -18,6 +18,11 @@ pub struct Backup {
     pub voice: Voice,
     pub auto_remote: bool,
     pub upload_interval: u64,
+    pub ntfy_url: String,
+    pub ntfy_user: String,
+    pub ntfy_pass: String,
+    pub ntfy_topic: String,
+    pub enable_ntfy: bool,
 
     pub readers: Vec<reader::Reader>,
     pub api: Vec<api::Api>,

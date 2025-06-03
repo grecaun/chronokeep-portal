@@ -1020,10 +1020,15 @@ impl CharacterDisplay {
                                     messages.push(info.settings_menu[4].clone());
                                     messages.push(info.settings_menu[6].clone());
                                 },
-                                _ => { // 6 | 7
+                                6 => {
                                     messages.push(info.settings_menu[6].clone());
                                     messages.push(info.settings_menu[5].clone());
                                     messages.push(info.settings_menu[7].clone());
+                                },
+                                _ => { // 6 | 8
+                                    messages.push(info.settings_menu[7].clone());
+                                    messages.push(info.settings_menu[6].clone());
+                                    messages.push(info.settings_menu[8].clone());
                                 },
                             };
                         }
