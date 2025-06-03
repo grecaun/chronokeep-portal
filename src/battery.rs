@@ -6,8 +6,6 @@ use ina219::SyncIna219;
 use rppal::i2c::I2c;
 use chrono::Utc;
 use std::net::TcpStream;
-use std::fs::OpenOptions;
-use std::io::Write;
 
 use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, screen::CharacterDisplay, notifier};
 
@@ -45,8 +43,6 @@ impl Checker {
 
     pub fn run(&mut self) {
         println!("Starting battery checker thread.");
-        let start = SystemTime::now();
-        let mut file = OpenOptions::new().append(true).create(true).open("/portal/logs/battery.txt").expect("Unable to open file.");
         if let Ok(device) = I2c::with_bus(1) {
             println!("I2C initialized.");
             if let Ok(mut ina) = SyncIna219::new(device, Address::from_byte(0x40).unwrap()) {
@@ -72,15 +68,6 @@ impl Checker {
                             thread::sleep(conversion_time);
                             if let Ok(Some(_)) = ina.next_measurement() {
                                 if let Ok(voltage) = ina.bus_voltage() {
-                                    match start.elapsed() {
-                                        Ok(t) => {
-                                            match writeln!(&mut file, "{} - Voltage: {}", t.as_secs(), voltage) {
-                                                Ok(_) => {}
-                                                Err(e) => { println!("Error trying to write to file. {e}") }
-                                            }
-                                        },
-                                        Err(_) => { }
-                                    }
                                     self.set_percentage(voltage.voltage_mv());
                                 } else {
                                     println!("Error checking voltage.");
@@ -108,28 +95,45 @@ impl Checker {
     }
 
     fn set_percentage(&mut self, voltage: u16) {
-        // Voltage is in mV, charging is > 14000 ?
-        // 100% - 13600
-        //  90% - 13400
-        //  80% - 13300
-        //  70% - 13200
-        //  60% - 13100
-        //  50% - 13000
-        //  40% - 13000
-        //  30% - 12900
-        //  20% - 12800
-        //  10% - 12000
-        //   0% - 10000
+        // Voltage is in mV
+        // CHG  -- >  14400
+        // 100% -- >  13550
+        //  90% -- >  13180
+        //  80% -- >  13170
+        //  70% -- >  13160
+        //  60% -- >  13150
+        //  50% -- >  13100
+        //  40% -- >  13050
+        //  30% -- >  13030
+        //  20% -- >  13010
+        //  10% -- >  12990
+        //   0% -- <= 12990
         // Discharge is (mostly) linear up to 20% then sharply declines.
-        let percentage: u8 = if voltage > 12800 { // check if above 20%
-            // this will be incorrect for values above 40% excepting the case of 100%
-            // we will be under reporting the battery level at 50% and up
+        let percentage: u8 = if voltage > 14400 { 
             // charging will be considered anything above 110%
-            ((voltage - 12600) / 10) as u8 // 
-        } else if voltage > 12000 { // 10% to 20%, each 80 mV is 1%, add to base 10
-            (10 + ((voltage - 12000) / 80)) as u8
-        } else { // 0% to 10%, each 200 mV is 1%
-            ((voltage - 10000) / 200) as u8
+            150
+        } else if voltage > 13550 {
+            100
+        } else if voltage > 13180 {
+            90
+        } else if voltage > 13170 {
+            80
+        } else if voltage > 13160 {
+            70
+        } else if voltage > 13150 {
+            60
+        } else if voltage > 13100 {
+            50
+        } else if voltage > 13050 {
+            40
+        } else if voltage > 13030 {
+            30
+        } else if voltage > 13010 {
+            20
+        } else if voltage > 12990 {
+            10
+        } else {
+            0
         };
         let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(t) => { t.as_secs() }
