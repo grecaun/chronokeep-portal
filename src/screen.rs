@@ -270,12 +270,10 @@ impl CharacterDisplay {
             if let Err(e) = lcd.home() {
                 println!("Error homing cursor. {e}");
             }
-            if let Ok(info) = self.info.lock() {
+            if let Ok(mut info) = self.info.lock() {
                 let sys_time = SystemTime::now();
                 let date_time: DateTime<Local> = sys_time.into();
-                if let Ok(mut info) = self.info.lock() {
-                    info.title_bar.replace_range(0..13, format!("{:<13}", date_time.format("%m/%d %T")).as_str());
-                }
+                info.title_bar.replace_range(0..14, format!("{:<14}", date_time.format("%m-%d %H:%M:%S")).as_str());
                 let mut messages: Vec<String> = vec!(info.title_bar.clone());
                 messages.push(info.main_menu[1].clone());
                 messages.push(info.main_menu[0].clone());
@@ -970,7 +968,7 @@ impl CharacterDisplay {
                 let sys_time = SystemTime::now();
                 let date_time: DateTime<Local> = sys_time.into();
                 if let Ok(mut info) = self.info.lock() {
-                    info.title_bar.replace_range(0..13, format!("{:<13}", date_time.format("%m/%d %T")).as_str());
+                    info.title_bar.replace_range(0..14, format!("{:<14}", date_time.format("%m-%d %H:%M:%S")).as_str());
                 }
                 let mut messages: Vec<String> = vec!();
                 if let Ok(info) = self.info.lock() {
@@ -1075,10 +1073,17 @@ impl CharacterDisplay {
                     },
                     ABOUT_MENU => { // about menu
                         messages.clear();
-                        messages.push(format!("{:^20}", ""));
-                        messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
-                        messages.push(format!("{:^20}", "Chronokeep Portal"));
-                        messages.push(format!("{:^20}", ""));
+                        if let Ok(control) = self.control.try_lock() {
+                            messages.push(format!("{:^20}", "Chronokeep Portal"));
+                            messages.push(format!("{:^20}", "Device Name:"));
+                            messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
+                            messages.push(format!("{:^20}", control.name));
+                        } else {
+                            messages.push(format!("{:^20}", ""));
+                            messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
+                            messages.push(format!("{:^20}", "Chronokeep Portal"));
+                            messages.push(format!("{:^20}", ""));
+                        }
                     },
                     STARTUP_MENU => {
                         messages.clear();

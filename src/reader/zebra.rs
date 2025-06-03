@@ -87,8 +87,6 @@ pub fn connect(
             let t_read_repeaters = reader.read_repeaters.clone();
             let mut t_sight_processor = reader.sight_processor.clone();
             let t_reconnector = reconnector.clone();
-            #[cfg(target_os = "linux")]
-            let t_screen = reader.screen.clone();
 
             let output = thread::spawn(move|| {
                 let buf: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];

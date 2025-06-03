@@ -6,6 +6,7 @@ use ina219::SyncIna219;
 use rppal::i2c::I2c;
 use chrono::Utc;
 use std::net::TcpStream;
+use chrono::{DateTime, Local};
 
 use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, screen::CharacterDisplay, notifier};
 
@@ -96,7 +97,7 @@ impl Checker {
 
     fn set_percentage(&mut self, voltage: u16) {
         // Voltage is in mV
-        // CHG  -- >  14400
+        // CHG  -- >  13800
         // 100% -- >  13550
         //  90% -- >  13180
         //  80% -- >  13170
@@ -109,7 +110,7 @@ impl Checker {
         //  10% -- >  12990
         //   0% -- <= 12990
         // Discharge is (mostly) linear up to 20% then sharply declines.
-        let percentage: u8 = if voltage > 14400 { 
+        let percentage: u8 = if voltage > 13800 { 
             // charging will be considered anything above 110%
             150
         } else if voltage > 13550 {
@@ -141,11 +142,13 @@ impl Checker {
         };
         if let Ok(mut control) = self.control.lock() {
             if control.battery > 30 && percentage <= 30 && now > self.last_low + 60 {
-                self.notifier.send_notification(notifier::Notification::BatteryLow);
+                let date_time: DateTime<Local> = SystemTime::now().into();
+                self.notifier.send_notification(notifier::Notification::BatteryLow, format!("{}", date_time.format("%Y/%m/%d %T")));
                 self.send_notification(APINotification::BatteryLow);
                 self.last_low = now;
             } else if control.battery > 15 && percentage <= 15 && now > self.last_crit + 60 {
-                self.notifier.send_notification(notifier::Notification::BatteryCritical);
+                let date_time: DateTime<Local> = SystemTime::now().into();
+                self.notifier.send_notification(notifier::Notification::BatteryCritical, format!("{}", date_time.format("%Y/%m/%d %T")));
                 self.send_notification(APINotification::BatteryCritical);
                 self.last_crit = now;
             }
