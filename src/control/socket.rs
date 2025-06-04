@@ -2213,6 +2213,8 @@ fn handle_stream(
                                     Ok(_) => {
                                         match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
                                             Ok(_) => {
+                                                // Update last_received_at so the socket doesn't auto close if we jump to the future.
+                                                last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                                                 no_error = write_time(&stream)
                                             },
                                             Err(e) => {
