@@ -37,6 +37,7 @@ pub const SETTINGS_VOICE: u8 = 5;
 pub const SETTINGS_AUTO_UPLOAD: u8 = 6;
 pub const SETTINGS_UPLOAD_INTERVAL: u8 = 7;
 pub const SETTINGS_ENABLE_NTFY: u8 = 8;
+pub const SETTINGS_SET_TIME: u8 = 9;
 
 #[derive(Clone)]
 pub struct CharacterDisplay {
@@ -195,7 +196,7 @@ impl CharacterDisplay {
                     }
                     info.main_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
                 },
-                SETTINGS_MENU => { // settings menu, max ix 7
+                SETTINGS_MENU => { // settings menu, max ix 9
                     for line in info.settings_menu.iter_mut() {
                         line.replace_range(1..2, " ");
                     }
@@ -231,6 +232,7 @@ impl CharacterDisplay {
                 info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
                 info.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
                 info.settings_menu.push(format!("   Enable NTFY {:>4} ", enable_ntfy));
+                info.settings_menu.push(format!("   Set Time         "));
             }
             for line in info.settings_menu.iter_mut() {
                 line.replace_range(1..2, " ");
@@ -317,7 +319,7 @@ impl CharacterDisplay {
                                     if self.current_menu[1] > SETTINGS_SIGHTING_PERIOD {
                                         self.current_menu[1] -= 1;
                                     } else {
-                                        self.current_menu[1] = SETTINGS_ENABLE_NTFY;
+                                        self.current_menu[1] = SETTINGS_SET_TIME;
                                     }
                                 }
                                 ABOUT_MENU | STARTUP_MENU => {
@@ -353,8 +355,8 @@ impl CharacterDisplay {
                                         }
                                     }
                                 }
-                                SETTINGS_MENU => { // settings menu, max ix 8 (SETTINGS_ENABLE_NTFY)
-                                    if self.current_menu[1] < SETTINGS_ENABLE_NTFY {
+                                SETTINGS_MENU => { // settings menu, max ix 9
+                                    if self.current_menu[1] < SETTINGS_SET_TIME {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to 0
                                         self.current_menu[1] = SETTINGS_SIGHTING_PERIOD;
@@ -871,17 +873,57 @@ impl CharacterDisplay {
                                         _ => {}
                                     }
                                 },
-                                SETTINGS_MENU => { // settings -> saves settings and goes back
-                                    self.current_menu[0] = MAIN_MENU;
-                                    self.current_menu[1] = MAIN_START_READING;
-                                    self.update_menu();
-                                    // notify of settings changes
-                                    if let Ok(sq) = self.sqlite.try_lock() {
-                                        let settings = socket::get_settings(&sq);
-                                        if let Ok(socks) = self.control_sockets.try_lock() {
-                                            for sock_opt in &*socks {
-                                                if let Some(sock) = sock_opt {
-                                                    _ = socket::write_settings(&sock, &settings);
+                                SETTINGS_MENU => { // settings -> saves settings and goes back (only if not on set time)
+                                    if self.current_menu[1] == SETTINGS_SET_TIME {
+                                        #[cfg(target_os = "linux")]
+                                        {
+                                            let _ = lcd.clear();
+                                            let _ = lcd.home();
+                                            let _ = write!(lcd, "{:<20}", "");
+                                            let _ = write!(lcd, "{:<20}", "");
+                                            let _ = write!(lcd, "{:^20}", "Setting Time . . .");
+                                            let _ = write!(lcd, "{:<20}", "");
+                                        }
+                                        match std::process::Command::new("sudo").arg("ntpd").arg(format!("-q")).arg(format!("-g")).arg(format!("--configfile=/etc/ntpsec/ntp-get.conf")).status() {
+                                            Ok(_) => {
+                                                match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
+                                                    Ok(_) => {
+                                                        self.current_menu[0] = MAIN_MENU;
+                                                        self.current_menu[1] = MAIN_START_READING;
+                                                        self.update_menu();
+                                                        // notify of settings changes
+                                                        if let Ok(sq) = self.sqlite.try_lock() {
+                                                            let settings = socket::get_settings(&sq);
+                                                            if let Ok(socks) = self.control_sockets.try_lock() {
+                                                                for sock_opt in &*socks {
+                                                                    if let Some(sock) = sock_opt {
+                                                                        _ = socket::write_settings(&sock, &settings);
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        println!("error setting hardware clock: {e}");
+                                                    }
+                                                }
+                                            },
+                                            Err(e) => {
+                                                println!("error setting time: {e}");
+                                            }
+                                        }
+                                    } else {
+                                        self.current_menu[0] = MAIN_MENU;
+                                        self.current_menu[1] = MAIN_START_READING;
+                                        self.update_menu();
+                                        // notify of settings changes
+                                        if let Ok(sq) = self.sqlite.try_lock() {
+                                            let settings = socket::get_settings(&sq);
+                                            if let Ok(socks) = self.control_sockets.try_lock() {
+                                                for sock_opt in &*socks {
+                                                    if let Some(sock) = sock_opt {
+                                                        _ = socket::write_settings(&sock, &settings);
+                                                    }
                                                 }
                                             }
                                         }
@@ -900,7 +942,7 @@ impl CharacterDisplay {
                                         #[cfg(target_os = "linux")]
                                         {
                                             let _ = lcd.clear();
-                                            let _ = lcd.backlight(false);
+                                            //let _ = lcd.backlight(false);
                                             let _ = lcd.show_display(false);
                                         }
                                         if let Ok(mut ka) = self.keepalive.lock() {
@@ -978,59 +1020,30 @@ impl CharacterDisplay {
                 match self.current_menu[0] {
                     MAIN_MENU => { // main menu, max ix 3
                         if let Ok(info) = self.info.lock() {
-                            match self.current_menu[1] {
-                                0 | 1 => {
-                                    messages.push(info.main_menu[1].clone()); // Interface writes lines odd lines before even lines,
-                                    messages.push(info.main_menu[0].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
-                                    messages.push(info.main_menu[2].clone());
-                                },
-                                _ => { // 2 | 3
-                                    messages.push(info.main_menu[2].clone());
-                                    messages.push(info.main_menu[1].clone());
-                                    messages.push(info.main_menu[3].clone());
-                                },
-                            };
+                            let max_ix: u8 = (info.main_menu.len() - 1).try_into().unwrap();
+                            let mut disp_ix = self.current_menu[1] as usize;
+                            if self.current_menu[1] == 0 {
+                                disp_ix += 1; // index 0 needs to display 0, 1, 2
+                            } else if self.current_menu[1] == max_ix {
+                                disp_ix -= 1; // last value needs to display last-2, last-1, last
+                            }
+                            messages.push(info.main_menu[disp_ix].clone());     // Interface writes lines odd lines before even lines,
+                            messages.push(info.main_menu[disp_ix - 1].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
+                            messages.push(info.main_menu[disp_ix + 1].clone()); // Messages comes pre-loaded with Line 1.
                         }
                     },
-                    SETTINGS_MENU => { // settings menu, max ix 7
+                    SETTINGS_MENU => { // settings menu, max ix 9
                         if let Ok(info) = self.info.lock() {
-                            match self.current_menu[1] {
-                                0 | 1 => {
-                                    messages.push(info.settings_menu[1].clone());
-                                    messages.push(info.settings_menu[0].clone());
-                                    messages.push(info.settings_menu[2].clone());
-                                },
-                                2 => {
-                                    messages.push(info.settings_menu[2].clone());
-                                    messages.push(info.settings_menu[1].clone());
-                                    messages.push(info.settings_menu[3].clone());
-                                },
-                                3 => {
-                                    messages.push(info.settings_menu[3].clone());
-                                    messages.push(info.settings_menu[2].clone());
-                                    messages.push(info.settings_menu[4].clone());
-                                },
-                                4 => {
-                                    messages.push(info.settings_menu[4].clone());
-                                    messages.push(info.settings_menu[3].clone());
-                                    messages.push(info.settings_menu[5].clone());
-                                },
-                                5 => {
-                                    messages.push(info.settings_menu[5].clone());
-                                    messages.push(info.settings_menu[4].clone());
-                                    messages.push(info.settings_menu[6].clone());
-                                },
-                                6 => {
-                                    messages.push(info.settings_menu[6].clone());
-                                    messages.push(info.settings_menu[5].clone());
-                                    messages.push(info.settings_menu[7].clone());
-                                },
-                                _ => { // 6 | 8
-                                    messages.push(info.settings_menu[7].clone());
-                                    messages.push(info.settings_menu[6].clone());
-                                    messages.push(info.settings_menu[8].clone());
-                                },
-                            };
+                            let max_ix: u8 = (info.settings_menu.len() - 1).try_into().unwrap();
+                            let mut disp_ix = self.current_menu[1] as usize;
+                            if self.current_menu[1] == 0 {
+                                disp_ix += 1; // index 0 needs to display 0, 1, 2
+                            } else if self.current_menu[1] == max_ix {
+                                disp_ix -= 1; // last value needs to display last-2, last-1, last
+                            }
+                            messages.push(info.settings_menu[disp_ix].clone());     // Interface writes lines odd lines before even lines,
+                            messages.push(info.settings_menu[disp_ix - 1].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
+                            messages.push(info.settings_menu[disp_ix + 1].clone()); // Messages comes pre-loaded with Line 1.
                         }
                     },
                     READING_MENU => { // reader is reading
@@ -1110,7 +1123,7 @@ impl CharacterDisplay {
                     },
                     SCREEN_OFF => {
                         let _ = lcd.clear();
-                        let _ = lcd.backlight(false);
+                        //let _ = lcd.backlight(false);
                         let _ = lcd.show_display(false);
                     }
                     _ => {}
@@ -1124,7 +1137,7 @@ impl CharacterDisplay {
         #[cfg(target_os = "linux")]
         {
             let _ = lcd.clear();
-            let _ = lcd.backlight(false);
+            //let _ = lcd.backlight(false);
             let _ = lcd.show_display(false);
         }
         println!("LCD thread terminated.");
