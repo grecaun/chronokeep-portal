@@ -74,7 +74,7 @@ impl Checker {
                                     println!("Error checking voltage.");
                                 }
                             }
-                            thread::sleep(Duration::from_secs(5));
+                            thread::sleep(Duration::from_secs(1));
                             if let Ok(keepalive) = self.keepalive.lock() {
                                 if *keepalive == false {
                                     break;
@@ -140,19 +140,21 @@ impl Checker {
             Ok(t) => { t.as_secs() }
             Err(_) => { 0 }
         };
+        let mut batt = -1;
         if let Ok(mut control) = self.control.lock() {
-            if control.battery > 30 && percentage <= 30 && now > self.last_low + 60 {
-                let date_time: DateTime<Local> = SystemTime::now().into();
-                self.notifier.send_notification(notifier::Notification::BatteryLow, format!("{}", date_time.format("%Y/%m/%d %T")));
-                self.send_notification(APINotification::BatteryLow);
-                self.last_low = now;
-            } else if control.battery > 15 && percentage <= 15 && now > self.last_crit + 60 {
-                let date_time: DateTime<Local> = SystemTime::now().into();
-                self.notifier.send_notification(notifier::Notification::BatteryCritical, format!("{}", date_time.format("%Y/%m/%d %T")));
-                self.send_notification(APINotification::BatteryCritical);
-                self.last_crit = now;
-            }
+            batt = control.battery;
             control.battery = percentage;
+        }
+        if batt > 30 && percentage <= 30 && now > self.last_low + 60 {
+            let date_time: DateTime<Local> = SystemTime::now().into();
+            self.notifier.send_notification(notifier::Notification::BatteryLow, format!("{}", date_time.format("%Y/%m/%d %T")));
+            self.send_notification(APINotification::BatteryLow);
+            self.last_low = now;
+        } else if batt > 15 && percentage <= 15 && now > self.last_crit + 60 {
+            let date_time: DateTime<Local> = SystemTime::now().into();
+            self.notifier.send_notification(notifier::Notification::BatteryCritical, format!("{}", date_time.format("%Y/%m/%d %T")));
+            self.send_notification(APINotification::BatteryCritical);
+            self.last_crit = now;
         }
         if let Ok(mut screen_opt) = self.screen.lock() {
             if let Some(screen) = &mut *screen_opt {

@@ -75,8 +75,6 @@ pub struct Reader {
     #[serde(skip)]
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     #[serde(skip)]
-    sight_processor: Option<Arc<processor::SightingsProcessor>>,
-    #[serde(skip)]
     screen: Arc<Mutex<Option<CharacterDisplay>>>,
     #[serde(skip)]
     readers: Arc<Mutex<Vec<Reader>>>,
@@ -105,7 +103,6 @@ impl Reader {
             auto_connect,
             control_sockets: Arc::new(Mutex::new(Default::default())),
             read_repeaters: Arc::new(Mutex::new(Default::default())),
-            sight_processor: None,
             antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
             screen: Arc::new(Mutex::new(None)),
             readers: Arc::new(Mutex::new(Vec::new()))
@@ -139,7 +136,6 @@ impl Reader {
         auto_connect: u8,
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-        sight_processor: Arc<processor::SightingsProcessor>,
         screen: Arc<Mutex<Option<CharacterDisplay>>>,
         readers: Arc<Mutex<Vec<Reader>>>,
     ) -> Result<Reader, DBError> {
@@ -159,7 +155,6 @@ impl Reader {
                     auto_connect,
                     control_sockets,
                     read_repeaters,
-                    sight_processor: Some(sight_processor),
                     antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
                     screen,
                     readers
@@ -225,10 +220,6 @@ impl Reader {
 
     pub fn set_read_repeaters(&mut self, r_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>) {
         self.read_repeaters = r_repeaters
-    }
-
-    pub fn set_sight_processor(&mut self, s_processor: Arc<processor::SightingsProcessor>) {
-        self.sight_processor = Some(s_processor)
     }
 
     pub fn set_readers(&mut self, readers: Arc<Mutex<Vec<Reader>>>) {

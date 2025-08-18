@@ -17,6 +17,7 @@ pub const TAG_LIMIT: usize = 100000;
 
 pub const WRITEABLE_FILE_PATH: &str = "PORTAL_WRITEABLE_FILE_PATH";
 pub const ZEBRA_SHIFT: &str = "PORTAL_ZEBRA_SHIFT";
+pub const STREAM_TIMOUT_MILLISECONDS: u64 = 100;
 
 struct ReadData {
     tags: Vec<TagData>,
@@ -42,15 +43,15 @@ pub fn connect(
             return Err("error parsing reader ip address")
         }
     };
-    let res = TcpStream::connect_timeout(&SocketAddr::new(ip_addr, reader.port), Duration::from_secs(1));
+    let res = TcpStream::connect_timeout(&SocketAddr::new(ip_addr, reader.port), Duration::from_millis(STREAM_TIMOUT_MILLISECONDS));
     match res {
         Err(_) => return Err("unable to connect"),
         Ok(mut tcp_stream) => {
-            match tcp_stream.set_read_timeout(Some(Duration::from_secs(1))) {
+            match tcp_stream.set_read_timeout(Some(Duration::from_millis(STREAM_TIMOUT_MILLISECONDS))) {
                 Ok(_) => {},
                 Err(e) => println!("unexpected error setting read timeout on tcp stream: {e}")
             }
-            match tcp_stream.set_write_timeout(Some(Duration::from_secs(1))) {
+            match tcp_stream.set_write_timeout(Some(Duration::from_millis(STREAM_TIMOUT_MILLISECONDS))) {
                 Ok(_) => {},
                 Err(e) => println!("unexpected error setting write timeout on tcp stream: {e}")
             }
@@ -85,7 +86,6 @@ pub fn connect(
             let t_control_sockets = reader.control_sockets.clone();
             let t_readers = reader.readers.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
-            let mut t_sight_processor = reader.sight_processor.clone();
             let t_reconnector = reconnector.clone();
 
             let output = thread::spawn(move|| {
@@ -624,10 +624,6 @@ pub fn connect(
                                                     println!("error sending new reads to repeaters: {e}")
                                                 }
                                             }
-                                            if let Some(processor) = t_sight_processor {
-                                                processor.notify();
-                                                t_sight_processor = Some(processor);
-                                            }
                                         }
                                     },
                                     Err(e) => println!("Error processing tags. {e}"),
@@ -706,10 +702,6 @@ pub fn connect(
                                                     Err(e) => {
                                                         println!("error sending new reads to repeaters: {e}")
                                                     }
-                                                }
-                                                if let Some(processor) = t_sight_processor {
-                                                    processor.notify();
-                                                    t_sight_processor = Some(processor);
                                                 }
                                             }
                                         },
@@ -962,8 +954,7 @@ fn save_reads(
             old_tag.antenna as u32,
             String::from(r_name),
             format!("{}", old_tag.rssi),
-            0,
-            0
+            read::READ_UPLOADED_FALSE
         ));
     }
     if reads.len() > 0 {
@@ -1111,7 +1102,6 @@ fn process_tags(
                     old_tag.antenna as u32,
                     String::from(r_name),
                     format!("{}", old_tag.rssi),
-                    read::READ_STATUS_UNUSED,
                     read::READ_UPLOADED_FALSE
                 ));
                 map.insert(tag.tag, (tag.portal_time, TagData{
@@ -1152,7 +1142,6 @@ fn process_tags(
                 old_tag.antenna as u32,
                 String::from(r_name),
                 format!("{}", old_tag.rssi),
-                read::READ_STATUS_UNUSED,
                 read::READ_UPLOADED_FALSE
             ));
             removed.push(old_tag.tag);
@@ -1900,119 +1889,4 @@ fn process_tag_read(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> 
         param_ix += param_info.length as usize;
     }
     Ok(Some(data))
-}
-
-fn _process_parameters(buf: &[u8;BUFFER_SIZE], start_ix: usize, num: &usize) {
-    let mut start: usize = start_ix;
-    while start < *num {
-        let bits: u32 = ((buf[start] as u32) << 24) +
-                        ((buf[start+1] as u32) << 16) +
-                        ((buf[start+2] as u32) << 8) +
-                        (buf[start+3] as u32);
-        let param_info = match llrp::bit_masks::get_param_type(&bits) {
-            Ok(info) => info,
-            Err(e) => {
-                println!("Unable to process parameters. {e}");
-                return
-            }
-        };
-        if param_info.length < 1 {
-            return
-        }
-        match param_info.kind {
-            parameter_types::RO_SPEC => {
-                if start + 10 > *num {
-                    println!("Out of bounds.");
-                    return
-                }
-                // ID is an unsigned integer. 0 is invalid
-                let rospec_id: u32 = ((buf[start+4] as u32) << 24) +
-                                    ((buf[start+5] as u32) << 16) +
-                                    ((buf[start+6] as u32) << 8) +
-                                    (buf[start+7] as u32);
-                // Valid priorities are 0-7, lower are given higher priority
-                let priority: u8 = buf[start+8];
-                // 0 = disabled, 1 = inactive, 2 = active
-                let current_state: u8 = buf[start+9];
-                // 10 is a ROBoundarySpec parameter followed by 1-n SpecParameters followed by 0-1 ROReportSpec parameters
-                println!("RO_SPEC Parameter -- id {} - priority {} - current state {}", rospec_id, priority, current_state);
-            },
-            parameter_types::LLRP_STATUS => {
-                if start + 8 > *num {
-                    println!("Out of bounds.");
-                    return
-                }
-                // Status code          - integer
-                let status_code: u16 = ((buf[start+4] as u16) << 8) + (buf[start+5] as u16);
-                // byte count for error description
-                let err_des_byte_count: u16 = ((buf[start+5] as u16) << 8) + (buf[start+7] as u16);
-                // Error Description    - UTF8 string
-                let param_ix = start + 8 + err_des_byte_count as usize;
-                let err_des: &str = match str::from_utf8(&buf[start+8..param_ix]) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        println!("Error converting error description. {e}");
-                        return
-                    }
-                };
-                println!("LLRP_STATUS parameter - Code {} - Descr {}", status_code, err_des);
-                // check if more available to read
-                let end: usize = param_info.length as usize + start;
-                if end < *num {
-                    _process_parameters(buf, start+24, &end)
-                }
-            },
-            parameter_types::ACCESS_SPEC => {
-                if start + 24 > *num {
-                    println!("Out of bounds.");
-                    return
-                }
-                let spec_id: u32 = ((buf[start+4] as u32) << 24) +
-                                    ((buf[start+5] as u32) << 16) +
-                                    ((buf[start+6] as u32) << 8) +
-                                    (buf[start+7] as u32);
-                let antenna_id: u16 = ((buf[start+8] as u16) << 8) +
-                                    (buf[start+9] as u16);
-                let protocol_id: u8 = buf[start+10];
-                let active: bool = (buf[start+11] & 0x80) != 0;
-                let rospec_id: u32 = ((buf[start+12] as u32) << 24) +
-                                    ((buf[start+13] as u32) << 16) +
-                                    ((buf[start+14] as u32) << 8) +
-                                    (buf[start+15] as u32);
-                let ass_trigger: u32 = ((buf[start+16] as u32) << 24) +
-                                    ((buf[start+17] as u32) << 16) +
-                                    ((buf[start+18] as u32) << 8) +
-                                    (buf[start+19] as u32);
-                let access_command: u32 = ((buf[start+20] as u32) << 24) +
-                                        ((buf[start+21] as u32) << 16) +
-                                        ((buf[start+22] as u32) << 8) +
-                                        (buf[start+23] as u32);
-                println!("ACCESS_SPEC parameter. Spec {}, Ant {}, Prot {}, Act {}, ROSpec {}, ASSTrigger {}, AccessCommand {}",
-                        spec_id,
-                        antenna_id,
-                        protocol_id,
-                        active,
-                        rospec_id,
-                        ass_trigger,
-                        access_command
-                    );
-                // check if more available to read
-                let end: usize = param_info.length as usize + start;
-                if end < *num {
-                    _process_parameters(buf, start+24, &end)
-                }
-            },
-            parameter_types::READER_EVENT_NOTIFICATION_DATA => {
-                // Timestamp Parameter
-                // Hopping Event Parameter ?
-                // GPIEvent Parameter ?
-                // ROSpecEvent Parameter ?
-                // ReportBufferLevelWarningEvent Parameter ?
-            }
-            _ => {
-                println!("Parameter found -- {:?} -- TV? {}", parameter_types::get_parameter_name(param_info.kind), param_info.tv);
-            }
-        }
-        start = start + param_info.length as usize;
-    }
 }

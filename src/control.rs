@@ -5,7 +5,6 @@ pub mod socket;
 pub mod zero_conf;
 pub mod sound;
 
-pub const SETTING_SIGHTING_PERIOD: &str = "SETTING_SIGHTING_PERIOD";
 pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";
 pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
 pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
@@ -22,7 +21,6 @@ pub const SETTING_ENABLE_NTFY: &str = "SETTING_ENABLE_NTFY";
 
 pub struct Control {
     pub name: String,
-    pub sighting_period: u32,
     pub read_window: u8,
     pub chip_type: String,
     pub play_sound: bool,
@@ -42,9 +40,6 @@ impl Control {
     pub fn update(&mut self, new_control: Control) -> Result<(), ()> {
         if self.name != new_control.name {
             self.name = new_control.name
-        }
-        if self.sighting_period != new_control.sighting_period {
-            self.sighting_period = new_control.sighting_period
         }
         if self.read_window != new_control.read_window {
             self.read_window = new_control.read_window
@@ -87,7 +82,6 @@ impl Control {
 
     pub fn new(sqlite: &sqlite::SQLite) -> Result<Control, database::DBError> {
         let mut output = Control {
-            sighting_period: defaults::DEFAULT_SIGHTING_PERIOD,
             name: String::from(""),
             chip_type: String::from(defaults::DEFAULT_CHIP_TYPE),
             read_window: defaults::DEFAULT_READ_WINDOW,
@@ -103,23 +97,6 @@ impl Control {
             enable_ntfy: defaults::DEFAULT_ENABLE_NTFY,
             battery: 0
         };
-        match sqlite.get_setting(SETTING_SIGHTING_PERIOD) {
-            Ok(s) => {
-                let port: u32 = s.value().parse().unwrap();
-                output.sighting_period = port;
-            },
-            // not found means we use the default
-            Err(DBError::NotFound) => {
-                match sqlite.set_setting(&setting::Setting::new(
-                    String::from(SETTING_SIGHTING_PERIOD),
-                    format!("{}", defaults::DEFAULT_SIGHTING_PERIOD)
-                )) {
-                    Ok(_) => {},
-                    Err(e) => return Err(e)
-                }
-            },
-            Err(e) => return Err(e)
-        }
         match sqlite.get_setting(SETTING_PORTAL_NAME) {
             Ok(s) => {
                 output.name = String::from(s.value());

@@ -1,9 +1,5 @@
 use serde::{Serialize, Deserialize};
 
-pub const READ_STATUS_UNUSED: u8 = 0;
-pub const READ_STATUS_USED: u8 = 1;
-pub const READ_STATUS_TOO_SOON: u8 = 2;
-
 pub const READ_UPLOADED_FALSE: u8 = 0;
 pub const READ_UPLOADED_TRUE: u8 = 1;
 
@@ -32,10 +28,6 @@ pub struct Read {
     ident_type: String,
     #[serde(rename="type")]
     kind: String,
-    // Status will be used for when the system processes reads.
-    // do not serialize these fields
-    #[serde(skip)]
-    status: u8,
     #[serde(skip)]
     uploaded: u8,
 }
@@ -51,7 +43,6 @@ impl Read {
         antenna: u32,
         reader: String,
         rssi: String,
-        status: u8,
         uploaded: u8,
     ) -> Read{
             Read {
@@ -64,7 +55,6 @@ impl Read {
                 antenna,
                 reader,
                 rssi,
-                status,
                 uploaded,
                 ident_type: String::from(READ_IDENT_TYPE_CHIP),
                 kind: String::from(READ_KIND_CHIP)
@@ -79,7 +69,6 @@ impl Read {
         self.reader_milliseconds == other.reader_milliseconds &&
         self.antenna == other.antenna &&
         self.reader == other.reader &&
-        self.status == other.status &&
         self.uploaded == other.uploaded
     }
 
@@ -119,16 +108,8 @@ impl Read {
         &self.rssi
     }
 
-    pub fn status(&self) -> u8 {
-        self.status
-    }
-
     pub fn uploaded(&self) -> u8 {
         self.uploaded
-    }
-
-    pub fn set_status(&mut self, status: u8) {
-        self.status = status;
     }
 
     pub fn set_uploaded(&mut self, uploaded: u8) {

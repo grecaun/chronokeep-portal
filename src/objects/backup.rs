@@ -10,7 +10,6 @@ pub const BACKUP_FILE_PATH: &str = "./portal_backup.json";
 #[serde(rename_all="camelCase")]
 pub struct Backup {
     pub name: String,
-    pub sighting_period: u32,
     pub read_window: u8,
     pub chip_type: String,
     pub play_sound: bool,

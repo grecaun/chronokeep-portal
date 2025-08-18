@@ -12,7 +12,7 @@ use crate::screen::CharacterDisplay;
 
 #[cfg(target_os = "linux")]
 pub struct Buttons {
-    _screen: Arc<Mutex<Option<CharacterDisplay>>>,
+    screen: Arc<Mutex<Option<CharacterDisplay>>>,
     keepalive: Arc<Mutex<bool>>,
     up_button: u8,
     down_button: u8,
@@ -24,7 +24,7 @@ pub struct Buttons {
 #[cfg(target_os = "linux")]
 impl Buttons {
     pub fn new(
-        _screen: Arc<Mutex<Option<CharacterDisplay>>>,
+        screen: Arc<Mutex<Option<CharacterDisplay>>>,
         keepalive: Arc<Mutex<bool>>
     ) -> Self {
         println!("Checking if there are buttons we should be reading from.");
@@ -49,7 +49,7 @@ impl Buttons {
             enter_button = btn.parse().unwrap_or(0);
         }
         Self {
-            _screen,
+            screen,
             keepalive,
             up_button,
             down_button,
@@ -100,7 +100,7 @@ impl Buttons {
                     match result {
                         Some((pin, _event)) => {
                             let p = pin.pin();
-                            if let Ok(guarded_screen) = self._screen.try_lock() {
+                            if let Ok(guarded_screen) = self.screen.try_lock() {
                                 if let Some(screen) = &*guarded_screen {
                                     if p == self.up_button {
                                         screen.register_button(ButtonPress::Up);

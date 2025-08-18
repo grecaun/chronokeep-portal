@@ -21,7 +21,6 @@ pub struct AutoConnector {
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-    sight_processor: Arc<processor::SightingsProcessor>,
     control: Arc<Mutex<control::Control>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     read_saver: Arc<processor::ReadSaver>,
@@ -36,7 +35,6 @@ impl AutoConnector {
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-        sight_processor: Arc<processor::SightingsProcessor>,
         control: Arc<Mutex<control::Control>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
         read_saver: Arc<processor::ReadSaver>,
@@ -49,7 +47,6 @@ impl AutoConnector {
             joiners,
             control_sockets,
             read_repeaters,
-            sight_processor,
             control,
             sqlite,
             read_saver,
@@ -90,13 +87,11 @@ impl AutoConnector {
                     reader.set_control_sockets(self.control_sockets.clone());
                     reader.set_readers(self.readers.clone());
                     reader.set_read_repeaters(self.read_repeaters.clone());
-                    reader.set_sight_processor(self.sight_processor.clone());
                     let reconnector = Reconnector::new(
                         self.readers.clone(),
                         self.joiners.clone(),
                         self.control_sockets.clone(),
                         self.read_repeaters.clone(),
-                        self.sight_processor.clone(),
                         self.control.clone(),
                         self.sqlite.clone(),
                         self.read_saver.clone(),

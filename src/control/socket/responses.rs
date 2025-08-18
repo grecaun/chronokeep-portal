@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{network::api, objects::{bibchip::{self, BibChip}, event::Event, participant::Participant, read, setting, sighting::Sighting}, reader::MAX_ANTENNAS, remote::uploader};
+use crate::{network::api, objects::{read, setting}, reader::MAX_ANTENNAS, remote::uploader};
 
 use super::{errors, notifications};
 
@@ -44,22 +44,6 @@ pub enum Responses {
         local: String,
         utc: String,
     },
-    Participants {
-        participants: Vec<Participant>,
-    },
-    BibChips {
-        bib_chips: Vec<BibChip>,
-    },
-    Sightings {
-        list: Vec<Sighting>,
-        bib_chips: Vec<bibchip::BibChip>,
-    },
-    Events {
-        events: Vec<Event>,
-    },
-    EventYears {
-        years: Vec<String>
-    },
     ReadAutoUpload {
         status: uploader::Status,
     },
@@ -68,7 +52,6 @@ pub enum Responses {
         kind: String,
         version: usize,
         reads_subscribed: bool,
-        sightings_subscribed: bool,
         readers: Vec<Reader>,
         updatable: bool,
         auto_upload: uploader::Status,

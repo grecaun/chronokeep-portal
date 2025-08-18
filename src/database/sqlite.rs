@@ -1,4 +1,4 @@
-use crate::objects::{bibchip, setting, participant, read, sighting};
+use crate::objects::{setting, read};
 use crate::network::api;
 use crate::database::DBError;
 use crate::reader;
@@ -190,23 +190,6 @@ impl SQLite {
                     UNIQUE (nickname) ON CONFLICT REPLACE,
                     UNIQUE (uri, token) ON CONFLICT REPLACE
                 );",
-                "CREATE TABLE IF NOT EXISTS participants (
-                    part_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    bib VARCHAR(50) NOT NULL,
-                    first VARCHAR(50) NOT NULL,
-                    last VARCHAR(75) NOT NULL,
-                    birthdate VARCHAR(50) NOT NULL DEFAULT '',
-                    gender VARCHAR(10) NOT NULL DEFAULT 'u',
-                    age_group VARCHAR(100) NOT NULL,
-                    distance VARCHAR(75) NOT NULL,
-                    anonymous SMALLINT NOT NULL DEFAULT 0,
-                    UNIQUE (bib) ON CONFLICT REPLACE
-                );",
-                "CREATE TABLE IF NOT EXISTS bibchip (
-                    chip VARCHAR(100),
-                    bib VARCHAR(50),
-                    UNIQUE (chip) ON CONFLICT REPLACE
-                );",
                 "CREATE TABLE IF NOT EXISTS readers (
                     reader_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nickname VARCHAR(75) NOT NULL,
@@ -226,15 +209,9 @@ impl SQLite {
                     antenna INTEGER,
                     reader VARCHAR(75),
                     rssi VARCHAR(10),
-                    status SMALLINT NOT NULL DEFAULT 0,
                     uploaded SMALLINT NOT NULL DEFAULT 0,
                     UNIQUE (chip, seconds, milliseconds) ON CONFLICT IGNORE
                 );",
-                "CREATE TABLE IF NOT EXISTS sightings (
-                    chip_id INTEGER REFERENCES chip_reads(chip_id) ON DELETE CASCADE,
-                    part_id INTEGER REFERENCES participants(part_id) ON DELETE CASCADE,
-                    UNIQUE (chip_id, part_id) ON CONFLICT IGNORE
-                );"
             ];
             for table in database_tables {
                 if let Err(e) = tx.execute(table, ()) {
@@ -432,8 +409,6 @@ impl super::Database for SQLite {
     // Results API
     fn save_api(&self, api: &api::Api) -> Result<i64, DBError> {
         match api.kind() {
-            api::API_TYPE_CHRONOKEEP_RESULTS |
-            api::API_TYPE_CHRONOKEEP_RESULTS_SELF |
             api::API_TYPE_CHRONOKEEP_REMOTE |
             api::API_TYPE_CHRONOKEEP_REMOTE_SELF =>
             {},
@@ -491,8 +466,6 @@ impl super::Database for SQLite {
             match row {
                 Ok(r) => {
                     match r.kind() {
-                        api::API_TYPE_CHRONOKEEP_RESULTS |
-                        api::API_TYPE_CHRONOKEEP_RESULTS_SELF |
                         api::API_TYPE_CHRONOKEEP_REMOTE |
                         api::API_TYPE_CHRONOKEEP_REMOTE_SELF =>
                         {
@@ -519,10 +492,6 @@ impl super::Database for SQLite {
         if let Ok(tx) = self.conn.transaction() {
             let mut count = 0;
             for r in reads {
-                match r.status() {
-                    read::READ_STATUS_TOO_SOON | read::READ_STATUS_UNUSED | read::READ_STATUS_USED => {},
-                    _ => return Err(DBError::DataInsertionError(String::from("invalid chip read status")))
-                }
                 match tx.execute(
                     "INSERT INTO chip_reads (
                             chip, 
@@ -533,10 +502,9 @@ impl super::Database for SQLite {
                             antenna,
                             reader,
                             rssi,
-                            status,
                             uploaded
-                        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10);",
-                    (r.chip(), r.seconds(), r.milliseconds(), r.reader_seconds(), r.reader_milliseconds(), r.antenna(), r.reader(), r.rssi(), r.status(), r.uploaded())
+                        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9);",
+                    (r.chip(), r.seconds(), r.milliseconds(), r.reader_seconds(), r.reader_milliseconds(), r.antenna(), r.reader(), r.rssi(), r.uploaded())
                 ) {
                     Ok(val) => count = count + val,
                     Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
@@ -551,7 +519,7 @@ impl super::Database for SQLite {
     }
 
     fn get_reads(&self, start: i64, end: i64) -> Result<Vec<read::Read>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;") {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, uploaded FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -569,7 +537,6 @@ impl super::Database for SQLite {
                     row.get(7)?,
                     row.get(8)?,
                     row.get(9)?,
-                    row.get(10)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -588,7 +555,7 @@ impl super::Database for SQLite {
     }
 
     fn get_all_reads(&self) -> Result<Vec<read::Read>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads;") {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, uploaded FROM chip_reads;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -606,7 +573,6 @@ impl super::Database for SQLite {
                     row.get(7)?,
                     row.get(8)?,
                     row.get(9)?,
-                    row.get(10)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -644,45 +610,8 @@ impl super::Database for SQLite {
         }
     }
 
-    fn get_useful_reads(&self) -> Result<Vec<read::Read>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads WHERE status <> ?1;") {
-            Ok(stmt) => stmt,
-            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
-        };
-        let results = match stmt.query_map(
-            [read::READ_STATUS_TOO_SOON],
-            |row| {
-                Ok(read::Read::new(
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                    row.get(9)?,
-                    row.get(10)?,
-                ))
-            }) {
-                Ok(r) => r,
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            };
-        let mut output: Vec<read::Read> = Vec::new();
-        for row in results {
-            match row {
-                Ok(r) => {
-                    output.push(r);
-                },
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            }
-        }
-        return Ok(output);
-    }
-    
     fn get_not_uploaded_reads(&self) -> Result<Vec<read::Read>, DBError> {       
-        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, status, uploaded FROM chip_reads WHERE uploaded=?1;") {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, uploaded FROM chip_reads WHERE uploaded=?1;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -700,7 +629,6 @@ impl super::Database for SQLite {
                     row.get(7)?,
                     row.get(8)?,
                     row.get(9)?,
-                    row.get(10)?,
                 ))
             }) {
                 Ok(r) => r,
@@ -718,20 +646,6 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn reset_reads_status(&self) -> Result<usize, DBError> {
-        match self.conn.execute("DELETE FROM sightings;", []) {
-            Ok(_) => (),
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        };
-        match self.conn.execute(
-            "UPDATE chip_reads SET status=?1;",
-            [read::READ_STATUS_UNUSED]
-        ) {
-            Ok(num) => Ok(num),
-            Err(e) => Err(DBError::DataInsertionError(e.to_string()))
-        }
-    }
-
     fn reset_reads_upload(&self) -> Result<usize, DBError> {
         match self.conn.execute(
             "UPDATE chip_reads SET uploaded=?1;",
@@ -746,16 +660,11 @@ impl super::Database for SQLite {
         if let Ok(tx) = self.conn.transaction() {
             let mut count = 0;
             for r in reads {
-                match r.status() {
-                    read::READ_STATUS_TOO_SOON | read::READ_STATUS_UNUSED | read::READ_STATUS_USED => {},
-                    _ => return Err(DBError::DataInsertionError(String::from("invalid chip read status")))
-                }
                 match tx.execute(
                     "UPDATE chip_reads SET
-                            status=?1,
-                            uploaded=?2
-                            WHERE chip_id=?3;",
-                    (r.status(), r.uploaded(), r.id())
+                            uploaded=?1
+                            WHERE chip_id=?2;",
+                    (r.uploaded(), r.id())
                 ) {
                     Ok(_) => count += 1,
                     Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
@@ -767,373 +676,5 @@ impl super::Database for SQLite {
             return Ok(count);
         }
         return Err(DBError::ConnectionError(String::from("error starting transaction")));
-    }
-
-    // Participants
-    fn add_participants(&mut self, participants: &Vec<participant::Participant>) -> Result<usize, DBError> {
-        let mut count = 0;
-        if let Ok(tx) = self.conn.transaction() {
-            for p in participants {
-                match tx.execute(
-                    "INSERT INTO participants (
-                        bib,
-                        first,
-                        last,
-                        birthdate,
-                        gender,
-                        age_group,
-                        distance,
-                        anonymous
-                    ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-                    (
-                        p.bib(),
-                        p.first(),
-                        p.last(),
-                        p.birthdate(),
-                        p.gender(),
-                        p.age_group(),
-                        p.distance(),
-                        p.anonymous()
-                    )
-                ) {
-                    Ok(_) => count = count + 1,
-                    Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
-                }
-            }
-            if let Err(e) = tx.commit() {
-                return Err(DBError::DataInsertionError(e.to_string()))
-            }
-        }
-        Ok(count)
-    }
-
-    fn delete_participants(&self) -> Result<usize, DBError> {
-        match self.conn.execute(
-            "DELETE FROM bibchip;", 
-            []
-        ) {
-            Ok(_) => {},
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        }
-        match self.delete_sightings() {
-            Ok(_) => (),
-            Err(e) => return Err(e)
-        }
-        match self.conn.execute(
-            "DELETE FROM participants;",
-            []
-        ) {
-            Ok(num) => return Ok(num),
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        }
-    }
-
-    fn delete_participant(&self, bib: &str) -> Result<usize, DBError> {
-        match self.conn.execute(
-            "DELETE FROM bibchip WHERE bib=?1;", 
-            [bib]
-        ) {
-            Ok(_) => {},
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        }
-        match self.conn.execute(
-            "DELETE FROM participants WHERE bib=?1;",
-            [bib]
-        ) {
-            Ok(num) => return Ok(num),
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        }
-    }
-
-    fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT part_id, bib, first, last, birthdate, gender, age_group, distance, anonymous FROM participants;") {
-            Ok(stmt) => stmt,
-            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
-        };
-        let results = match stmt.query_map(
-            [],
-            |row| {
-                Ok(participant::Participant::new(
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                ))
-            }) {
-                Ok(r) => r,
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            };
-        let mut output: Vec<participant::Participant> = Vec::new();
-        for row in results {
-            match row {
-                Ok(p) => {
-                    output.push(p);
-                },
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            }
-        }
-        return Ok(output);
-    }
-
-    // BibChips
-    fn add_bibchips(&mut self, bibchips: &Vec<bibchip::BibChip>) -> Result<usize, DBError> {
-        let mut count = 0;
-        if let Ok(tx) = self.conn.transaction() {
-            for b in bibchips {
-                match tx.execute(
-                    "INSERT INTO bibchip (
-                        bib,
-                        chip
-                    ) VALUES (?1, ?2)",
-                    (
-                        b.bib(),
-                        b.chip()
-                    )
-                ) {
-                    Ok(_) => count = count + 1,
-                    Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
-                }
-            }
-            if let Err(e) = tx.commit() {
-                return Err(DBError::DataInsertionError(e.to_string()))
-            }
-        }
-        Ok(count)
-    }
-
-    fn delete_all_bibchips(&self) -> Result<usize, DBError> {
-        match self.conn.execute(
-            "DELETE FROM bibchip;", 
-            []
-        ) {
-            Ok(num) => return Ok(num),
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        }
-    }
-
-    fn delete_bibchips(&self, bib: &str) -> Result<usize, DBError> {
-        match self.conn.execute(
-            "DELETE FROM bibchip WHERE bib=?1;", 
-            [bib]
-        ) {
-            Ok(num) => return Ok(num),
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        }
-    }
-
-    fn get_bibchips(&self) -> Result<Vec<bibchip::BibChip>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT bib, chip FROM bibchip;") {
-            Ok(stmt) => stmt,
-            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
-        };
-        let results = match stmt.query_map(
-            [],
-            |row| {
-                Ok(bibchip::BibChip::new(
-                    row.get(0)?,
-                    row.get(1)?,
-                ))
-            }) {
-                Ok(b) => b,
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            };
-        let mut output: Vec<bibchip::BibChip> = Vec::new();
-        for row in results {
-            match row {
-                Ok(b) => {
-                    output.push(b);
-                },
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            }
-        }
-        return Ok(output)
-    }
-
-    // Sightings
-    fn save_sightings(&mut self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError> {
-        if let Ok(tx) = self.conn.transaction() {
-            let mut count = 0;
-            for s in sightings {
-                match tx.execute(
-                    "INSERT INTO sightings (
-                        chip_id,
-                        part_id
-                    ) VALUES (?1,?2);",
-                    (s.read.id(), s.participant.id())
-                ) {
-                    Ok(val) => count = count + val,
-                    Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
-                }
-            }
-            if let Err(e) = tx.commit() {
-                return Err(DBError::DataInsertionError(e.to_string()));
-            }
-            return Ok(count);
-        }
-        return Err(DBError::ConnectionError(String::from("error starting transaction")));
-    }
-
-    fn get_sightings(&self, start: i64, end: i64) -> Result<Vec<sighting::Sighting>, DBError> {
-        let mut stmt = match self.conn.prepare(
-            "SELECT 
-                part_id,
-                bib,
-                first,
-                last,
-                birthdate,
-                gender,
-                age_group,
-                distance,
-                chip,
-                anonymous,
-                chip_id,
-                seconds,
-                milliseconds,
-                reader_seconds,
-                reader_milliseconds,
-                antenna,
-                reader,
-                rssi,
-                status,
-                uploaded
-            FROM participants NATURAL JOIN sightings NATURAL JOIN chip_reads 
-            WHERE seconds >= ?1 AND seconds <= ?2;"
-        ) {
-            Ok(stmt) => stmt,
-            Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-        };
-        let results = match stmt.query_map(
-            [start, end],
-            |row| {
-                Ok(sighting::Sighting{
-                    participant: participant::Participant::new(
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(9)?
-                    ),
-                    read: read::Read::new(
-                        row.get(10)?,
-                        row.get(8)?,
-                        row.get(11)?,
-                        row.get(12)?,
-                        row.get(13)?,
-                        row.get(14)?,
-                        row.get(15)?,
-                        row.get(16)?,
-                        row.get(17)?,
-                        row.get(18)?,
-                        row.get(19)?,
-                    )
-                })
-            }
-        ) {
-            Ok(r) => r,
-            Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-        };
-        let mut output: Vec<sighting::Sighting> = Vec::new();
-        for row in results {
-            match row {
-                Ok(r) => output.push(r),
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            }
-        }
-        return Ok(output);
-    }
-
-    fn get_all_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError> {
-        let mut stmt = match self.conn.prepare(
-            "SELECT 
-                part_id,
-                bib,
-                first,
-                last,
-                birthdate,
-                gender,
-                age_group,
-                distance,
-                chip,
-                anonymous,
-                chip_id,
-                seconds,
-                milliseconds,
-                reader_seconds,
-                reader_milliseconds,
-                antenna,
-                reader,
-                rssi,
-                status,
-                uploaded
-            FROM participants NATURAL JOIN sightings NATURAL JOIN chip_reads;"
-        ) {
-            Ok(stmt) => stmt,
-            Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-        };
-        let results = match stmt.query_map([],
-            |row| {
-                Ok(sighting::Sighting{
-                    participant: participant::Participant::new(
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                        row.get(9)?,
-                    ),
-                    read: read::Read::new(
-                        row.get(10)?,
-                        row.get(8)?,
-                        row.get(11)?,
-                        row.get(12)?,
-                        row.get(13)?,
-                        row.get(14)?,
-                        row.get(15)?,
-                        row.get(16)?,
-                        row.get(17)?,
-                        row.get(18)?,
-                        row.get(19)?,
-                    )
-                })
-            }
-        ) {
-            Ok(r) => r,
-            Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-        };
-        let mut output: Vec<sighting::Sighting> = Vec::new();
-        for row in results {
-            match row {
-                Ok(r) => output.push(r),
-                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
-            }
-        }
-        return Ok(output);
-    }
-
-    fn delete_sightings(&self) -> Result<usize, DBError> {
-        let output = match self.conn.execute("DELETE FROM sightings;", []) {
-            Ok(num) => num,
-            Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
-        };
-        match self.conn.execute(
-            "UPDATE chip_reads SET status=?1;",
-            [read::READ_STATUS_UNUSED]
-        ) {
-            Ok(_) => (),
-            Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
-        }
-        Ok(output)
     }
 }

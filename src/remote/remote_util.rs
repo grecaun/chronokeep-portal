@@ -34,7 +34,6 @@ pub fn upload_all_reads(
                                 read.antenna(),
                                 String::from(read.reader()),
                                 String::from(read.rssi()),
-                                read.status(),
                                 read::READ_UPLOADED_TRUE
                             ))
                         }
@@ -71,7 +70,6 @@ pub fn upload_all_reads(
                             read.antenna(),
                             String::from(read.reader()),
                             String::from(read.rssi()),
-                            read.status(),
                             read::READ_UPLOADED_TRUE
                         ));
                     }
@@ -103,7 +101,6 @@ pub fn upload_all_reads(
                             read.antenna(),
                             String::from(read.reader()),
                             String::from(read.rssi()),
-                            read.status(),
                             read::READ_UPLOADED_TRUE
                         ));
                     }

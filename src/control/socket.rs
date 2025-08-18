@@ -8,7 +8,7 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{bibchip, event::Event, participant, read, setting::{self, Setting}, sighting}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, results, screen::CharacterDisplay, sound_board::Voice};
+use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, screen::CharacterDisplay, sound_board::Voice};
 
 use self::notifications::APINotification;
 
@@ -48,8 +48,6 @@ pub fn control_loop(
     let control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>> = Arc::new(Mutex::new(Default::default()));
     // Read repeaters are sockets that want reads to be sent to them as they're being saved.
     let read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>> = Arc::new(Mutex::new([false;MAX_CONNECTED]));
-    // Sighting repeaters are sockets that want sightings to be sent to them as they're being saved.
-    let sighting_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>> = Arc::new(Mutex::new([false;MAX_CONNECTED]));
     
     // Our control port will be semi-random at the start to try to ensure we don't try to get a port in use.
     let control_port = get_available_port();
@@ -122,32 +120,6 @@ pub fn control_loop(
         println!("Unable to get joiners lock.");
     }
 
-    // create our sightings processing thread
-    let sight_processor = Arc::new(processor::SightingsProcessor::new(
-        control_sockets.clone(),
-        sighting_repeaters.clone(),
-        sqlite.clone(),
-        keepalive.clone()
-    ));
-    let t_sight_processor = sight_processor.clone();
-    let s_joiner = thread::spawn(move|| {
-        t_sight_processor.start();
-    });
-
-    if let Ok(mut j) = joiners.lock() {
-        j.push(s_joiner);
-    } else {
-        println!("Unable to get joiners lock.");
-    }
-
-    // Reset reads status on load and re-process sightings.
-    if let Ok(sq) = sqlite.lock() {
-        if let Err(e) = sq.reset_reads_status() {
-            println!("Error trying to reset reads statuses: {e}");
-        };
-    }
-    sight_processor.notify();
-
     // Get all known readers so we can work on them later.
     match sqlite.lock() {
         Ok(sq) => {
@@ -213,7 +185,6 @@ pub fn control_loop(
         joiners.clone(),
         control_sockets.clone(),
         read_repeaters.clone(),
-        sight_processor.clone(),
         control.clone(),
         sqlite.clone(),
         read_saver.clone(),
@@ -271,24 +242,26 @@ pub fn control_loop(
 
     // create our reads uploader struct for auto uploading if the user wants to
     let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone(), control.clone(), screen.clone()));
+    let mut auto_upload = false;
     if let Ok(control) = control.lock() {
-        if control.auto_remote == true {
-            println!("Starting auto upload thread.");
-            let t_uploader = uploader.clone();
-            let t_joiner = thread::spawn(move|| {
-                t_uploader.run();
-            });
-            if let Ok(mut j) = joiners.lock() {
-                j.push(t_joiner);
-            }
-        } else {
-            if let Ok(mut screen) = screen.lock() {
-                if let Some(screen) = &mut *screen {
-                    screen.update_upload_status(uploader::Status::Stopped, 0);
-                }
+        auto_upload = control.auto_remote;
+    };
+    if auto_upload == true {
+        println!("Starting auto upload thread.");
+        let t_uploader = uploader.clone();
+        let t_joiner = thread::spawn(move|| {
+            t_uploader.run();
+        });
+        if let Ok(mut j) = joiners.lock() {
+            j.push(t_joiner);
+        }
+    } else {
+        if let Ok(mut screen) = screen.lock() {
+            if let Some(screen) = &mut *screen {
+                screen.update_upload_status(uploader::Status::Stopped, 0);
             }
         }
-    };
+    }
 
     // Start our code to check the battery level.
     #[cfg(target_os = "linux")]
@@ -353,10 +326,8 @@ pub fn control_loop(
                 let t_readers = readers.clone();
                 let t_joiners = joiners.clone();
                 let t_read_repeaters = read_repeaters.clone();
-                let t_sighting_repeaters = sighting_repeaters.clone();
                 let t_sqlite = sqlite.clone();
                 let t_control_sockets = control_sockets.clone();
-                let t_sight_processor = sight_processor.clone();
                 let t_uploader = uploader.clone();
                 let t_ac_state = ac_state.clone();
                 let t_sound_notifier = sound_notifier.clone();
@@ -392,9 +363,7 @@ pub fn control_loop(
                                 t_readers,
                                 t_joiners,
                                 t_read_repeaters,
-                                t_sighting_repeaters,
                                 t_control_sockets,
-                                t_sight_processor,
                                 t_sqlite,
                                 t_uploader,
                                 t_ac_state,
@@ -442,9 +411,6 @@ pub fn control_loop(
             }
         }
     }
-    println!("Stopping sightings processor.");
-    sight_processor.stop();
-    sight_processor.notify();
     println!("Finished control thread shutdown.");
     if let Ok(control) = control.lock() {
         if control.auto_remote {
@@ -509,9 +475,7 @@ fn handle_stream(
     readers: Arc<Mutex<Vec<reader::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-    sighting_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
-    sight_processor: Arc<processor::SightingsProcessor>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     uploader: Arc<uploader::Uploader>,
     ac_state: Arc<Mutex<auto_connect::State>>,
@@ -607,7 +571,7 @@ fn handle_stream(
                     // tell then to close it and then break the loop to exit the thread
                     break;
                 },
-                requests::Request::Connect { reads, sightings } => {
+                requests::Request::Connect { reads } => {
                     let mut name = String::from("Unknown");
                     if let Ok(sq) = sqlite.lock() {
                         if let Ok(set) = sq.get_setting(SETTING_PORTAL_NAME) {
@@ -617,11 +581,8 @@ fn handle_stream(
                     if let Ok(mut repeaters) = read_repeaters.lock() {
                         repeaters[index] = reads;
                     }
-                    if let Ok(mut repeaters) = sighting_repeaters.lock() {
-                        repeaters[index] = sightings;
-                    }
                     if let Ok(u_readers) = readers.try_lock() {
-                        no_error = write_connection_successful(&mut stream, name, reads, sightings, &*u_readers, &uploader);
+                        no_error = write_connection_successful(&mut stream, name, reads, &*u_readers, &uploader);
                     } else {
                         no_error = write_error(&mut stream, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
                     }
@@ -802,7 +763,6 @@ fn handle_stream(
                                                     old_reader.auto_connect(),
                                                     control_sockets.clone(),
                                                     read_repeaters.clone(),
-                                                    sight_processor.clone(),
                                                     screen.clone(),
                                                     readers.clone(),
                                                 ) {
@@ -812,7 +772,6 @@ fn handle_stream(
                                                             joiners.clone(),
                                                             control_sockets.clone(),
                                                             read_repeaters.clone(),
-                                                            sight_processor.clone(),
                                                             control.clone(),
                                                             sqlite.clone(),
                                                             read_saver.clone(),
@@ -940,14 +899,12 @@ fn handle_stream(
                                             reader.set_control_sockets(control_sockets.clone());
                                             reader.set_readers(readers.clone());
                                             reader.set_read_repeaters(read_repeaters.clone());
-                                            reader.set_sight_processor(sight_processor.clone());
                                             reader.set_screen(screen.clone());
                                             let reconnector = Reconnector::new(
                                                 readers.clone(),
                                                 joiners.clone(),
                                                 control_sockets.clone(),
                                                 read_repeaters.clone(),
-                                                sight_processor.clone(),
                                                 control.clone(),
                                                 sqlite.clone(),
                                                 read_saver.clone(),
@@ -1126,7 +1083,6 @@ fn handle_stream(
                                 super::SETTING_CHIP_TYPE |
                                 super::SETTING_PORTAL_NAME |
                                 super::SETTING_READ_WINDOW |
-                                super::SETTING_SIGHTING_PERIOD |
                                 super::SETTING_PLAY_SOUND |
                                 super::SETTING_UPLOAD_INTERVAL |
                                 super::SETTING_VOLUME |
@@ -1350,59 +1306,6 @@ fn handle_stream(
                                 }
                             }
                         },
-                        api::API_TYPE_CHRONOKEEP_RESULTS |
-                        api::API_TYPE_CHRONOKEEP_RESULTS_SELF => {
-                            if let Ok(sq) = sqlite.lock() {
-                                let mut t_uri = match kind.as_str() {
-                                    api::API_TYPE_CHRONOKEEP_RESULTS => {
-                                        String::from(api::API_URI_CHRONOKEEP_RESULTS)
-                                    },
-                                    _ => {
-                                        uri
-                                    }
-                                };
-                                if !t_uri.ends_with("/") {
-                                    t_uri = format!("{t_uri}/")
-                                }
-                                match sq.save_api(&api::Api::new(
-                                    id,
-                                    name,
-                                    kind,
-                                    token,
-                                    t_uri
-                                )) {
-                                    Ok(_) => {
-                                        match sq.get_apis() {
-                                            Ok(apis) => {
-                                                if let Ok(c_socks) = control_sockets.lock() {
-                                                    for sock in c_socks.iter() {
-                                                        if let Some(sock) = sock {
-                                                            // we might be writing to other sockets
-                                                            // so errors here shouldn't close our connection
-                                                            _ = write_api_list(&sock, &apis);
-                                                        }
-                                                    }
-                                                } else {
-                                                    no_error = write_api_list(&stream, &apis);
-                                                }
-                                            },
-                                            Err(e) => {
-                                                println!("error getting api list. {e}");
-                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                    message: format!("error getting api list: {e}")
-                                                });
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        println!("Error saving api {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error saving api {e}")
-                                        });
-                                    }
-                                }
-                            }
-                        },
                         other => {
                             println!("'{other}' is not a valid api type");
                             no_error = write_error(&stream, errors::Errors::InvalidApiType {
@@ -1444,8 +1347,6 @@ fn handle_stream(
                                             remote_exists = true;
                                         }
                                     },
-                                    api::API_TYPE_CHRONOKEEP_RESULTS |
-                                    api::API_TYPE_CHRONOKEEP_RESULTS_SELF => {},
                                     _ => {
                                         invalid_type = true;
                                     }
@@ -1465,9 +1366,6 @@ fn handle_stream(
                                 // check if we have any errors saving apis
                                 for api in list {
                                     let mut t_uri = match api.kind() {
-                                        api::API_TYPE_CHRONOKEEP_RESULTS => {
-                                            String::from(api::API_URI_CHRONOKEEP_RESULTS)
-                                        },
                                         _ => {
                                             String::from(api.uri())
                                         }
@@ -1529,8 +1427,6 @@ fn handle_stream(
                                     api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
                                         remote_count += 1
                                     },
-                                    api::API_TYPE_CHRONOKEEP_RESULTS |
-                                    api::API_TYPE_CHRONOKEEP_RESULTS_SELF => {},
                                     _ => {
                                         invalid_type = true;
                                     }
@@ -1732,303 +1628,6 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiResultsEventsGet { api_id } => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.get_apis() {
-                            Ok(apis) => {
-                                for api in apis {
-                                    if api.id() == api_id {
-                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
-                                            no_error = match get_events(&http_client, api) {
-                                                Ok(events) => {
-                                                    write_event_list(&stream, events)
-                                                },
-                                                Err(e) => {
-                                                    println!("error getting events: {:?}", e);
-                                                    write_error(&stream, e)
-                                                }
-                                            };
-                                        } else {
-                                            let kind = api.kind();
-                                            println!("invalid api type specified: {kind}");
-                                            no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("expected Chronokeep results type") })
-                                        }
-                                        break;
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("error getting apis from database: {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting participants from database: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::ApiResultsEventYearsGet { api_id, event_slug } => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.get_apis() {
-                            Ok(apis) => {
-                                for api in apis {
-                                    if api.id() == api_id {
-                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
-                                            no_error = match get_event_years(&http_client, api, event_slug) {
-                                                Ok(years) => {
-                                                    write_event_years(&stream, years)
-                                                },
-                                                Err(e) => {
-                                                    println!("error getting event years: {:?}", e);
-                                                    write_error(&stream, e)
-                                                }
-                                            };
-                                        } else {
-                                            let kind = api.kind();
-                                            println!("invalid api type specified: {kind}");
-                                            no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("expected Chronokeep results type") })
-                                        }
-                                        break;
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("error getting apis from database: {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting participants from database: {e}")
-                                })
-                            }
-                        }
-                    }
-                },
-                requests::Request::ApiResultsParticipantsGet { api_id, event_slug, event_year } => {
-                    if let Ok(mut sq) = sqlite.lock() {
-                        match sq.get_apis() {
-                            Ok(apis) => {
-                                for api in apis {
-                                    if api.id() == api_id {
-                                        if api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS || api.kind() == api::API_TYPE_CHRONOKEEP_RESULTS_SELF {
-                                            // try to get the participants from the API
-                                            let new_parts = match get_participants(&http_client, &api, &event_slug, &event_year) {
-                                                Ok(new_parts) => {
-                                                    new_parts
-                                                },
-                                                Err(e) => {
-                                                    println!("error getting participants from api: {:?}", e);
-                                                    no_error = write_error(&stream, e);
-                                                    break;
-                                                }
-                                            };
-                                            let new_bibchips = match get_bibchips(&http_client, &api, &event_slug, &event_year) {
-                                                Ok(new_bibchips) => {
-                                                    new_bibchips
-                                                },
-                                                Err(e) => {
-                                                    println!("error getting bibchips from api: {:?}", e);
-                                                    no_error = write_error(&stream, e);
-                                                    break;
-                                                }
-                                            };
-                                            // delete old participants
-                                            match sq.delete_participants() {
-                                                Ok(_) => { },
-                                                Err(e) => {
-                                                    println!("error deleting participants: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                        message: format!("error deleting participants: {e}")
-                                                    });
-                                                    break;
-                                                }
-                                            }
-                                            // if participant deletion was successful, add new participants
-                                            // first translate into participants and bibchips
-                                            let mut parts: Vec<participant::Participant> = Vec::new();
-                                            for p in &new_parts {
-                                                parts.push(p.get_participant());
-                                            }
-                                            match sq.add_participants(&parts) {
-                                                Ok(_) => { },
-                                                Err(e) => {
-                                                    println!("error adding participants: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                        message: format!("error adding participants: {e}")
-                                                    });
-                                                    break;
-                                                },
-                                            }
-                                            match sq.add_bibchips(&new_bibchips) {
-                                                Ok(_) => { },
-                                                Err(e) => {
-                                                    println!("error adding bibchips: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                        message: format!("error adding bibchips: {e}")
-                                                    });
-                                                    break;
-                                                }
-                                            }
-                                            // get participants and send them to the connection that had us update participants
-                                            match sq.get_participants() {
-                                                Ok(parts) => {
-                                                    no_error = write_participants(&stream, &parts)
-                                                },
-                                                Err(e) => {
-                                                    println!("error getting participants: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                        message: format!("error getting participants: {e}")
-                                                    });
-                                                }
-                                            };
-                                        } else {
-                                            let kind = api.kind();
-                                            println!("invalid api type specified: {kind}");
-                                            no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("expected Chronokeep results type") })
-                                        }
-                                        break;
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("error getting apis from database: {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting participants from database: {e}")
-                                })
-                            }
-                        }
-                    }
-                },
-                requests::Request::ParticipantsGet => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.get_participants() {
-                            Ok(parts) => {
-                                no_error = write_participants(&stream, &parts);
-                            },
-                            Err(e) => {
-                                println!("error getting participants from database. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting participants from database: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::ParticipantsRemove => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.delete_participants() {
-                            Ok(_) => {
-                                match sq.get_participants() {
-                                    Ok(parts) => {
-                                        if let Ok(c_socks) = control_sockets.lock() {
-                                            for sock in c_socks.iter() {
-                                                if let Some(sock) = sock {
-                                                    // we might be writing to other sockets
-                                                    // so errors here shouldn't close our connection
-                                                    _ = write_participants(&sock, &parts);
-                                                }
-                                            }
-                                        } else {
-                                            no_error = write_participants(&stream, &parts);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        println!("error getting participants. {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error getting participants: {e}")
-                                        });
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("Error deleting participants. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error deleting participants: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::ParticipantsAdd { participants } => {
-                    if let Ok(mut sq) = sqlite.lock() {
-                        let mut parts: Vec<participant::Participant> = Vec::new();
-                        for p in participants {
-                            parts.push(p.get_participant());
-                        }
-                        match sq.add_participants(&parts) {
-                            Ok(_) => {
-                                match sq.get_participants() {
-                                    Ok(parts) => {
-                                        if let Ok(c_socks) = control_sockets.lock() {
-                                            for sock in c_socks.iter() {
-                                                if let Some(sock) = sock {
-                                                    // we might be writing to other sockets
-                                                    // so errors here shouldn't close our connection
-                                                    _ = write_participants(&sock, &parts);
-                                                }
-                                            }
-                                        } else {
-                                            no_error = write_participants(&stream, &parts);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        println!("error getting participants. {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error getting participants: {e}")
-                                        });
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("Error adding participants. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error adding participants: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::BibChipsGet => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.get_bibchips() {
-                            Ok(bib_chips) => {
-                                no_error = write_bibchips(&stream, &bib_chips);
-                            },
-                            Err(e) => {
-                                println!("error getting bibchips from database. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting bibchips from database: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::BibChipsRemove => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.delete_all_bibchips() {
-                            Ok(num) => {
-                                no_error = write_success(&stream, num);
-                            },
-                            Err(e) => {
-                                println!("Error deleting bibchips. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error deleting bibchips: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::BibChipsAdd { bib_chips } => {
-                    if let Ok(mut sq) = sqlite.lock() {
-                        match sq.add_bibchips(&bib_chips) {
-                            Ok(num) => {
-                                no_error = write_success(&stream, num);
-                            },
-                            Err(e) => {
-                                println!("Error adding bibchips. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error adding bibchips: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
                 requests::Request::ReadsAdd { read } => {
                     if read.is_valid() == false {
                         no_error = write_error(&stream, errors::Errors::InvalidRead)
@@ -2052,7 +1651,6 @@ fn handle_stream(
                                             }
                                         }
                                     }
-                                    sight_processor.notify();
                                 },
                                 Err(e) => {
                                     println!("Error saving manual read: {e}");
@@ -2094,56 +1692,6 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::SightingsGet { start_seconds, end_seconds } => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.get_sightings(start_seconds, end_seconds) {
-                            Ok(sightings) => {
-                                match sq.get_bibchips() {
-                                    Ok(bibchips) => {
-                                        no_error = write_sightings(&stream, &sightings, &bibchips);
-                                    },
-                                    Err(e) => {
-                                        println!("Error getting bibchips. {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error getting bibchips: {e}")
-                                        });
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("Error getting sightings. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting sightings: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::SightingsGetAll => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.get_all_sightings() {
-                            Ok(sightings) => {
-                                match sq.get_bibchips() {
-                                    Ok(bibchips) => {
-                                        no_error = write_sightings(&stream, &sightings, &bibchips);
-                                    },
-                                    Err(e) => {
-                                        println!("Error getting bibchips. {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error getting bibchips: {e}")
-                                        });
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                println!("Error getting sightings. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error getting sightings: {e}")
-                                })
-                            }
-                        }
-                    }
-                },
                 requests::Request::ReadsDelete { start_seconds, end_seconds } => {
                     if let Ok(sq) = sqlite.lock() {
                         match sq.delete_reads(start_seconds, end_seconds) {
@@ -2167,21 +1715,6 @@ fn handle_stream(
                             },
                             Err(e) => {
                                 println!("Error deleting reads. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                    message: format!("error deleting reads: {e}")
-                                });
-                            }
-                        }
-                    }
-                },
-                requests::Request::SightingsDelete => {
-                    if let Ok(sq) = sqlite.lock() {
-                        match sq.delete_sightings() {
-                            Ok(count) => {
-                                no_error = write_success(&stream, count);
-                            }
-                            Err(e) => {
-                                println!("Error deleting sightings. {e}");
                                 no_error = write_error(&stream, errors::Errors::DatabaseError {
                                     message: format!("error deleting reads: {e}")
                                 });
@@ -2236,7 +1769,7 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::Subscribe { reads, sightings } => {
+                requests::Request::Subscribe { reads } => {
                     let mut message:String = String::from("");
                     if let Ok(mut repeaters) = read_repeaters.lock() {
                         if (repeaters[index] == true && reads == true)
@@ -2244,14 +1777,6 @@ fn handle_stream(
                             message = format!("reads already set to {reads}")
                         } else {
                             repeaters[index] = reads
-                        }
-                    }
-                    if let Ok(mut repeaters) = sighting_repeaters.lock() {
-                        if (repeaters[index] == true && sightings == true)
-                        || (repeaters[index] == false && sightings == false) {
-                            message = if message.len() > 0 {format!("{message} sightings already set to {sightings}")} else {format!("sightings already set to {sightings}")}
-                        } else {
-                            repeaters[index] = sightings
                         }
                     }
                     if message.len() > 0 {
@@ -2351,11 +1876,6 @@ fn handle_stream(
     println!("Closing socket for index {index}.");
     // unsubscribe to notifications
     if let Ok(mut repeaters) = read_repeaters.lock() {
-        if index < MAX_CONNECTED {
-            repeaters[index] = false;
-        }
-    }
-    if let Ok(mut repeaters) = sighting_repeaters.lock() {
         if index < MAX_CONNECTED {
             repeaters[index] = false;
         }
@@ -2516,7 +2036,6 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
         super::SETTING_CHIP_TYPE,
         super::SETTING_PORTAL_NAME,
         super::SETTING_READ_WINDOW,
-        super::SETTING_SIGHTING_PERIOD,
         super::SETTING_PLAY_SOUND,
         super::SETTING_VOLUME,
         super::SETTING_VOICE,
@@ -2838,50 +2357,6 @@ pub fn write_reads(
     true
 }
 
-pub fn write_sightings(
-    stream: &TcpStream,
-    sightings: &Vec<sighting::Sighting>,
-    bibchips: &Vec<bibchip::BibChip>
-) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Sightings {
-        list: sightings.to_vec(),
-        bib_chips: bibchips.to_vec()
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("14/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("14/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
-}
-
 fn write_success(
     stream: &TcpStream,
     count: usize
@@ -2924,95 +2399,10 @@ fn write_success(
     true
 }
 
-fn write_bibchips(
-    stream: &TcpStream,
-    bibchips: &Vec<bibchip::BibChip>
-) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::BibChips {
-        bib_chips: bibchips.to_vec(),
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("16/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("16/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
-}
-
-fn write_participants(
-    stream: &TcpStream,
-    parts: &Vec<participant::Participant>
-) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Participants {
-        participants: parts.to_vec(),
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("8/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("8/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
-}
-
 fn write_connection_successful(
     stream: &TcpStream,
     name: String,
     reads: bool,
-    sightings: bool,
     u_readers: &Vec<reader::Reader>,
     uploader: &Arc<Uploader>
 ) -> bool {
@@ -3047,7 +2437,6 @@ fn write_connection_successful(
         kind: String::from(CONNECTION_TYPE),
         version: CONNECTION_VERS,
         reads_subscribed: reads,
-        sightings_subscribed: sightings,
         readers: list,
         updatable: updatable,
         auto_upload: uploader.status(),
@@ -3166,88 +2555,6 @@ pub fn write_disconnect(
     true
 }
 
-pub fn write_event_list(
-    stream: &TcpStream,
-    events: Vec<Event>
-) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Events {
-        events
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("12/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("12/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
-}
-
-pub fn write_event_years(
-    stream: &TcpStream,
-    years: Vec<String>
-) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::EventYears { years }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("13/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("13/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
-}
-
 pub fn write_uploader_status(
     stream: &TcpStream,
     status: uploader::Status
@@ -3329,174 +2636,6 @@ pub fn upload_reads(
         other => {
             println!("invalid status code: {other}");
             return Err(errors::Errors::ServerError { message: format!("invalid status code: {other}") })
-        }
-    };
-    Ok(output)
-}
-
-fn get_events(
-    http_client: &reqwest::blocking::Client,
-    api: Api
-) -> Result<Vec<Event>, errors::Errors> {
-    let url = api.uri();
-    let response = match http_client.get(format!("{url}event/all"))
-        .headers(construct_headers(api.token()))
-        .send() {
-            Ok(resp) => resp,
-            Err(e) => {
-                println!("error trying to talk to api: {e}");
-                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
-            }
-        };
-    let output = match response.status() {
-        reqwest::StatusCode::OK => {
-            let resp_body: results::responses::GetEventsResponse = match response.json() {
-                Ok(it) => it,
-                Err(e) => {
-                    println!("error trying to parse response from api: {e}");
-                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
-                }
-            };
-            resp_body.events
-        },
-        reqwest::StatusCode::NOT_FOUND => {
-            println!("event not found");
-            return Err(errors::Errors::NotFound);
-        }
-        other => {
-            println!("invalid status code: {other}");
-            return Err(errors::Errors::ServerError { message: format!("invalid status code: {other}") })
-        }
-    };
-    Ok(output)
-}
-
-fn get_event_years(
-    http_client: &reqwest::blocking::Client,
-    api: Api,
-    slug: String
-) -> Result<Vec<String>, errors::Errors> {
-    let url = api.uri();
-    let response = match http_client.post(format!("{url}event"))
-        .headers(construct_headers(api.token()))
-        .json(&results::requests::GetEventRequest{
-            slug,
-        })
-        .send() {
-            Ok(resp) => resp,
-            Err(e) => {
-                println!("error trying to talk to api: {e}");
-                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
-            }
-        };
-    let output = match response.status() {
-        reqwest::StatusCode::OK => {
-            let resp_body: results::responses::GetEventResponse = match response.json() {
-                Ok(it) => it,
-                Err(e) => {
-                    println!("error trying to parse response from api: {e}");
-                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
-                },
-            };
-            let mut years: Vec<String> = Vec::new();
-            for y in resp_body.event_years {
-                years.push(y.year);
-            }
-            years
-        },
-        reqwest::StatusCode::NOT_FOUND => {
-            println!("event not found");
-            return Err(errors::Errors::NotFound);
-        }
-        other => {
-            println!("invalid status code: {other}");
-            return Err(errors::Errors::ServerError { message: String::from("invalid status code") })
-        }
-    };
-    Ok(output)
-}
-
-fn get_participants(
-    http_client: &reqwest::blocking::Client,
-    api: &Api,
-    slug: &str,
-    year: &str
-) -> Result<Vec<requests::RequestParticipant>, errors::Errors> {
-    let url = api.uri();
-    let response = match http_client.get(format!("{url}participants"))
-        .headers(construct_headers(api.token()))
-        .json(&results::requests::GetParticipantsRequest{
-            slug: String::from(slug),
-            year: String::from(year)
-        })
-        .send() {
-            Ok(resp) => resp,
-            Err(e) => {
-                println!("error trying to talk to api: {e}");
-                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
-            }
-        };
-    let output = match response.status() {
-        reqwest::StatusCode::OK => {
-            let resp_body: results::responses::GetParticipantsResponse = match response.json() {
-                Ok(it) => it,
-                Err(e) => {
-                    println!("error trying to parse response from api: {e}");
-                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
-                }
-            };
-            resp_body.participants
-        },
-        reqwest::StatusCode::NOT_FOUND => {
-            println!("event not found");
-            return Err(errors::Errors::NotFound);
-        }
-        other => {
-            println!("invalid status code: {other}");
-            return Err(errors::Errors::ServerError { message: String::from("invalid status code") })
-        }
-    };
-    Ok(output)
-}
-
-fn get_bibchips(
-    http_client: &reqwest::blocking::Client,
-    api: &Api,
-    slug: &str,
-    year: &str
-) -> Result<Vec<bibchip::BibChip>, errors::Errors> {
-    let url = api.uri();
-    let response = match http_client.get(format!("{url}bibchips"))
-        .headers(construct_headers(api.token()))
-        .json(&results::requests::GetBibChipsRequest{
-            slug: String::from(slug),
-            year: String::from(year)
-        })
-        .send() {
-            Ok(resp) => resp,
-            Err(e) => {
-                println!("error trying to talk to api: {e}");
-                return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
-            }
-        };
-    let output = match response.status() {
-        reqwest::StatusCode::OK => {
-            let resp_body: results::responses::GetBibChipsResponse = match response.json() {
-                Ok(it) => it,
-                Err(e) => {
-                    println!("error trying to parse response from api: {e}");
-                    return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
-                }
-            };
-            resp_body.bib_chips
-        },
-        reqwest::StatusCode::NOT_FOUND => {
-            println!("event not found");
-            return Err(errors::Errors::NotFound);
-        }
-        other => {
-            println!("invalid status code: {other}");
-            return Err(errors::Errors::ServerError { message: String::from("invalid status code") })
         }
     };
     Ok(output)

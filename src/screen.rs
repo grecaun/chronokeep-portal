@@ -11,7 +11,7 @@ use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 #[cfg(target_os = "linux")]
 use rppal::{hal, i2c::I2c};
 
-use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_SIGHTING_PERIOD, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self, SightingsProcessor}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -21,23 +21,25 @@ pub const READING_MENU: u8 = 2;
 pub const ABOUT_MENU: u8 = 3;
 pub const SHUTDOWN_MENU: u8 = 4;
 pub const STARTUP_MENU: u8 = 5;
+pub const RESTART_MENU: u8 = 6;
 pub const SCREEN_OFF: u8 = 15;
 
 pub const MAIN_START_READING: u8 = 0;
 pub const MAIN_SETTINGS: u8 = 1;
 pub const MAIN_ABOUT: u8 = 2;
-pub const MAIN_SHUTDOWN: u8 = 3;
+pub const MAIN_RESTART: u8 = 3;
+pub const MAIN_SHUTDOWN: u8 = 4;
 
-pub const SETTINGS_SIGHTING_PERIOD: u8 = 0;
-pub const SETTINGS_READ_WINDOW: u8 = 1;
-pub const SETTINGS_CHIP_TYPE: u8 = 2;
-pub const SETTINGS_PLAY_SOUND: u8 = 3;
-pub const SETTINGS_VOLUME: u8 = 4;
-pub const SETTINGS_VOICE: u8 = 5;
-pub const SETTINGS_AUTO_UPLOAD: u8 = 6;
-pub const SETTINGS_UPLOAD_INTERVAL: u8 = 7;
-pub const SETTINGS_ENABLE_NTFY: u8 = 8;
-pub const SETTINGS_SET_TIME: u8 = 9;
+pub const SETTINGS_READ_WINDOW: u8 = 0;
+pub const SETTINGS_CHIP_TYPE: u8 = 1;
+pub const SETTINGS_PLAY_SOUND: u8 = 2;
+pub const SETTINGS_VOLUME: u8 = 3;
+pub const SETTINGS_VOICE: u8 = 4;
+pub const SETTINGS_AUTO_UPLOAD: u8 = 5;
+pub const SETTINGS_UPLOAD_INTERVAL: u8 = 6;
+pub const SETTINGS_ENABLE_NTFY: u8 = 7;
+pub const SETTINGS_SET_TIME_WEB: u8 = 8;
+pub const SETTINGS_SET_TIME_MANUAL: u8 = 9;
 
 #[derive(Clone)]
 pub struct CharacterDisplay {
@@ -47,7 +49,6 @@ pub struct CharacterDisplay {
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-    sight_processor: Arc<SightingsProcessor>,
     button_presses: Arc<Mutex<Vec<ButtonPress>>>,
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
@@ -82,7 +83,6 @@ impl CharacterDisplay {
         sqlite: Arc<Mutex<sqlite::SQLite>>,
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-        sight_processor: Arc<SightingsProcessor>,
         ac_state: Arc<Mutex<auto_connect::State>>,
         read_saver: Arc<processor::ReadSaver>,
         sound: Arc<SoundNotifier>,
@@ -97,7 +97,6 @@ impl CharacterDisplay {
             sqlite,
             control_sockets,
             read_repeaters,
-            sight_processor,
             button_presses: Arc::new(Mutex::new(Vec::new())),
             info: Arc::new(Mutex::new(DisplayInfo {
                 title_bar: format!("{:<20}", "Chronokeep"),
@@ -106,6 +105,7 @@ impl CharacterDisplay {
                     " > Start Reading    ".to_string(),
                     "   Settings         ".to_string(),
                     "   About            ".to_string(),
+                    "   Restart          ".to_string(),
                     "   Shutdown         ".to_string(),
                 ],
                 settings_menu: Vec::new(),
@@ -190,13 +190,13 @@ impl CharacterDisplay {
     pub fn update_menu(&mut self) {
         if let Ok(mut info) = self.info.lock() {
             match self.current_menu[0] {
-                MAIN_MENU => { // main menu, max ix 3
+                MAIN_MENU => { // main menu, max ix 4
                     for line in info.main_menu.iter_mut() {
                         line.replace_range(1..2, " ");
                     }
                     info.main_menu[self.current_menu[1] as usize].replace_range(1..2, ">");
                 },
-                SETTINGS_MENU => { // settings menu, max ix 9
+                SETTINGS_MENU => { // settings menu, max ix 8
                     for line in info.settings_menu.iter_mut() {
                         line.replace_range(1..2, " ");
                     }
@@ -223,7 +223,6 @@ impl CharacterDisplay {
                 if control.enable_ntfy {
                     enable_ntfy = "yes";
                 }
-                info.settings_menu.push(format!("   Sightings   {:>4} ", control.sighting_period));
                 info.settings_menu.push(format!("   Read Window {:>4} ", control.read_window));
                 info.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
                 info.settings_menu.push(format!("   Play Sounds {:>4} ", play_sound));
@@ -232,7 +231,8 @@ impl CharacterDisplay {
                 info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
                 info.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
                 info.settings_menu.push(format!("   Enable NTFY {:>4} ", enable_ntfy));
-                info.settings_menu.push(format!("   Set Time         "));
+                info.settings_menu.push(format!("   Set Time (Web)   "));
+                info.settings_menu.push(format!("   Set Time (Manual)"));
             }
             for line in info.settings_menu.iter_mut() {
                 line.replace_range(1..2, " ");
@@ -316,10 +316,10 @@ impl CharacterDisplay {
                                     }
                                 }
                                 SETTINGS_MENU => {
-                                    if self.current_menu[1] > SETTINGS_SIGHTING_PERIOD {
+                                    if self.current_menu[1] > SETTINGS_READ_WINDOW {
                                         self.current_menu[1] -= 1;
                                     } else {
-                                        self.current_menu[1] = SETTINGS_SET_TIME;
+                                        self.current_menu[1] = SETTINGS_SET_TIME_MANUAL;
                                     }
                                 }
                                 ABOUT_MENU | STARTUP_MENU => {
@@ -356,10 +356,10 @@ impl CharacterDisplay {
                                     }
                                 }
                                 SETTINGS_MENU => { // settings menu, max ix 9
-                                    if self.current_menu[1] < SETTINGS_SET_TIME {
+                                    if self.current_menu[1] < SETTINGS_SET_TIME_MANUAL {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to 0
-                                        self.current_menu[1] = SETTINGS_SIGHTING_PERIOD;
+                                        self.current_menu[1] = SETTINGS_READ_WINDOW;
                                     }
                                 }
                                 ABOUT_MENU | STARTUP_MENU => { // 3 == about
@@ -380,16 +380,6 @@ impl CharacterDisplay {
                                 SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
                                         match self.current_menu[1] {
-                                            SETTINGS_SIGHTING_PERIOD => {  // Sighting Period
-                                                if control.sighting_period > 29 {
-                                                    if let Ok(sq) = self.sqlite.lock() {
-                                                        control.sighting_period -= 30;
-                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_SIGHTING_PERIOD.to_string(), control.sighting_period.to_string())) {
-                                                            println!("Error saving setting: {e}");
-                                                        }
-                                                    }
-                                                }
-                                            }
                                             SETTINGS_READ_WINDOW => {  // Read Window
                                                 if control.read_window > 5 {
                                                     if let Ok(sq) = self.sqlite.lock() {
@@ -530,13 +520,11 @@ impl CharacterDisplay {
                                                                     reader.set_control_sockets(self.control_sockets.clone());
                                                                     reader.set_readers(self.readers.clone());
                                                                     reader.set_read_repeaters(self.read_repeaters.clone());
-                                                                    reader.set_sight_processor(self.sight_processor.clone());
                                                                     let reconnector = Reconnector::new(
                                                                         self.readers.clone(),
                                                                         self.joiners.clone(),
                                                                         self.control_sockets.clone(),
                                                                         self.read_repeaters.clone(),
-                                                                        self.sight_processor.clone(),
                                                                         self.control.clone(),
                                                                         self.sqlite.clone(),
                                                                         self.read_saver.clone(),
@@ -583,7 +571,7 @@ impl CharacterDisplay {
                                         },
                                         MAIN_SETTINGS => { // Settings
                                             self.current_menu[0] = SETTINGS_MENU;
-                                            self.current_menu[1] = SETTINGS_SIGHTING_PERIOD;
+                                            self.current_menu[1] = SETTINGS_READ_WINDOW;
                                             self.update_settings();
                                             self.update_menu();
                                         }
@@ -654,16 +642,6 @@ impl CharacterDisplay {
                                 SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
                                         match self.current_menu[1] {
-                                            SETTINGS_SIGHTING_PERIOD => {  // Sighting Period
-                                                if control.sighting_period < 99990 {
-                                                    if let Ok(sq) = self.sqlite.lock() {
-                                                        control.sighting_period += 30;
-                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_SIGHTING_PERIOD.to_string(), control.sighting_period.to_string())) {
-                                                            println!("Error saving setting: {e}");
-                                                        }
-                                                    }
-                                                }
-                                            }
                                             SETTINGS_READ_WINDOW => {  // Read Window
                                                 if control.read_window < 50 {
                                                     if let Ok(sq) = self.sqlite.lock() {
@@ -804,13 +782,11 @@ impl CharacterDisplay {
                                                                     reader.set_control_sockets(self.control_sockets.clone());
                                                                     reader.set_readers(self.readers.clone());
                                                                     reader.set_read_repeaters(self.read_repeaters.clone());
-                                                                    reader.set_sight_processor(self.sight_processor.clone());
                                                                     let reconnector = Reconnector::new(
                                                                         self.readers.clone(),
                                                                         self.joiners.clone(),
                                                                         self.control_sockets.clone(),
                                                                         self.read_repeaters.clone(),
-                                                                        self.sight_processor.clone(),
                                                                         self.control.clone(),
                                                                         self.sqlite.clone(),
                                                                         self.read_saver.clone(),
@@ -870,11 +846,15 @@ impl CharacterDisplay {
                                             self.current_menu[0] = SHUTDOWN_MENU;
                                             self.current_menu[1] = 0;
                                         },
+                                        MAIN_RESTART => { // Restart
+                                            self.current_menu[0] = RESTART_MENU;
+                                            self.current_menu[1] = 0;
+                                        },
                                         _ => {}
                                     }
                                 },
                                 SETTINGS_MENU => { // settings -> saves settings and goes back (only if not on set time)
-                                    if self.current_menu[1] == SETTINGS_SET_TIME {
+                                    if self.current_menu[1] == SETTINGS_SET_TIME_WEB {
                                         #[cfg(target_os = "linux")]
                                         {
                                             let _ = lcd.clear();
@@ -911,6 +891,16 @@ impl CharacterDisplay {
                                             Err(e) => {
                                                 println!("error setting time: {e}");
                                             }
+                                        }
+                                    } else if self.current_menu[1] == SETTINGS_SET_TIME_MANUAL {
+                                        #[cfg(target_os = "linux")]
+                                        {
+                                            let _ = lcd.clear();
+                                            let _ = lcd.home();
+                                            let _ = write!(lcd, "{:<20}", "");
+                                            let _ = write!(lcd, "{:<20}", "");
+                                            let _ = write!(lcd, "{:^20}", "Setting Time . . .");
+                                            let _ = write!(lcd, "{:<20}", "");
                                         }
                                     } else {
                                         self.current_menu[0] = MAIN_MENU;

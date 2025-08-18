@@ -1,4 +1,4 @@
-use crate::objects::{bibchip, participant, read, setting, sighting};
+use crate::objects::{read, setting};
 use crate::network::api;
 use crate::reader;
 use std::fmt;
@@ -55,24 +55,7 @@ pub trait Database {
     fn get_all_reads(&self) -> Result<Vec<read::Read>, DBError>;
     fn delete_reads(&self, start: i64, end: i64) -> Result<usize, DBError>;
     fn delete_all_reads(&self) -> Result<usize, DBError>;
-    fn reset_reads_status(&self) -> Result<usize, DBError>;
     fn reset_reads_upload(&self) -> Result<usize, DBError>;
-    fn get_useful_reads(&self) -> Result<Vec<read::Read>, DBError>;
     fn get_not_uploaded_reads(&self) -> Result<Vec<read::Read>, DBError>;
     fn update_reads_status(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
-    // Participant information
-    fn add_participants(&mut self, participants: &Vec<participant::Participant>) -> Result<usize, DBError>;
-    fn delete_participants(&self) -> Result<usize, DBError>;
-    fn delete_participant(&self, bib: &str) -> Result<usize, DBError>;
-    fn get_participants(&self) -> Result<Vec<participant::Participant>, DBError>;
-    // BibChip information
-    fn add_bibchips(&mut self, bibchips: &Vec<bibchip::BibChip>) -> Result<usize, DBError>;
-    fn delete_all_bibchips(&self) -> Result<usize, DBError>;
-    fn delete_bibchips(&self, bib: &str) -> Result<usize, DBError>;
-    fn get_bibchips(&self) -> Result<Vec<bibchip::BibChip>, DBError>;
-    // Sighting information
-    fn save_sightings(&mut self, sightings: &Vec<sighting::Sighting>) -> Result<usize, DBError>;
-    fn get_sightings(&self, start: i64, end: i64) -> Result<Vec<sighting::Sighting>, DBError>;
-    fn get_all_sightings(&self) -> Result<Vec<sighting::Sighting>, DBError>;
-    fn delete_sightings(&self) -> Result<usize, DBError>;
 }

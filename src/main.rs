@@ -18,7 +18,6 @@ pub mod reader;
 pub mod types;
 pub mod util;
 pub mod llrp;
-pub mod results;
 pub mod remote;
 pub mod processor;
 pub mod sound_board;
@@ -68,15 +67,6 @@ fn main() {
                     Ok(_) => {},
                     Err(e) => {
                         println!("error saving portal name {e}");
-                    }
-                }
-                match sqlite.set_setting(&setting::Setting::new(
-                    String::from(control::SETTING_SIGHTING_PERIOD),
-                    val.sighting_period.to_string()
-                )) {
-                    Ok(_) => {},
-                    Err(e) => {
-                        println!("error saving sighting period {e}");
                     }
                 }
                 match sqlite.set_setting(&setting::Setting::new(
@@ -197,7 +187,6 @@ fn main() {
     if let Ok(control) = control.lock() {
         println!("Portal is named '{}'.", control.name);
         println!("Portal version is '{}'", env!("CARGO_PKG_VERSION"));
-        println!("Sightings will be ignored if received within {}", util::pretty_time(&u64::from(control.sighting_period)));
         println!("Play sound value set to {}.", control.play_sound);
     }
     else {
@@ -211,7 +200,6 @@ fn main() {
         let api = sq.get_apis().unwrap();
         let backup = Backup{
             name: control.name,
-            sighting_period: control.sighting_period,
             read_window: control.read_window,
             chip_type: control.chip_type,
             play_sound: control.play_sound,
