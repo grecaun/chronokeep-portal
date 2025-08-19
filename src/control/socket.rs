@@ -214,7 +214,6 @@ pub fn control_loop(
                         sqlite.clone(),
                         control_sockets.clone(),
                         read_repeaters.clone(),
-                        sight_processor.clone(),
                         ac_state.clone(),
                         read_saver.clone(),
                         sound_notifier.clone(),
@@ -279,7 +278,6 @@ pub fn control_loop(
     // Set screen on all the readers.
     if let Ok(mut u_readers) = readers.lock() {
         for reader in u_readers.iter_mut() {
-            reader.set_screen(screen.clone());
             reader.set_control_sockets(control_sockets.clone());
             reader.set_readers(readers.clone());
         }
@@ -332,7 +330,6 @@ pub fn control_loop(
                 let t_ac_state = ac_state.clone();
                 let t_sound_notifier = sound_notifier.clone();
                 let t_read_saver = read_saver.clone();
-                let t_screen = screen.clone();
                 let t_notifier = notifier.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
@@ -369,7 +366,6 @@ pub fn control_loop(
                                 t_ac_state,
                                 t_read_saver,
                                 t_sound_notifier,
-                                t_screen,
                                 t_notifier,
                             );
                         });
@@ -481,7 +477,6 @@ fn handle_stream(
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
-    screen: Arc<Mutex<Option<CharacterDisplay>>>,
     notifier: notifier::Notifier,
 ) {
     println!("Starting control loop for index {index}");
@@ -633,7 +628,6 @@ fn handle_stream(
                                         Ok(reader) => {
                                             let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
                                             let mut tmp = reader;
-                                            tmp.set_screen(screen.clone());
                                             match sq.save_reader(&tmp) {
                                                 Ok(val) => {
                                                     if let Ok(mut u_readers) = readers.lock() {
@@ -763,7 +757,6 @@ fn handle_stream(
                                                     old_reader.auto_connect(),
                                                     control_sockets.clone(),
                                                     read_repeaters.clone(),
-                                                    screen.clone(),
                                                     readers.clone(),
                                                 ) {
                                                     Ok(mut reader) => {
@@ -899,7 +892,6 @@ fn handle_stream(
                                             reader.set_control_sockets(control_sockets.clone());
                                             reader.set_readers(readers.clone());
                                             reader.set_read_repeaters(read_repeaters.clone());
-                                            reader.set_screen(screen.clone());
                                             let reconnector = Reconnector::new(
                                                 readers.clone(),
                                                 joiners.clone(),
@@ -1726,46 +1718,31 @@ fn handle_stream(
                     no_error = write_time(&stream);
                 },
                 requests::Request::TimeSet { time } => {
-                    let mut allowed = true;
-                    if let Ok(readers) = readers.lock() {
-                        for reader in readers.iter() {
-                            if let Some(val) = reader.is_connected() {
-                                if val {
-                                    println!("User attempted to set the time while a reader is connected.");
-                                    no_error = write_error(&stream, errors::Errors::NotAllowed { message: format!("setting time not allowed with a reader connected") });
-                                    allowed = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if allowed {
-                        match std::env::consts::OS {
-                            "linux" => {
-                                match std::process::Command::new("sudo").arg("date").arg(format!("--set={time}")).status() {
-                                    Ok(_) => {
-                                        match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
-                                            Ok(_) => {
-                                                // Update last_received_at so the socket doesn't auto close if we jump to the future.
-                                                last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-                                                no_error = write_time(&stream)
-                                            },
-                                            Err(e) => {
-                                                println!("error setting time: {e}");
-                                                no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
-                                            }
+                    match std::env::consts::OS {
+                        "linux" => {
+                            match std::process::Command::new("sudo").arg("date").arg(format!("--set={time}")).status() {
+                                Ok(_) => {
+                                    match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
+                                        Ok(_) => {
+                                            // Update last_received_at so the socket doesn't auto close if we jump to the future.
+                                            last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                                            no_error = write_time(&stream)
+                                        },
+                                        Err(e) => {
+                                            println!("error setting time: {e}");
+                                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
                                         }
-                                    },
-                                    Err(e) => {
-                                        println!("error setting time: {e}");
-                                        no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
                                     }
+                                },
+                                Err(e) => {
+                                    println!("error setting time: {e}");
+                                    no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
                                 }
-                            },
-                            other => {
-                                println!("not supported on this platform ({other})");
-                                no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
                             }
+                        },
+                        other => {
+                            println!("not supported on this platform ({other})");
+                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
                         }
                     }
                 },
@@ -1792,7 +1769,7 @@ fn handle_stream(
                                         no_error = write_success(&stream, 0);
                                     },
                                     Err(e) => {
-                                        println!("error updating time: {e}");
+                                        println!("error updating: {e}");
                                         no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error updating: {e}") })
                                     }
                                 }

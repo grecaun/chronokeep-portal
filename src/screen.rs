@@ -1,17 +1,17 @@
-use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
+use std::{env, net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
 
 #[cfg(target_os = "linux")]
 use std::time::SystemTime;
 #[cfg(target_os = "linux")]
 use std::fmt::Write;
 #[cfg(target_os = "linux")]
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Datelike, Local, Timelike};
 #[cfg(target_os = "linux")]
 use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 #[cfg(target_os = "linux")]
 use rppal::{hal, i2c::I2c};
 
-use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED, UPDATE_SCRIPT_ENV}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -22,13 +22,18 @@ pub const ABOUT_MENU: u8 = 3;
 pub const SHUTDOWN_MENU: u8 = 4;
 pub const STARTUP_MENU: u8 = 5;
 pub const RESTART_MENU: u8 = 6;
+pub const MANUAL_TIME_MENU: u8 = 7;
+pub const UPDATE_MENU: u8 = 8;
+pub const DELETE_READS_MENU: u8 = 9;
+pub const DELETE_READS_MENU_TWO: u8 = 10;
 pub const SCREEN_OFF: u8 = 15;
 
 pub const MAIN_START_READING: u8 = 0;
 pub const MAIN_SETTINGS: u8 = 1;
 pub const MAIN_ABOUT: u8 = 2;
-pub const MAIN_RESTART: u8 = 3;
-pub const MAIN_SHUTDOWN: u8 = 4;
+pub const MAIN_UPDATE: u8 = 3;
+pub const MAIN_RESTART: u8 = 4;
+pub const MAIN_SHUTDOWN: u8 = 5;
 
 pub const SETTINGS_READ_WINDOW: u8 = 0;
 pub const SETTINGS_CHIP_TYPE: u8 = 1;
@@ -38,8 +43,16 @@ pub const SETTINGS_VOICE: u8 = 4;
 pub const SETTINGS_AUTO_UPLOAD: u8 = 5;
 pub const SETTINGS_UPLOAD_INTERVAL: u8 = 6;
 pub const SETTINGS_ENABLE_NTFY: u8 = 7;
-pub const SETTINGS_SET_TIME_WEB: u8 = 8;
-pub const SETTINGS_SET_TIME_MANUAL: u8 = 9;
+pub const SETTINGS_DELETE_CHIP_READS: u8 = 8;
+pub const SETTINGS_SET_TIME_WEB: u8 = 9;
+pub const SETTINGS_SET_TIME_MANUAL: u8 = 10;
+
+pub const TIME_MENU_YEAR: u8 = 0;
+pub const TIME_MENU_MONTH: u8 = 1;
+pub const TIME_MENU_DAY: u8 = 2;
+pub const TIME_MENU_HOUR: u8 = 3;
+pub const TIME_MENU_MINUTE: u8 = 4;
+pub const TIME_MENU_SECOND: u8 = 5;
 
 #[derive(Clone)]
 pub struct CharacterDisplay {
@@ -58,6 +71,13 @@ pub struct CharacterDisplay {
     control_port: u16,
     current_menu: [u8; 3],
     notifier: notifier::Notifier,
+    year: u16,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    seconds: u8,
+    volume: u8,
 }
 
 pub struct DisplayInfo {
@@ -105,6 +125,7 @@ impl CharacterDisplay {
                     " > Start Reading    ".to_string(),
                     "   Settings         ".to_string(),
                     "   About            ".to_string(),
+                    "   Update           ".to_string(),
                     "   Restart          ".to_string(),
                     "   Shutdown         ".to_string(),
                 ],
@@ -116,7 +137,14 @@ impl CharacterDisplay {
             sound,
             joiners,
             control_port,
-            notifier
+            notifier,
+            year: 0,
+            month: 0,
+            day: 0,
+            hour: 0,
+            minute: 0,
+            seconds: 0,
+            volume: 10,
         }
     }
 
@@ -223,16 +251,18 @@ impl CharacterDisplay {
                 if control.enable_ntfy {
                     enable_ntfy = "yes";
                 }
+                self.volume = (control.volume * 10.0) as u8;
                 info.settings_menu.push(format!("   Read Window {:>4} ", control.read_window));
                 info.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
                 info.settings_menu.push(format!("   Play Sounds {:>4} ", play_sound));
-                info.settings_menu.push(format!("   Volume      {:>4} ", (control.volume * 10.0) as usize));
+                info.settings_menu.push(format!("   Volume      {:>4} ", self.volume));
                 info.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
                 info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
                 info.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
                 info.settings_menu.push(format!("   Enable NTFY {:>4} ", enable_ntfy));
-                info.settings_menu.push(format!("   Set Time (Web)   "));
-                info.settings_menu.push(format!("   Set Time (Manual)"));
+                info.settings_menu.push(String::from("   Delete Reads     "));
+                info.settings_menu.push(String::from("   Set Time (Web)   "));
+                info.settings_menu.push(String::from("   Set Time (Manual)"));
             }
             for line in info.settings_menu.iter_mut() {
                 line.replace_range(1..2, " ");
@@ -272,9 +302,9 @@ impl CharacterDisplay {
             if let Err(e) = lcd.home() {
                 println!("Error homing cursor. {e}");
             }
+            let sys_time = SystemTime::now();
+            let date_time: DateTime<Local> = sys_time.into();
             if let Ok(mut info) = self.info.lock() {
-                let sys_time = SystemTime::now();
-                let date_time: DateTime<Local> = sys_time.into();
                 info.title_bar.replace_range(0..14, format!("{:<14}", date_time.format("%m-%d %H:%M:%S")).as_str());
                 let mut messages: Vec<String> = vec!(info.title_bar.clone());
                 messages.push(info.main_menu[1].clone());
@@ -284,6 +314,12 @@ impl CharacterDisplay {
                     let _ = write!(lcd, "{msg}");
                 }
             }
+            self.year = date_time.year() as u16;
+            self.month = date_time.month() as u8;
+            self.day = date_time.day() as u8;
+            self.hour = date_time.hour() as u8;
+            self.minute = date_time.minute() as u8;
+            self.seconds = date_time.second() as u8;
         }
         loop {
             if let Ok(keepalive) = self.keepalive.try_lock() {
@@ -327,8 +363,80 @@ impl CharacterDisplay {
                                     self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 }
-                                SHUTDOWN_MENU => {
+                                SHUTDOWN_MENU | RESTART_MENU | UPDATE_MENU | DELETE_READS_MENU | DELETE_READS_MENU_TWO => {
                                     self.current_menu[1] = (self.current_menu[1] + 1) % 2;
+                                },
+                                MANUAL_TIME_MENU => {
+                                    match self.current_menu[1] {
+                                        TIME_MENU_YEAR => {
+                                            if self.year < 2200 { // max of 175 years from the day this is typed
+                                                self.year += 1;
+                                            }
+                                        },
+                                        TIME_MENU_MONTH => {
+                                            if self.month < 12 {
+                                                self.month += 1;
+                                            } else { // overflow to JAN
+                                                self.month = 1;
+                                            }
+                                            // lower day if day value isn't valid for the month
+                                            if (self.month == 4 || self.month == 6 || self.month == 9 || self.month == 11) && self.day > 30 {
+                                                self.day = 30;
+                                            } else if self.month == 2 && self.day > 28 {
+                                                // Check for leap year and set to 29 if leap year, otherwise 28. Stays 29 if it was already 29.
+                                                if self.year % 400 == 0 || (self.year % 4 == 0 && self.year % 100 != 0) {
+                                                    self.day = 29;
+                                                } else {
+                                                    self.day = 28;
+                                                }
+                                            }
+                                        },
+                                        TIME_MENU_DAY => {
+                                            if ((self.month == 1            // January, March, May, July, August, October, and December have 31 days
+                                                || self.month == 3
+                                                || self.month == 5
+                                                || self.month == 7
+                                                || self.month == 8
+                                                || self.month == 10
+                                                || self.month == 12)
+                                                && self.day < 31)           // JAN, MAR, MAY, JUL, AUG, OCT, DEC
+                                                || ((self.month == 4        // April, June, September, and November have 30 days
+                                                || self.month == 6
+                                                || self.month == 9
+                                                || self.month == 11)
+                                                && self.day < 30)           // APR, JUN, SEP, NOV
+                                                || ((self.year % 400 == 0   // it is a leap year when divisible by 400
+                                                || (self.year % 4 == 0 && self.year % 100 != 0)) // or divisible 4 but not 100
+                                                && self.day < 29)           // FEB - Leap year
+                                                || self.day < 28 {          // FEB - Non leap year
+                                                self.day += 1;
+                                            } else { // overflow to the first of the month
+                                                self.day = 1;
+                                            }
+                                        },
+                                        TIME_MENU_HOUR => {
+                                            if self.hour < 23 { // max 23, 24 would be 00
+                                                self.hour += 1;
+                                            } else { // overflow to midnight
+                                                self.hour = 0;
+                                            }
+                                        },
+                                        TIME_MENU_MINUTE => {
+                                            if self.minute < 59 { // max 59, 60 would be 00
+                                                self.minute += 1;
+                                            } else { // overflow to 0
+                                                self.minute = 0;
+                                            }
+                                        },
+                                        TIME_MENU_SECOND => {
+                                            if self.seconds < 59 { // max 59, 60 would be 00
+                                                self.seconds += 1;
+                                            } else { // overflow to 0
+                                                self.seconds = 0;
+                                            }
+                                        },
+                                        _ => {}
+                                    }
                                 },
                                 _ => {}, // 2 = currently reading, do nothing
                             }
@@ -337,7 +445,7 @@ impl CharacterDisplay {
                         },
                         ButtonPress::Down => {
                             match self.current_menu[0] {
-                                MAIN_MENU => { // main menu, max ix 3
+                                MAIN_MENU => { // main menu, max ix MAIN_SHUTDOWN
                                     if self.current_menu[1] < MAIN_SHUTDOWN {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to the start
@@ -355,7 +463,7 @@ impl CharacterDisplay {
                                         }
                                     }
                                 }
-                                SETTINGS_MENU => { // settings menu, max ix 9
+                                SETTINGS_MENU => { // settings menu, max ix SETTINGS_SET_TIME_MANUAL
                                     if self.current_menu[1] < SETTINGS_SET_TIME_MANUAL {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to 0
@@ -367,8 +475,76 @@ impl CharacterDisplay {
                                     self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 }
-                                SHUTDOWN_MENU => {
+                                SHUTDOWN_MENU | RESTART_MENU | UPDATE_MENU | DELETE_READS_MENU | DELETE_READS_MENU_TWO => {
                                     self.current_menu[1] = (self.current_menu[1] + 1) % 2;
+                                },
+                                MANUAL_TIME_MENU => {
+                                    match self.current_menu[1] {
+                                        TIME_MENU_YEAR => {
+                                            if self.year > 2020 { // min year is 2020
+                                                self.year -= 1;
+                                            } // No rollover here
+                                        },
+                                        TIME_MENU_MONTH => {
+                                            if self.month > 1 { // min month is january (1)
+                                                self.month -= 1;
+                                            } else {
+                                                self.month = 12; // roll down to december
+                                            }
+                                            // lower day if day value isn't valid for the month
+                                            if (self.month == 4 || self.month == 6 || self.month == 9 || self.month == 11) && self.day > 30 {
+                                                self.day = 30;
+                                            } else if self.month == 2 && self.day > 28 {
+                                                // Check for leap year and set to 29 if leap year, otherwise 28. Stays 29 if it was already 29.
+                                                if self.year % 400 == 0 || (self.year % 4 == 0 && self.year % 100 != 0) {
+                                                    self.day = 29;
+                                                } else {
+                                                    self.day = 28;
+                                                }
+                                            }
+                                        },
+                                        TIME_MENU_DAY => {  // min day is 1
+                                            if self.day > 1 {
+                                                self.day -= 1;
+                                            } else {
+                                                // Roll day to max day of the year - JAN, MAR, MAY, JUL, AUG, OCT, DEC have 31
+                                                if self.month == 1 || self.month == 3 || self.month == 5 || self.month == 7
+                                                    || self.month == 8 || self.month == 10 || self.month == 12 {
+                                                    self.day = 31;
+                                                // APR, JUN, SEP, NOV have 31
+                                                } else if self.month == 4 || self.month == 6 || self.month == 9 || self.month == 11 {
+                                                    self.day = 30;
+                                                // Leaving FEB - Leap years have 29 and non-leap years 28.
+                                                } else if self.year % 400 == 0 || (self.year % 4 == 0 && self.year % 100 != 0) {
+                                                    self.day = 29;
+                                                } else {
+                                                    self.day = 28;
+                                                }
+                                            }
+                                        },
+                                        TIME_MENU_HOUR => {
+                                            if self.hour > 0 { // min hour is 0 (midnight)
+                                                self.hour -= 1;
+                                            } else { // roll down to the last hour of the day
+                                                self.hour = 23;
+                                            }
+                                        },
+                                        TIME_MENU_MINUTE => { // 0 min
+                                            if self.minute > 0 {
+                                                self.minute -= 1;
+                                            } else {
+                                                self.minute = 59;
+                                            }
+                                        },
+                                        TIME_MENU_SECOND => { // 0 min
+                                            if self.seconds > 0 {
+                                                self.seconds -= 1;
+                                            } else {
+                                                self.seconds = 59;
+                                            }
+                                        },
+                                        _ => {}
+                                    }
                                 },
                                 _ => {}, // 2 = currently reading, do nothing
                             }
@@ -411,9 +587,10 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_VOLUME => {  // Volume
-                                                if control.volume >= 0.1 {
+                                                if self.volume > 0 {
                                                     if let Ok(sq) = self.sqlite.lock() {
-                                                        control.volume -= 0.1;
+                                                        self.volume -= 1;
+                                                        control.volume = (self.volume as f32) / 10.0;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                             println!("Error saving setting: {e}");
                                                         }
@@ -487,8 +664,15 @@ impl CharacterDisplay {
                                     self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
                                 },
-                                SHUTDOWN_MENU => {
+                                SHUTDOWN_MENU | RESTART_MENU | UPDATE_MENU | DELETE_READS_MENU | DELETE_READS_MENU_TWO => {
                                     self.current_menu[1] = (self.current_menu[1] + 1) % 2;
+                                },
+                                MANUAL_TIME_MENU => {
+                                    if self.current_menu[1] == TIME_MENU_YEAR {
+                                        self.current_menu[1] = TIME_MENU_SECOND + 1;
+                                    } else {
+                                        self.current_menu[1] -= 1;
+                                    }
                                 },
                                 _ => {}, // main menu, reading menu, and shutdown menu
                             }
@@ -628,15 +812,16 @@ impl CharacterDisplay {
                                                     println!("Auto connect is working right now.");
                                                     self.sound.notify_custom(SoundType::StartupInProgress);
                                                     self.current_menu[0] = STARTUP_MENU;
-                                                    self.current_menu[1] = 0;
+                                                    self.current_menu[1] = MAIN_START_READING;
                                                 },
                                             }
                                         } else {
                                             println!("Auto connect is working right now.");
                                             self.sound.notify_custom(SoundType::StartupInProgress);
                                             self.current_menu[0] = STARTUP_MENU;
-                                            self.current_menu[1] = 0;
+                                            self.current_menu[1] = MAIN_START_READING;
                                         }
+                                        self.update_menu();
                                     }
                                 },
                                 SETTINGS_MENU => {
@@ -673,9 +858,10 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_VOLUME => {  // Volume
-                                                if control.volume < 1.0 {
+                                                if self.volume < 10 {
                                                     if let Ok(sq) = self.sqlite.lock() {
-                                                        control.volume += 0.1;
+                                                        self.volume += 1;
+                                                        control.volume = (self.volume as f32) / 10.0;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                             println!("Error saving setting: {e}");
                                                         }
@@ -744,13 +930,20 @@ impl CharacterDisplay {
                                     }
                                     self.update_settings();
                                 },
-                                SHUTDOWN_MENU => {
+                                SHUTDOWN_MENU | RESTART_MENU | UPDATE_MENU | DELETE_READS_MENU | DELETE_READS_MENU_TWO => {
                                     self.current_menu[1] = (self.current_menu[1] + 1) % 2;
                                 },
                                 ABOUT_MENU | STARTUP_MENU => { // 3 == about, 5 == startup
                                     self.current_menu[0] = MAIN_MENU;
                                     self.current_menu[1] = MAIN_START_READING;
                                     self.update_menu();
+                                },
+                                MANUAL_TIME_MENU => {
+                                    if self.current_menu[1] > TIME_MENU_SECOND {
+                                        self.current_menu[1] = TIME_MENU_YEAR;
+                                    } else {
+                                        self.current_menu[1] += 1;
+                                    }
                                 },
                                 _ => {},
                             }
@@ -850,69 +1043,87 @@ impl CharacterDisplay {
                                             self.current_menu[0] = RESTART_MENU;
                                             self.current_menu[1] = 0;
                                         },
+                                        MAIN_UPDATE => { // Update
+                                            self.current_menu[0] = UPDATE_MENU;
+                                            self.current_menu[1] = 0;
+                                        },
                                         _ => {}
                                     }
                                 },
                                 SETTINGS_MENU => { // settings -> saves settings and goes back (only if not on set time)
-                                    if self.current_menu[1] == SETTINGS_SET_TIME_WEB {
-                                        #[cfg(target_os = "linux")]
-                                        {
-                                            let _ = lcd.clear();
-                                            let _ = lcd.home();
-                                            let _ = write!(lcd, "{:<20}", "");
-                                            let _ = write!(lcd, "{:<20}", "");
-                                            let _ = write!(lcd, "{:^20}", "Setting Time . . .");
-                                            let _ = write!(lcd, "{:<20}", "");
-                                        }
-                                        match std::process::Command::new("sudo").arg("ntpd").arg(format!("-q")).arg(format!("-g")).arg(format!("--configfile=/etc/ntpsec/ntp-get.conf")).status() {
-                                            Ok(_) => {
-                                                match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
-                                                    Ok(_) => {
-                                                        self.current_menu[0] = MAIN_MENU;
-                                                        self.current_menu[1] = MAIN_START_READING;
-                                                        self.update_menu();
-                                                        // notify of settings changes
-                                                        if let Ok(sq) = self.sqlite.try_lock() {
-                                                            let settings = socket::get_settings(&sq);
-                                                            if let Ok(socks) = self.control_sockets.try_lock() {
-                                                                for sock_opt in &*socks {
-                                                                    if let Some(sock) = sock_opt {
-                                                                        _ = socket::write_settings(&sock, &settings);
+                                    match self.current_menu[1] {
+                                        SETTINGS_SET_TIME_WEB => {
+                                            #[cfg(target_os = "linux")]
+                                            {
+                                                let _ = lcd.clear();
+                                                let _ = lcd.home();
+                                                let _ = write!(lcd, "{:<20}", "");
+                                                let _ = write!(lcd, "{:<20}", "");
+                                                let _ = write!(lcd, "{:^20}", "Setting Time . . .");
+                                                let _ = write!(lcd, "{:<20}", "");
+                                            }
+                                            match std::process::Command::new("sudo").arg("systemctl").arg("stop").arg("ntpd").status() {
+                                                Ok(_) => {
+                                                    match std::process::Command::new("sudo").arg("ntpd").arg(format!("-q")).arg(format!("-g")).arg(format!("--configfile=/etc/ntpsec/ntp-get.conf")).status() {
+                                                        Ok(_) => {
+                                                            match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
+                                                                Ok(_) => {
+                                                                    self.current_menu[0] = MAIN_MENU;
+                                                                    self.current_menu[1] = MAIN_START_READING;
+                                                                    self.update_menu();
+                                                                    // notify of settings changes
+                                                                    if let Ok(sq) = self.sqlite.try_lock() {
+                                                                        let settings = socket::get_settings(&sq);
+                                                                        if let Ok(socks) = self.control_sockets.try_lock() {
+                                                                            for sock_opt in &*socks {
+                                                                                if let Some(sock) = sock_opt {
+                                                                                    _ = socket::write_settings(&sock, &settings);
+                                                                                }
+                                                                            }
+                                                                        }
                                                                     }
+                                                                },
+                                                                Err(e) => {
+                                                                    println!("error setting hardware clock: {e}");
                                                                 }
                                                             }
+                                                        },
+                                                        Err(e) => {
+                                                            println!("error setting time: {e}");
                                                         }
-                                                    },
-                                                    Err(e) => {
-                                                        println!("error setting hardware clock: {e}");
                                                     }
+                                                },
+                                                Err(e) => {
+                                                    println!("error stopping ntpd: {e}");
                                                 }
-                                            },
-                                            Err(e) => {
-                                                println!("error setting time: {e}");
                                             }
+                                            match std::process::Command::new("sudo").arg("systemctl").arg("start").arg("ntpd").status() {
+                                                Ok(_) => {},
+                                                Err(e) => {
+                                                    println!("error starting ntpd: {e}");
+                                                }
+                                            }
+                                        },
+                                        SETTINGS_SET_TIME_MANUAL => {
+                                            self.current_menu[0] = MANUAL_TIME_MENU;
+                                            self.current_menu[1] = TIME_MENU_YEAR;
+                                        },
+                                        SETTINGS_DELETE_CHIP_READS => {
+                                            self.current_menu[0] = DELETE_READS_MENU;
+                                            self.current_menu[1] = 0;
                                         }
-                                    } else if self.current_menu[1] == SETTINGS_SET_TIME_MANUAL {
-                                        #[cfg(target_os = "linux")]
-                                        {
-                                            let _ = lcd.clear();
-                                            let _ = lcd.home();
-                                            let _ = write!(lcd, "{:<20}", "");
-                                            let _ = write!(lcd, "{:<20}", "");
-                                            let _ = write!(lcd, "{:^20}", "Setting Time . . .");
-                                            let _ = write!(lcd, "{:<20}", "");
-                                        }
-                                    } else {
-                                        self.current_menu[0] = MAIN_MENU;
-                                        self.current_menu[1] = MAIN_START_READING;
-                                        self.update_menu();
-                                        // notify of settings changes
-                                        if let Ok(sq) = self.sqlite.try_lock() {
-                                            let settings = socket::get_settings(&sq);
-                                            if let Ok(socks) = self.control_sockets.try_lock() {
-                                                for sock_opt in &*socks {
-                                                    if let Some(sock) = sock_opt {
-                                                        _ = socket::write_settings(&sock, &settings);
+                                        _ => {
+                                            self.current_menu[0] = MAIN_MENU;
+                                            self.current_menu[1] = MAIN_START_READING;
+                                            self.update_menu();
+                                            // notify of settings changes
+                                            if let Ok(sq) = self.sqlite.try_lock() {
+                                                let settings = socket::get_settings(&sq);
+                                                if let Ok(socks) = self.control_sockets.try_lock() {
+                                                    for sock_opt in &*socks {
+                                                        if let Some(sock) = sock_opt {
+                                                            _ = socket::write_settings(&sock, &settings);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -964,10 +1175,144 @@ impl CharacterDisplay {
                                         }
                                         // connect to ensure the spawning thread will exit the accept call
                                         _ = TcpStream::connect(format!("127.0.0.1:{}", self.control_port));
+                                    }
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
+                                    self.update_menu();
+                                },
+                                RESTART_MENU => {
+                                    if self.current_menu[1] == 1 {
+                                        #[cfg(target_os = "linux")]
+                                        {
+                                            let _ = lcd.clear();
+                                            //let _ = lcd.backlight(false);
+                                            let _ = lcd.show_display(false);
+                                        }
+                                        if let Ok(mut ka) = self.keepalive.lock() {
+                                            println!("Starting program restart sequence.");
+                                            *ka = false;
+                                        }
+                                        // send shutdown command to the OS
+                                        println!("Sending program restart command if on Linux.");
+                                        match std::env::consts::OS {
+                                            "linux" => {
+                                                match std::process::Command::new("sudo").arg("systemctl").arg("restart").arg("portal").spawn() {
+                                                    Ok(_) => {
+                                                        println!("Restart command sent to OS successfully.");
+                                                    },
+                                                    Err(e) => {
+                                                        println!("Error sending restart command: {e}");
+                                                    }
+                                                }
+                                            },
+                                            other => {
+                                                println!("Rerstart not supported on this platform ({other})");
+                                            }
+                                        }
+                                    }
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
+                                    self.update_menu();
+                                },
+                                UPDATE_MENU => {
+                                    if self.current_menu[1] == 1 {
+                                        #[cfg(target_os = "linux")]
+                                        {
+                                            let _ = lcd.clear();
+                                            //let _ = lcd.backlight(false);
+                                            let _ = lcd.show_display(false);
+                                        }
+                                        if let Ok(mut ka) = self.keepalive.lock() {
+                                            println!("Starting program update sequence.");
+                                            *ka = false;
+                                        }
+                                        // send shutdown command to the OS
+                                        println!("Sending program update command if on Linux.");
+                                        match std::env::consts::OS {
+                                            "linux" => {
+                                                if let Ok(update_path) = env::var(UPDATE_SCRIPT_ENV) {
+                                                    match std::process::Command::new(update_path).spawn() {
+                                                        Ok(_) => {},
+                                                        Err(e) => {
+                                                            println!("error updating: {e}");
+                                                        }
+                                                    }
+                                                } else {
+                                                    println!("update script environment variable not set");
+                                                }
+                                            },
+                                            other => {
+                                                println!("not supported on this platform ({other})");
+                                            }
+                                        }
+                                    }
+                                    self.current_menu[0] = MAIN_MENU;
+                                    self.current_menu[1] = MAIN_START_READING;
+                                    self.update_menu();
+                                },
+                                DELETE_READS_MENU => {
+                                    if self.current_menu[1] == 1 {
+                                        self.current_menu[0] = DELETE_READS_MENU_TWO;
+                                        self.current_menu[1] = 0;
                                     } else {
-                                        self.current_menu[0] = MAIN_MENU;
-                                        self.current_menu[1] = MAIN_START_READING;
+                                        self.current_menu[0] = SETTINGS_MENU;
+                                        self.current_menu[1] = SETTINGS_DELETE_CHIP_READS;
                                         self.update_menu();
+                                    }
+                                },
+                                DELETE_READS_MENU_TWO => {
+                                    if self.current_menu[1] == 1 {
+                                        if let Ok(sq) = self.sqlite.lock() {
+                                            if let Err(e) = sq.delete_all_reads() {
+                                                println!("error deleting reads: {e}")
+                                            }
+                                        }
+                                    }
+                                    self.current_menu[0] = SETTINGS_MENU;
+                                    self.current_menu[1] = SETTINGS_DELETE_CHIP_READS;
+                                    self.update_menu();
+                                },
+                                MANUAL_TIME_MENU => {
+                                    if self.current_menu[1] == TIME_MENU_SECOND + 1 {
+                                        self.current_menu[0] = SETTINGS_MENU;
+                                        self.current_menu[1] = SETTINGS_SET_TIME_MANUAL;
+                                    } else {
+                                        #[cfg(target_os = "linux")]
+                                        {
+                                            let _ = lcd.clear();
+                                            let _ = lcd.home();
+                                            let _ = write!(lcd, "{:<20}", "");
+                                            let _ = write!(lcd, "{:<20}", "");
+                                            let _ = write!(lcd, "{:^20}", "Setting Time . . .");
+                                            let _ = write!(lcd, "{:<20}", "");
+                                        }
+                                        match std::env::consts::OS {
+                                            "linux" => {
+                                                match std::process::Command::new("sudo").arg("date")
+                                                    .arg(format!("--set={:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+                                                        self.year, self.month, self.day, self.hour, self.minute, self.seconds)).status()
+                                                {
+                                                    Ok(_) => {
+                                                        match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
+                                                            Ok(_) => {
+                                                                self.current_menu[0] = SETTINGS_MENU;
+                                                                self.current_menu[1] = SETTINGS_SET_TIME_MANUAL;
+                                                                self.update_menu();
+                                                            },
+                                                            Err(e) => {
+                                                                println!("error setting time: {e}");
+                                                            }
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        println!("error setting time: {e}");
+                                                    },
+                                                }
+                                            },
+                                            other => {
+                                                println!("not supported on this platform ({other})");
+                                            },
+                                        }
                                     }
                                 },
                                 _ => {},
@@ -977,9 +1322,8 @@ impl CharacterDisplay {
                 }
                 presses.clear();
             }
+            let mut connected = false;
             if let Ok(u_readers) = self.readers.lock() {
-                // make sure to iterate through the vec in reverse so we don't have some weird loop issues
-                let mut connected = false;
                 for reader in u_readers.iter() {
                     if let Some(reading) = reader.is_reading() {
                         if reading {
@@ -990,10 +1334,11 @@ impl CharacterDisplay {
                         }
                     }
                 }
-                if self.current_menu[0] == READING_MENU && !connected {
-                    self.current_menu[0] = MAIN_MENU;
-                    self.current_menu[1] = MAIN_START_READING;
-                }
+            }
+            if self.current_menu[0] == READING_MENU && !connected {
+                self.current_menu[0] = MAIN_MENU;
+                self.current_menu[1] = MAIN_START_READING;
+                self.update_menu();
             }
             #[cfg(target_os = "linux")]
             {
@@ -1099,7 +1444,7 @@ impl CharacterDisplay {
                         messages.push(format!("{:^20}", "Please wait."));
                         messages.push(format!("{:^20}", "System Initializing."));
                         messages.push(format!("{:^20}", ""));
-                    }
+                    },
                     SHUTDOWN_MENU => {
                         messages.clear();
                         messages.push(format!("{:^20}", ""));
@@ -1108,9 +1453,94 @@ impl CharacterDisplay {
                         } else {
                             messages.push(String::from("   > YES      NO    "));
                         }
-                        messages.push(format!("{:^20}", "Shutdown System?"));
+                        messages.push(format!("{:^20}", "Shutdown Portal?"));
                         messages.push(format!("{:^20}", ""));
                     },
+                    UPDATE_MENU => {
+                        messages.clear();
+                        messages.push(format!("{:^20}", ""));
+                        if self.current_menu[1] == 0 {
+                            messages.push(String::from("     YES    > NO    "));
+                        } else {
+                            messages.push(String::from("   > YES      NO    "));
+                        }
+                        messages.push(format!("{:^20}", "Update Portal?"));
+                        messages.push(format!("{:^20}", ""));
+                    },
+                    RESTART_MENU => {
+                        messages.clear();
+                        messages.push(format!("{:^20}", ""));
+                        if self.current_menu[1] == 0 {
+                            messages.push(String::from("     YES    > NO    "));
+                        } else {
+                            messages.push(String::from("   > YES      NO    "));
+                        }
+                        messages.push(format!("{:^20}", "Restart Portal?"));
+                        messages.push(format!("{:^20}", ""));
+                    },
+                    DELETE_READS_MENU => {
+                        messages.clear();
+                        messages.push(format!("{:^20}", ""));
+                        if self.current_menu[1] == 0 {
+                            messages.push(String::from("     YES    > NO    "));
+                        } else {
+                            messages.push(String::from("   > YES      NO    "));
+                        }
+                        messages.push(format!("{:^20}", "Delete all reads?"));
+                        messages.push(format!("{:^20}", ""));
+                    },
+                    DELETE_READS_MENU_TWO => {
+                        messages.clear();
+                        messages.push(format!("{:^20}", ""));
+                        if self.current_menu[1] == 0 {
+                            messages.push(String::from("     YES    > NO    "));
+                        } else {
+                            messages.push(String::from("   > YES      NO    "));
+                        }
+                        messages.push(format!("{:^20}", "Are you sure?"));
+                        messages.push(format!("{:^20}", ""));
+                    },
+                    MANUAL_TIME_MENU => {
+                        messages.clear();
+                        messages.push(format!("{:<20}", ""));
+                        messages.push(format!("{:04}-{:02}-{:02}  {:02}:{:02}:{:02}", //yyyy-MM-dd HH:mm:ss
+                            self.year,
+                            self.month,
+                            self.day,
+                            self.hour,
+                            self.minute,
+                            self.seconds));
+                        match self.current_menu[1] {
+                            TIME_MENU_YEAR => {
+                                messages.push(String::from(" vv                 "));
+                                messages.push(String::from(" ^^                 "));
+                            },
+                            TIME_MENU_MONTH => {
+                                messages.push(String::from("     vv             "));
+                                messages.push(String::from("     ^^             "));
+                            },
+                            TIME_MENU_DAY => {
+                                messages.push(String::from("        vv          "));
+                                messages.push(String::from("        ^^          "));
+                            },
+                            TIME_MENU_HOUR => {
+                                messages.push(String::from("            vv      "));
+                                messages.push(String::from("            ^^      "));
+                            },
+                            TIME_MENU_MINUTE => {
+                                messages.push(String::from("               vv   "));
+                                messages.push(String::from("               ^^   "));
+                            },
+                            TIME_MENU_SECOND => {
+                                messages.push(String::from("                  vv"));
+                                messages.push(String::from("                  ^^"));
+                            },
+                            _ => {
+                                messages.push(format!("{:^20}", ""));
+                                messages.push(format!("{:^20}", "Cancel"));
+                            },
+                        }
+                    }
                     SCREEN_OFF => {
                         let _ = lcd.clear();
                         //let _ = lcd.backlight(false);

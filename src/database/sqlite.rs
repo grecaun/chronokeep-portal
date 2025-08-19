@@ -1,5 +1,5 @@
 use crate::objects::{setting, read};
-use crate::network::api;
+use crate::network::api::{self, API_TYPE_CHRONOKEEP_REMOTE, API_TYPE_CHRONOKEEP_REMOTE_SELF};
 use crate::database::DBError;
 use crate::reader;
 
@@ -13,7 +13,7 @@ mod tests;
 const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 
 const DATABASE_VERSION_SETTING: &str = "PORTAL_DATABASE_VERSION";
-const DATABASE_VERSION: u16 = 4;
+const DATABASE_VERSION: u16 = 5;
 
 const DATABASE_PATH_ENV: &str = "PORTAL_DATABASE_PATH";
 
@@ -77,10 +77,47 @@ impl SQLite {
                     return Err(e)
                 }
             }
+            if old_version < 5 {
+                if let Err(e) = self.update_to_v5() {
+                    return Err(e)
+                }
+            }
         } else if new_version < old_version {
             return Err(DBError::DatabaseTooNew(String::from("database version is newer than our known version")))
         }
         return Ok(())
+    }
+
+    fn update_to_v5(&mut self) -> Result<(), DBError> {
+        if let Ok(tx) = self.conn.transaction() {
+            let updates = [
+                "DROP TABLE participants;",
+                "DROP TABLE bibchip;",
+                "DROP TABLE sightings;",
+            ];
+            for table in updates {
+                if let Err(e) = tx.execute(table, ()) {
+                    return Err(DBError::DataInsertionError(e.to_string()))
+                }
+            }
+            if let Err(e) = tx.execute(
+                "DELETE FROM results_api WHERE kind <> ?1 AND kind <> ?2;",
+                (API_TYPE_CHRONOKEEP_REMOTE, API_TYPE_CHRONOKEEP_REMOTE_SELF
+            )) {
+                    return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            if let Err(e) = tx.execute(
+                "INSERT INTO settings (setting, value) VALUES (?1, ?2);",
+                (DATABASE_VERSION_SETTING, "5")
+            ) {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            if let Err(e) = tx.commit() {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            return Ok(())
+        }
+        Err(DBError::ConnectionError(String::from("unable to start transaction")))
     }
 
     fn update_to_v4(&mut self) -> Result<(), DBError> {
