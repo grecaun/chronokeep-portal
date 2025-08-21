@@ -22,7 +22,8 @@ pub enum SoundType {
     Introduction,
     StartupFinished,
     StartupInProgress,
-    CustomNotAvailable
+    CustomNotAvailable,
+    Connected,
 }
 
 impl SoundNotifier {
@@ -103,6 +104,7 @@ impl Sounds {
                                     SoundType::StartupFinished => control.sound_board.play_startup_finished(control.volume),
                                     SoundType::StartupInProgress => control.sound_board.play_startup_in_progress(control.volume),
                                     SoundType::CustomNotAvailable => control.sound_board.play_custom_not_available(control.volume),
+                                    SoundType::Connected => control.sound_board.play_connected(control.volume),
                                 }
                             }
                         };

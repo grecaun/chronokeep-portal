@@ -729,6 +729,7 @@ impl CharacterDisplay {
                                                                             if let Ok(mut join) = self.joiners.lock() {
                                                                                 join.push(j);
                                                                             }
+                                                                            self.sound.notify_custom(SoundType::Connected);
                                                                         },
                                                                         Err(e) => {
                                                                             println!("Error connecting to reader: {e}");
