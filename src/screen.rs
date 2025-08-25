@@ -11,7 +11,7 @@ use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 #[cfg(target_os = "linux")]
 use rppal::{hal, i2c::I2c};
 
-use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED, UPDATE_SCRIPT_ENV}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED, UPDATE_SCRIPT_ENV}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::{Voice}, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -587,9 +587,17 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_VOLUME => {  // Volume
-                                                if self.volume > 0 {
+                                                if self.volume > 10 {
+                                                    self.volume = 10;
                                                     if let Ok(sq) = self.sqlite.lock() {
-                                                        self.volume -= 1;
+                                                        control.volume = (self.volume as f32) / 10.0;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
+                                                } else if self.volume > 0 {
+                                                    self.volume -= 1;
+                                                    if let Ok(sq) = self.sqlite.lock() {
                                                         control.volume = (self.volume as f32) / 10.0;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                             println!("Error saving setting: {e}");
@@ -860,8 +868,16 @@ impl CharacterDisplay {
                                             }
                                             SETTINGS_VOLUME => {  // Volume
                                                 if self.volume < 10 {
+                                                    self.volume += 1;
                                                     if let Ok(sq) = self.sqlite.lock() {
-                                                        self.volume += 1;
+                                                        control.volume = (self.volume as f32) / 10.0;
+                                                        if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
+                                                            println!("Error saving setting: {e}");
+                                                        }
+                                                    }
+                                                } else if self.volume > 10 {
+                                                    self.volume = 10;
+                                                    if let Ok(sq) = self.sqlite.lock() {
                                                         control.volume = (self.volume as f32) / 10.0;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                             println!("Error saving setting: {e}");
@@ -970,7 +986,9 @@ impl CharacterDisplay {
                                                     auto_connect::State::Unknown => {
                                                         if let Ok(mut u_readers) = self.readers.lock() {
                                                             // make sure to iterate through the vec in reverse so we don't have some weird loop issues
-                                                            for ix in (0..u_readers.len()).rev() {
+                                                            let num_readers = u_readers.len();
+                                                            let mut connected_readers: usize = 0;
+                                                            for ix in (0..num_readers).rev() {
                                                                 let mut reader = u_readers.remove(ix);
                                                                 if reader.is_connected() != Some(true) {
                                                                     reader.set_control_sockets(self.control_sockets.clone());
@@ -1001,6 +1019,7 @@ impl CharacterDisplay {
                                                                             if let Ok(mut join) = self.joiners.lock() {
                                                                                 join.push(j);
                                                                             }
+                                                                            connected_readers += 1;
                                                                         },
                                                                         Err(e) => {
                                                                             println!("Error connecting to reader: {e}");
@@ -1009,6 +1028,9 @@ impl CharacterDisplay {
                                                                     thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
                                                                 }
                                                                 u_readers.push(reader);
+                                                            }
+                                                            if connected_readers == num_readers {
+                                                                self.sound.notify_custom(SoundType::Connected);
                                                             }
                                                         }
                                                     }
@@ -1025,6 +1047,7 @@ impl CharacterDisplay {
                                                 self.current_menu[0] = STARTUP_MENU;
                                                 self.current_menu[1] = 0;
                                             }
+
                                         },
                                         MAIN_SETTINGS => { // Settings
                                             self.current_menu[0] = SETTINGS_MENU;

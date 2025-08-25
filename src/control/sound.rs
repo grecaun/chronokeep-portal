@@ -24,6 +24,8 @@ pub enum SoundType {
     StartupInProgress,
     CustomNotAvailable,
     Connected,
+    Disconnected,
+    Malfunction,
 }
 
 impl SoundNotifier {
@@ -105,6 +107,8 @@ impl Sounds {
                                     SoundType::StartupInProgress => control.sound_board.play_startup_in_progress(control.volume),
                                     SoundType::CustomNotAvailable => control.sound_board.play_custom_not_available(control.volume),
                                     SoundType::Connected => control.sound_board.play_connected(control.volume),
+                                    SoundType::Disconnected => control.sound_board.play_disconnected(control.volume),
+                                    SoundType::Malfunction => control.sound_board.play_malfunction(control.volume),
                                 }
                             }
                         };

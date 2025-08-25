@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Local};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::{self, get_message_name}, parameter_types::{self, get_llrp_custom_message_name}}, notifier, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::{SoundNotifier, SoundType}}, database::{sqlite, Database}, defaults, llrp::{self, bit_masks::ParamTypeInfo, message_types::{self, get_message_name}, parameter_types::{self, get_llrp_custom_message_name}}, notifier, objects::read, processor, reader::ANTENNA_STATUS_NONE, types};
 
 use super::{reconnector::Reconnector, ReaderStatus, ANTENNA_STATUS_CONNECTED, ANTENNA_STATUS_DISCONNECTED, MAX_ANTENNAS};
 
@@ -45,7 +45,10 @@ pub fn connect(
     };
     let res = TcpStream::connect_timeout(&SocketAddr::new(ip_addr, reader.port), Duration::from_millis(STREAM_TIMOUT_MILLISECONDS));
     match res {
-        Err(_) => return Err("unable to connect"),
+        Err(_) => {
+            sound.notify_custom(SoundType::Disconnected);
+            return Err("unable to connect")
+        },
         Ok(mut tcp_stream) => {
             match tcp_stream.set_read_timeout(Some(Duration::from_millis(STREAM_TIMOUT_MILLISECONDS))) {
                 Ok(_) => {},
@@ -68,6 +71,7 @@ pub fn connect(
             reader.socket = match tcp_stream.try_clone() {
                 Ok(stream) => sync::Mutex::new(Some(stream)),
                 Err(_) => {
+                    sound.notify_custom(SoundType::Disconnected);
                     return Err("error copying stream to thread")
                 }
             };
@@ -92,7 +96,7 @@ pub fn connect(
                 let buf: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
                 let leftover_buffer: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
                 let leftover_num: &mut usize = &mut 0;
-                match t_stream.set_read_timeout(Some(Duration::from_secs(1))) {
+                match t_stream.set_read_timeout(Some(Duration::from_millis(STREAM_TIMOUT_MILLISECONDS))) {
                     Ok(_) => (),
                     Err(e) => {
                         println!("Error setting read timeout. {e}")
@@ -783,6 +787,7 @@ pub fn connect(
                         rec.run();
                     }
                 }
+                sound.notify_custom(SoundType::Disconnected);
                 println!("Thread reading from this reader has now closed.");
             });
             Ok(output)

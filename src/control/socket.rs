@@ -785,6 +785,7 @@ fn handle_stream(
                                                                 if let Ok(mut join) = joiners.lock() {
                                                                     join.push(j);
                                                                 }
+                                                                sound.notify_custom(SoundType::Connected);
                                                             },
                                                             Err(e) => {
                                                                 println!("Error connecting to reader: {e}");
@@ -886,7 +887,9 @@ fn handle_stream(
                             auto_connect::State::Unknown => {
                                 if let Ok(mut u_readers) = readers.lock() {
                                     // make sure to iterate through the vec in reverse so we don't have some weird loop issues
-                                    for ix in (0..u_readers.len()).rev() {
+                                    let num_readers = u_readers.len();
+                                    let mut connected_readers: usize = 0;
+                                    for ix in (0..num_readers).rev() {
                                         let mut reader = u_readers.remove(ix);
                                         if reader.is_connected() != Some(true) {
                                             reader.set_control_sockets(control_sockets.clone());
@@ -917,6 +920,7 @@ fn handle_stream(
                                                     if let Ok(mut join) = joiners.lock() {
                                                         join.push(j);
                                                     }
+                                                    connected_readers += 1;
                                                 },
                                                 Err(e) => {
                                                     println!("Error connecting to reader: {e}");
@@ -927,6 +931,9 @@ fn handle_stream(
                                             }
                                         }
                                         u_readers.push(reader);
+                                    }
+                                    if num_readers == connected_readers {
+                                        sound.notify_custom(SoundType::Connected);
                                     }
                                     thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
                                     if let Ok(c_socks) = control_sockets.lock() {

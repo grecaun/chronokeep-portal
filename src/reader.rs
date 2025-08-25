@@ -3,7 +3,7 @@ use std::{io::Write, net::TcpStream, sync::{self, Arc, Mutex}, thread::JoinHandl
 use reconnector::Reconnector;
 use serde::{Deserialize, Serialize};
 
-use crate::{control::{self, socket::MAX_CONNECTED, sound::SoundNotifier}, database::{sqlite, DBError}, notifier, processor};
+use crate::{control::{self, socket::MAX_CONNECTED, sound::{SoundNotifier, SoundType}}, database::{sqlite, DBError}, notifier, processor};
 
 pub mod zebra;
 pub mod auto_connect;
@@ -297,6 +297,7 @@ impl Reader {
                 zebra::connect(self, sqlite, control, read_saver, sound, reconnector, notifier)
             }
             _ => {
+                sound.notify_custom(SoundType::Malfunction);
                 Err("reader type not supported")
             }
         }
