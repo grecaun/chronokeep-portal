@@ -6,5 +6,5 @@ pub const DEFAULT_PLAY_SOUND: bool = true;
 pub const DEFAULT_VOLUME: f32 = 1.0;
 pub const DEFAULT_VOICE: Voice = Voice::Emily;
 pub const DEFAULT_AUTO_REMOTE: bool = false;
-pub const DEFAULT_UPLOAD_INTERVAL: u64 = 10;
+pub const DEFAULT_UPLOAD_INTERVAL: u64 = 5;
 pub const DEFAULT_ENABLE_NTFY: bool = false;

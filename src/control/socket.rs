@@ -562,8 +562,7 @@ fn handle_stream(
             match cmd {
                 requests::Request::Disconnect => {
                     // client requested to close the connection
-                    _ = write_disconnect(&mut stream);
-                    // tell then to close it and then break the loop to exit the thread
+                    // break the loop to exit the thread
                     break;
                 },
                 requests::Request::Connect { reads } => {
@@ -613,9 +612,9 @@ fn handle_stream(
                             auto_connect::State::Finished |
                             auto_connect::State::Unknown => {
                                 if let Ok(sq) = sqlite.lock() {
-                                    let mut ac = reader::AUTO_CONNECT_FALSE;
+                                    let mut loc_ac = reader::AUTO_CONNECT_FALSE;
                                     if auto_connect == true {
-                                        ac = reader::AUTO_CONNECT_TRUE
+                                        loc_ac = reader::AUTO_CONNECT_TRUE
                                     }
                                     match reader::Reader::new_no_repeaters(
                                         id,
@@ -623,7 +622,7 @@ fn handle_stream(
                                         name,
                                         ip_address,
                                         port,
-                                        ac,
+                                        loc_ac,
                                     ) {
                                         Ok(reader) => {
                                             let port = if port < 100 {zebra::DEFAULT_ZEBRA_PORT} else {port};
@@ -1051,15 +1050,15 @@ fn handle_stream(
                         let old_play_sound = control.play_sound;
                         let old_voice = control.sound_board.get_voice();
                         let mut custom_error = false;
-                        for setting in settings {
-                            match setting.name() {
-                                super::SETTING_VOICE => {
-                                    let new_voice = Voice::from_str(setting.value());
-                                    if new_voice == Voice::Custom && !control.sound_board.custom_available() {
-                                        println!("Custom voice selected but not available.");
-                                        custom_error = true;
-                                    } else {
-                                        if let Ok(sq) = sqlite.lock() {
+                        if let Ok(sq) = sqlite.lock() {
+                            for setting in settings {
+                                match setting.name() {
+                                    super::SETTING_VOICE => {
+                                        let new_voice = Voice::from_str(setting.value());
+                                        if new_voice == Voice::Custom && !control.sound_board.custom_available() {
+                                            println!("Custom voice selected but not available.");
+                                            custom_error = true;
+                                        } else {
                                             match sq.set_setting(&setting) {
                                                 Ok(_) => {
                                                     if let Ok(new_control) = super::Control::new(&sq) {
@@ -1077,20 +1076,18 @@ fn handle_stream(
                                                 }
                                             }
                                         }
-                                    }
-                                },
-                                super::SETTING_CHIP_TYPE |
-                                super::SETTING_PORTAL_NAME |
-                                super::SETTING_READ_WINDOW |
-                                super::SETTING_PLAY_SOUND |
-                                super::SETTING_UPLOAD_INTERVAL |
-                                super::SETTING_VOLUME |
-                                super::SETTING_NTFY_URL |
-                                super::SETTING_NTFY_USER |
-                                super::SETTING_NTFY_PASS |
-                                super::SETTING_NTFY_TOPIC | 
-                                super::SETTING_ENABLE_NTFY => {
-                                    if let Ok(sq) = sqlite.lock() {
+                                    },
+                                    super::SETTING_CHIP_TYPE |
+                                    super::SETTING_PORTAL_NAME |
+                                    super::SETTING_READ_WINDOW |
+                                    super::SETTING_PLAY_SOUND |
+                                    super::SETTING_UPLOAD_INTERVAL |
+                                    super::SETTING_VOLUME |
+                                    super::SETTING_NTFY_URL |
+                                    super::SETTING_NTFY_USER |
+                                    super::SETTING_NTFY_PASS |
+                                    super::SETTING_NTFY_TOPIC | 
+                                    super::SETTING_ENABLE_NTFY => {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
                                                 if let Ok(new_control) = super::Control::new(&sq) {
@@ -1108,17 +1105,15 @@ fn handle_stream(
                                                 });
                                             }
                                         }
+                                    },
+                                    other => {
+                                        println!("'{other}' is not a valid setting");
+                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            message: format!("'{other}' is not a valid setting")
+                                        });
                                     }
-                                },
-                                other => {
-                                    println!("'{other}' is not a valid setting");
-                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                        message: format!("'{other}' is not a valid setting")
-                                    });
                                 }
                             }
-                        }
-                        if let Ok(sq) = sqlite.lock() {
                             let settings = get_settings(&sq);
                             if let Ok(c_socks) = control_sockets.lock() {
                                 for sock in c_socks.iter() {
@@ -1840,9 +1835,6 @@ fn handle_stream(
             // if we haven't received a message in 2 x the keep alive period then we've
             // probably disconnected
             if last_received_at + (2*KEEPALIVE_INTERVAL_SECONDS) < time.as_secs() {
-                // write disconnect to tell the client what's going on if they're still
-                // actually listening
-                _ = write_disconnect(&stream);
                 // and we can exit the loop because we're definitely disconnecting
                 break;
             // send a keepalive message if we haven't heard from the socket in KEEPALIVE_INTERVAL_SECONDS
@@ -1864,10 +1856,12 @@ fn handle_stream(
             repeaters[index] = false;
         }
     }
-    write_disconnect(&stream);
+    _ = write_disconnect(&stream);
     _ = stream.shutdown(Shutdown::Both);
     if let Ok(mut c_socks) = control_sockets.lock() {
-        c_socks[index] = None;
+        if index < MAX_CONNECTED {
+            c_socks[index] = None;
+        }
     }
 }
 
