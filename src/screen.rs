@@ -11,7 +11,7 @@ use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
 #[cfg(target_os = "linux")]
 use rppal::{hal, i2c::I2c};
 
-use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED, UPDATE_SCRIPT_ENV}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, notifier, objects::setting::Setting, processor::{self}, reader::{self, auto_connect, reconnector::Reconnector}, remote::uploader::{self, Status}, sound_board::{Voice}, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
+use crate::{control::{socket::{self, CONNECTION_CHANGE_PAUSE, MAX_CONNECTED, UPDATE_SCRIPT_ENV}, sound::{SoundNotifier, SoundType}, Control, SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{sqlite, Database}, network::api, notifier, objects::{read, setting::Setting}, processor::{self}, reader::{self, auto_connect, reconnector::Reconnector}, remote::{remote_util, uploader::{self, Status, Uploader}}, sound_board::Voice, types::{TYPE_CHIP_DEC, TYPE_CHIP_HEX}};
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -41,11 +41,12 @@ pub const SETTINGS_PLAY_SOUND: u8 = 2;
 pub const SETTINGS_VOLUME: u8 = 3;
 pub const SETTINGS_VOICE: u8 = 4;
 pub const SETTINGS_AUTO_UPLOAD: u8 = 5;
-pub const SETTINGS_UPLOAD_INTERVAL: u8 = 6;
-pub const SETTINGS_ENABLE_NTFY: u8 = 7;
-pub const SETTINGS_DELETE_CHIP_READS: u8 = 8;
-pub const SETTINGS_SET_TIME_WEB: u8 = 9;
-pub const SETTINGS_SET_TIME_MANUAL: u8 = 10;
+pub const SETTINGS_MANUAL_UPLOAD: u8 = 6;
+pub const SETTINGS_UPLOAD_INTERVAL: u8 = 7;
+pub const SETTINGS_ENABLE_NTFY: u8 = 8;
+pub const SETTINGS_DELETE_CHIP_READS: u8 = 9;
+pub const SETTINGS_SET_TIME_WEB: u8 = 10;
+pub const SETTINGS_SET_TIME_MANUAL: u8 = 11;
 
 pub const TIME_MENU_YEAR: u8 = 0;
 pub const TIME_MENU_MONTH: u8 = 1;
@@ -66,6 +67,7 @@ pub struct CharacterDisplay {
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
+    uploader: Arc<Uploader>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     info: Arc<Mutex<DisplayInfo>>,
     control_port: u16,
@@ -106,6 +108,7 @@ impl CharacterDisplay {
         ac_state: Arc<Mutex<auto_connect::State>>,
         read_saver: Arc<processor::ReadSaver>,
         sound: Arc<SoundNotifier>,
+        uploader: Arc<Uploader>,
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
         control_port: u16,
         notifier: notifier::Notifier,
@@ -135,6 +138,7 @@ impl CharacterDisplay {
             ac_state,
             read_saver,
             sound,
+            uploader,
             joiners,
             control_port,
             notifier,
@@ -258,6 +262,7 @@ impl CharacterDisplay {
                 info.settings_menu.push(format!("   Volume      {:>4} ", self.volume));
                 info.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
                 info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
+                info.settings_menu.push(format!("   Manual Upload    "));
                 info.settings_menu.push(format!("   Upload Int  {:>4} ", control.upload_interval));
                 info.settings_menu.push(format!("   Enable NTFY {:>4} ", enable_ntfy));
                 info.settings_menu.push(String::from("   Delete Reads     "));
@@ -321,6 +326,9 @@ impl CharacterDisplay {
             self.minute = date_time.minute() as u8;
             self.seconds = date_time.second() as u8;
         }
+        let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
+                                .connect_timeout(Duration::from_secs(5)).build()
+                                .unwrap_or(reqwest::blocking::Client::new());
         loop {
             if let Ok(keepalive) = self.keepalive.try_lock() {
                 if *keepalive == false {
@@ -639,8 +647,69 @@ impl CharacterDisplay {
                                             SETTINGS_AUTO_UPLOAD => {  // Auto Upload
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     control.auto_remote = !control.auto_remote;
+                                                    // start uploader if true, otherwise stop it
+                                                    if control.auto_remote {
+                                                        if self.uploader.running() {
+
+                                                        }
+                                                        println!("Starting auto upload thread.");
+                                                        let t_uploader = self.uploader.clone();
+                                                        let t_joiner = thread::spawn(move|| {
+                                                            t_uploader.run();
+                                                        });
+                                                        if let Ok(mut j) = self.joiners.lock() {
+                                                            j.push(t_joiner);
+                                                        }
+                                                    } else {
+                                                        self.uploader.stop();
+                                                    }
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
                                                         println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            SETTINGS_MANUAL_UPLOAD => {
+                                                let mut to_upload: Vec<read::Read> = Vec::new();
+                                                let mut upload_api: Option<api::Api> = None;
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    match sq.get_apis() {
+                                                        Ok(apis) => {
+                                                            for api in apis {
+                                                                if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                                                    upload_api = Some(api.clone());
+                                                                    //println!("Uploading reads to {}", api.nickname());
+                                                                    // this request will upload all reads regardless of whether or not they've been uploaded previously
+                                                                    match sq.get_all_reads() {
+                                                                        Ok(mut reads) => {
+                                                                            to_upload.append(&mut reads);
+                                                                        },
+                                                                        Err(e) => {
+                                                                            println!("Error geting reads to upload. {e}");
+                                                                            break;
+                                                                        }
+                                                                    };
+                                                                    // remote api found, so break the loop looking for it
+                                                                    break;
+                                                                }
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            println!("error getting apis: {e}");
+                                                        }
+                                                    }
+                                                }
+                                                // upload any reads we found in the database if we found our remote API
+                                                if let Some(api) = upload_api {
+                                                    if to_upload.len() > 0 {
+                                                        let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                        if let Ok(mut sq) = self.sqlite.lock() {
+                                                            match sq.update_reads_status(&modified_reads) {
+                                                                Ok(_) => {},
+                                                                Err(e) => {
+                                                                    println!("Error updating uploaded reads: {e}");
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
