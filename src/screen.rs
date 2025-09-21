@@ -645,13 +645,10 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_AUTO_UPLOAD => {  // Auto Upload
-                                                if let Ok(sq) = self.sqlite.lock() {
-                                                    control.auto_remote = !control.auto_remote;
-                                                    // start uploader if true, otherwise stop it
-                                                    if control.auto_remote {
-                                                        if self.uploader.running() {
-
-                                                        }
+                                                control.auto_remote = !control.auto_remote;
+                                                // start uploader if true, otherwise stop it
+                                                if control.auto_remote {
+                                                    if !self.uploader.running() {
                                                         println!("Starting auto upload thread.");
                                                         let t_uploader = self.uploader.clone();
                                                         let t_joiner = thread::spawn(move|| {
@@ -660,9 +657,11 @@ impl CharacterDisplay {
                                                         if let Ok(mut j) = self.joiners.lock() {
                                                             j.push(t_joiner);
                                                         }
-                                                    } else {
-                                                        self.uploader.stop();
                                                     }
+                                                } else {
+                                                    self.uploader.stop();
+                                                }
+                                                if let Ok(sq) = self.sqlite.lock() {
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
                                                         println!("Error saving setting: {e}");
                                                     }
