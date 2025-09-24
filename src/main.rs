@@ -32,6 +32,11 @@ fn main() {
     if let Ok(_) = dotenv() {
         println!(".env file loaded successfully.")
     }
+    let args: Vec<String> = env::args().collect();
+    let mut quick = false;
+    if args.len() > 1 && (args[1].eq_ignore_ascii_case("--quick") || args[1].eq_ignore_ascii_case("-q")) {
+        quick = true;
+    }
     let restore = sqlite::SQLite::already_exists() == false;
     let mut sqlite = sqlite::SQLite::new().unwrap();
     match sqlite.setup() {
@@ -193,7 +198,7 @@ fn main() {
         println!("Unable to get control mutex for some reason.");
     }
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
-    control::socket::control_loop(sqlite.clone(), &control, keepalive.clone());
+    control::socket::control_loop(sqlite.clone(), &control, keepalive.clone(), quick);
     if let Ok(sq) = sqlite.lock() {
         let control: control::Control = control::Control::new(&sq).unwrap();
         let readers = sq.get_readers().unwrap();

@@ -36,7 +36,8 @@ pub const JSON_END_CHAR: char = '}';
 pub fn control_loop(
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     control: &Arc<Mutex<super::Control>>,
-    keepalive: Arc<Mutex<bool>>
+    keepalive: Arc<Mutex<bool>>,
+    quick: bool
 ) {
     // Joiners are join handles for threads we spin up.
     let joiners: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
@@ -193,7 +194,7 @@ pub fn control_loop(
     );
     // start a thread to automatically connect to readers
     thread::spawn(move|| {
-        auto_connector.run();
+        auto_connector.run(quick);
     });
     
     // Check if we can start a screen

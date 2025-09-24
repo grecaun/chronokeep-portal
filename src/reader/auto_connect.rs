@@ -63,15 +63,20 @@ impl AutoConnector {
         output
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, quick: bool) {
         if let Ok(mut state) = self.state.lock() {
             *state = State::Waiting;
         } else {
             println!("Error getting state mutex during reader auto start sequence.");
             return
         }
-        println!("Auto connect is pausing for {START_UP_WAITING_PERIOD_SECONDS} seconds before trying to connect to readers.");
-        thread::sleep(Duration::from_secs(START_UP_WAITING_PERIOD_SECONDS));
+        if !quick {
+            println!("Auto connect is pausing for {START_UP_WAITING_PERIOD_SECONDS} seconds before trying to connect to readers.");
+            thread::sleep(Duration::from_secs(START_UP_WAITING_PERIOD_SECONDS));
+        } else {
+            println!("Auto connect is in quick mode. Wait period shortened to 1 second.");
+            thread::sleep(Duration::from_secs(1));
+        }
         if let Ok(mut state) = self.state.lock() {
             *state = State::Running;
         } else {
