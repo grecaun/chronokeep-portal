@@ -8,6 +8,14 @@ UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-porta
 PORTAL_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal/releases/latest'
 QUIT_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal-quit/releases/latest'
 
+help_function()
+{
+    echo ""
+    echo "Usage: $0 [-f]"
+    echo -e "\t-f\tForces the creation of all scripts, service files, and sudoers file."
+    exit 1
+}
+
 if [[ "$EUID" -eq 0 ]]; then
     echo "This script is not meant to be run as root. Please run as a user with sudo privileges."
     exit 1
@@ -42,7 +50,16 @@ else
         TARGET=armv7-linux
     fi;
 fi;
-echo $TARGET
+
+FORCE_CREATE=false
+while getopts "f" opt
+do
+    case "$opt" in
+        f) FORCE_CREATE=true ;;
+        \?) help_function ;;
+    esac
+done
+
 echo "------------------------------------------------"
 echo "--------- Now installing Chronoportal! ---------"
 echo "------------------------------------------------"
@@ -78,7 +95,7 @@ if ! [[ -e ${PORTAL_DEST}logs/ ]]; then
     sudo mkdir ${PORTAL_DEST}logs/
 fi;
 sudo chown -R $USER:root ${PORTAL_DEST}
-if ! [[ -e ${PORTAL_DEST}run.sh ]]; then
+if ! [[ -e ${PORTAL_DEST}run.sh ]] || [[ $FORCE_CREATE == true ]]; then
     echo "--------- Creating portal run script. ----------"
     echo "------------------------------------------------"
     echo "#!/bin/bash" | sudo tee ${PORTAL_DEST}run.sh
@@ -94,11 +111,11 @@ if ! [[ -e ${PORTAL_DEST}run.sh ]]; then
     echo "export PORTAL_ZEBRA_SHIFT=True" | sudo tee -a ${PORTAL_DEST}run.sh
     echo | sudo tee -a ${PORTAL_DEST}run.sh
     echo "now=\`date +%Y-%m-%d\`" | sudo tee -a ${PORTAL_DEST}run.sh
-    echo "${PORTAL_DEST}chronokeep-portal | ts '[%Y-%m-%d %H:%M:%S]' >> ${PORTAL_DEST}logs/\${now}-portal.log 2>&1" | sudo tee -a ${PORTAL_DEST}run.sh
+    echo "${PORTAL_DEST}chronokeep-portal \$1 | ts '[%Y-%m-%d %H:%M:%S]' >> ${PORTAL_DEST}logs/\${now}-portal.log 2>&1" | sudo tee -a ${PORTAL_DEST}run.sh
     sudo chown $USER:root ${PORTAL_DEST}run.sh
     sudo chmod +x ${PORTAL_DEST}run.sh
 fi;
-if ! [[ -e ${PORTAL_DEST}quit.sh ]]; then
+if ! [[ -e ${PORTAL_DEST}quit.sh ]] || [[ $FORCE_CREATE == true ]]; then
     echo "--------- Creating portal quit script. ---------"
     echo "------------------------------------------------"
     echo "#!/bin/bash" | sudo tee ${PORTAL_DEST}quit.sh
@@ -109,7 +126,7 @@ if ! [[ -e ${PORTAL_DEST}quit.sh ]]; then
 fi;
 echo "------------ Checking update script ------------"
 echo "------------------------------------------------"
-if ! [[ -e ${PORTAL_DEST}update.sh ]]; then
+if ! [[ -e ${PORTAL_DEST}update.sh ]] || [[ $FORCE_CREATE == true ]]; then
     echo "----------- Fetching update script. ------------"
     echo "------------------------------------------------"
     curl -L ${UPDATE_SCRIPT_URL} -o ${PORTAL_DEST}update.sh > /dev/null 2>&1
@@ -138,7 +155,7 @@ else
 fi;
 echo "---------- Checking uninstall script -----------"
 echo "------------------------------------------------"
-if ! [[ -e ${PORTAL_DEST}uninstall.sh ]]; then
+if ! [[ -e ${PORTAL_DEST}uninstall.sh ]] || [[ $FORCE_CREATE == true ]]; then
     echo "--------- Fetching uninstall script. -----------"
     echo "------------------------------------------------"
     curl -L ${UNINSTALL_SCRIPT_URL} -o ${PORTAL_DEST}uninstall.sh > /dev/null 2>&1
@@ -164,7 +181,7 @@ else
         sudo chmod +x ${PORTAL_DEST}uninstall.sh
     fi;
 fi;
-if ! [[ -e /etc/systemd/system/${SERVICE_NAME}.service ]]; then
+if ! [[ -e /etc/systemd/system/${SERVICE_NAME}.service ]] || [[ $FORCE_CREATE == true ]]; then
     echo "----------- Creating portal service. -----------"
     echo "------------------------------------------------"
     sudo echo "    [Unit]" | sudo tee /etc/systemd/system/${SERVICE_NAME}.service
@@ -179,11 +196,13 @@ if ! [[ -e /etc/systemd/system/${SERVICE_NAME}.service ]]; then
     sudo echo "RestartSec=1" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
     sudo echo "User=$USER" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
     sudo echo "ExecStart=${PORTAL_DEST}run.sh" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
+    sudo echo "ExecStop=${PORTAL_DEST}quit.sh" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
+    sudo echo "ExecRestart=${PORTAL_DEST}run.sh -q" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
     sudo echo | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
     sudo echo "[Install]" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
     sudo echo "WantedBy=multi-user.target" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service
 fi;
-if ! [[ -e /etc/systemd/system/${QUIT_SERVICE_NAME}.service ]]; then
+if ! [[ -e /etc/systemd/system/${QUIT_SERVICE_NAME}.service ]] || [[ $FORCE_CREATE == true ]]; then
     echo "-------- Creating portal quit service. ---------"
     echo "------------------------------------------------"
     sudo echo "[Unit]" | sudo tee /etc/systemd/system/${QUIT_SERVICE_NAME}.service
@@ -233,7 +252,7 @@ sudo systemctl enable ${SERVICE_NAME}
 echo "----------- Starting portal service. -----------"
 echo "------------------------------------------------"
 sudo systemctl start ${SERVICE_NAME}
-if ! [[ -e /etc/sudoers.d/chronoportal ]]; then
+if ! [[ -e /etc/sudoers.d/chronoportal ]] || [[ $FORCE_CREATE == true ]]; then
     echo "----------- Setting up nopasswd sudo -----------"
     echo "------------------------------------------------"
     if [[ -e /etc/sudoers.d/010_pi-nopasswd ]]; then
