@@ -650,6 +650,15 @@ impl CharacterDisplay {
                                                 if control.auto_remote {
                                                     if !self.uploader.running() {
                                                         println!("Starting auto upload thread.");
+                                                        #[cfg(target_os = "linux")]
+                                                        {
+                                                            let _ = lcd.clear();
+                                                            let _ = lcd.home();
+                                                            let _ = write!(lcd, "{:<20}", "");
+                                                            let _ = write!(lcd, "{:<20}", "");
+                                                            let _ = write!(lcd, "{:^20}", "Working . . .");
+                                                            let _ = write!(lcd, "{:<20}", "");
+                                                        }
                                                         let t_uploader = self.uploader.clone();
                                                         let t_joiner = thread::spawn(move|| {
                                                             t_uploader.run();
@@ -668,6 +677,15 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_MANUAL_UPLOAD => {
+                                                #[cfg(target_os = "linux")]
+                                                {
+                                                    let _ = lcd.clear();
+                                                    let _ = lcd.home();
+                                                    let _ = write!(lcd, "{:<20}", "");
+                                                    let _ = write!(lcd, "{:<20}", "");
+                                                    let _ = write!(lcd, "{:^20}", "Uploading . . .");
+                                                    let _ = write!(lcd, "{:<20}", "");
+                                                }
                                                 let mut to_upload: Vec<read::Read> = Vec::new();
                                                 let mut upload_api: Option<api::Api> = None;
                                                 if let Ok(sq) = self.sqlite.lock() {
@@ -985,10 +1003,88 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_AUTO_UPLOAD => {  // Auto Upload
+                                                control.auto_remote = !control.auto_remote;
+                                                // start uploader if true, otherwise stop it
+                                                if control.auto_remote {
+                                                    if !self.uploader.running() {
+                                                        #[cfg(target_os = "linux")]
+                                                        {
+                                                            let _ = lcd.clear();
+                                                            let _ = lcd.home();
+                                                            let _ = write!(lcd, "{:<20}", "");
+                                                            let _ = write!(lcd, "{:<20}", "");
+                                                            let _ = write!(lcd, "{:^20}", "Working . . .");
+                                                            let _ = write!(lcd, "{:<20}", "");
+                                                        }
+                                                        println!("Starting auto upload thread.");
+                                                        let t_uploader = self.uploader.clone();
+                                                        let t_joiner = thread::spawn(move|| {
+                                                            t_uploader.run();
+                                                        });
+                                                        if let Ok(mut j) = self.joiners.lock() {
+                                                            j.push(t_joiner);
+                                                        }
+                                                    }
+                                                } else {
+                                                    self.uploader.stop();
+                                                }
                                                 if let Ok(sq) = self.sqlite.lock() {
-                                                    control.auto_remote = !control.auto_remote;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
                                                         println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            SETTINGS_MANUAL_UPLOAD => {
+                                                #[cfg(target_os = "linux")]
+                                                {
+                                                    let _ = lcd.clear();
+                                                    let _ = lcd.home();
+                                                    let _ = write!(lcd, "{:<20}", "");
+                                                    let _ = write!(lcd, "{:<20}", "");
+                                                    let _ = write!(lcd, "{:^20}", "Uploading . . .");
+                                                    let _ = write!(lcd, "{:<20}", "");
+                                                }
+                                                let mut to_upload: Vec<read::Read> = Vec::new();
+                                                let mut upload_api: Option<api::Api> = None;
+                                                if let Ok(sq) = self.sqlite.lock() {
+                                                    match sq.get_apis() {
+                                                        Ok(apis) => {
+                                                            for api in apis {
+                                                                if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                                                    upload_api = Some(api.clone());
+                                                                    //println!("Uploading reads to {}", api.nickname());
+                                                                    // this request will upload all reads regardless of whether or not they've been uploaded previously
+                                                                    match sq.get_all_reads() {
+                                                                        Ok(mut reads) => {
+                                                                            to_upload.append(&mut reads);
+                                                                        },
+                                                                        Err(e) => {
+                                                                            println!("Error geting reads to upload. {e}");
+                                                                            break;
+                                                                        }
+                                                                    };
+                                                                    // remote api found, so break the loop looking for it
+                                                                    break;
+                                                                }
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            println!("error getting apis: {e}");
+                                                        }
+                                                    }
+                                                }
+                                                // upload any reads we found in the database if we found our remote API
+                                                if let Some(api) = upload_api {
+                                                    if to_upload.len() > 0 {
+                                                        let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                        if let Ok(mut sq) = self.sqlite.lock() {
+                                                            match sq.update_reads_status(&modified_reads) {
+                                                                Ok(_) => {},
+                                                                Err(e) => {
+                                                                    println!("Error updating uploaded reads: {e}");
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1203,6 +1299,60 @@ impl CharacterDisplay {
                                         SETTINGS_DELETE_CHIP_READS => {
                                             self.current_menu[0] = DELETE_READS_MENU;
                                             self.current_menu[1] = 0;
+                                        }
+                                        SETTINGS_MANUAL_UPLOAD => {
+                                            #[cfg(target_os = "linux")]
+                                            {
+                                                let _ = lcd.clear();
+                                                let _ = lcd.home();
+                                                let _ = write!(lcd, "{:<20}", "");
+                                                let _ = write!(lcd, "{:<20}", "");
+                                                let _ = write!(lcd, "{:^20}", "Uploading . . .");
+                                                let _ = write!(lcd, "{:<20}", "");
+                                            }
+                                            let mut to_upload: Vec<read::Read> = Vec::new();
+                                            let mut upload_api: Option<api::Api> = None;
+                                            if let Ok(sq) = self.sqlite.lock() {
+                                                match sq.get_apis() {
+                                                    Ok(apis) => {
+                                                        for api in apis {
+                                                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                                                upload_api = Some(api.clone());
+                                                                //println!("Uploading reads to {}", api.nickname());
+                                                                // this request will upload all reads regardless of whether or not they've been uploaded previously
+                                                                match sq.get_all_reads() {
+                                                                    Ok(mut reads) => {
+                                                                        to_upload.append(&mut reads);
+                                                                    },
+                                                                    Err(e) => {
+                                                                        println!("Error geting reads to upload. {e}");
+                                                                        break;
+                                                                    }
+                                                                };
+                                                                // remote api found, so break the loop looking for it
+                                                                break;
+                                                            }
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        println!("error getting apis: {e}");
+                                                    }
+                                                }
+                                            }
+                                            // upload any reads we found in the database if we found our remote API
+                                            if let Some(api) = upload_api {
+                                                if to_upload.len() > 0 {
+                                                    let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                    if let Ok(mut sq) = self.sqlite.lock() {
+                                                        match sq.update_reads_status(&modified_reads) {
+                                                            Ok(_) => {},
+                                                            Err(e) => {
+                                                                println!("Error updating uploaded reads: {e}");
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                         _ => {
                                             self.current_menu[0] = MAIN_MENU;
