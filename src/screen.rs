@@ -67,7 +67,7 @@ pub struct CharacterDisplay {
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
-    uploader: Arc<Uploader>,
+    uploader: Option<Arc<Uploader>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     info: Arc<Mutex<DisplayInfo>>,
     control_port: u16,
@@ -108,7 +108,6 @@ impl CharacterDisplay {
         ac_state: Arc<Mutex<auto_connect::State>>,
         read_saver: Arc<processor::ReadSaver>,
         sound: Arc<SoundNotifier>,
-        uploader: Arc<Uploader>,
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
         control_port: u16,
         notifier: notifier::Notifier,
@@ -138,7 +137,7 @@ impl CharacterDisplay {
             ac_state,
             read_saver,
             sound,
-            uploader,
+            uploader: None,
             joiners,
             control_port,
             notifier,
@@ -150,6 +149,10 @@ impl CharacterDisplay {
             seconds: 0,
             volume: 10,
         }
+    }
+
+    pub fn set_uploader(&mut self, upload: Arc<Uploader>) {
+        self.uploader = Some(upload);
     }
 
     pub fn set_shutdown(&mut self) {
@@ -648,27 +651,31 @@ impl CharacterDisplay {
                                                 control.auto_remote = !control.auto_remote;
                                                 // start uploader if true, otherwise stop it
                                                 if control.auto_remote {
-                                                    if !self.uploader.running() {
-                                                        println!("Starting auto upload thread.");
-                                                        #[cfg(target_os = "linux")]
-                                                        {
-                                                            let _ = lcd.clear();
-                                                            let _ = lcd.home();
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:^20}", "Working . . .");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                        }
-                                                        let t_uploader = self.uploader.clone();
-                                                        let t_joiner = thread::spawn(move|| {
-                                                            t_uploader.run();
-                                                        });
-                                                        if let Ok(mut j) = self.joiners.lock() {
-                                                            j.push(t_joiner);
+                                                    if let Some(uploader) = &self.uploader {
+                                                        if !uploader.running() {
+                                                            println!("Starting auto upload thread.");
+                                                            #[cfg(target_os = "linux")]
+                                                            {
+                                                                let _ = lcd.clear();
+                                                                let _ = lcd.home();
+                                                                let _ = write!(lcd, "{:<20}", "");
+                                                                let _ = write!(lcd, "{:<20}", "");
+                                                                let _ = write!(lcd, "{:^20}", "Working . . .");
+                                                                let _ = write!(lcd, "{:<20}", "");
+                                                            }
+                                                            let t_uploader = uploader.clone();
+                                                            let t_joiner = thread::spawn(move|| {
+                                                                t_uploader.run();
+                                                            });
+                                                            if let Ok(mut j) = self.joiners.lock() {
+                                                                j.push(t_joiner);
+                                                            }
                                                         }
                                                     }
                                                 } else {
-                                                    self.uploader.stop();
+                                                    if let Some(uploader) = &self.uploader {
+                                                        uploader.stop();
+                                                    }
                                                 }
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
@@ -1006,27 +1013,31 @@ impl CharacterDisplay {
                                                 control.auto_remote = !control.auto_remote;
                                                 // start uploader if true, otherwise stop it
                                                 if control.auto_remote {
-                                                    if !self.uploader.running() {
-                                                        #[cfg(target_os = "linux")]
-                                                        {
-                                                            let _ = lcd.clear();
-                                                            let _ = lcd.home();
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:^20}", "Working . . .");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                        }
-                                                        println!("Starting auto upload thread.");
-                                                        let t_uploader = self.uploader.clone();
-                                                        let t_joiner = thread::spawn(move|| {
-                                                            t_uploader.run();
-                                                        });
-                                                        if let Ok(mut j) = self.joiners.lock() {
-                                                            j.push(t_joiner);
+                                                    if let Some(uploader) = &self.uploader {
+                                                        if !uploader.running() {
+                                                            #[cfg(target_os = "linux")]
+                                                            {
+                                                                let _ = lcd.clear();
+                                                                let _ = lcd.home();
+                                                                let _ = write!(lcd, "{:<20}", "");
+                                                                let _ = write!(lcd, "{:<20}", "");
+                                                                let _ = write!(lcd, "{:^20}", "Working . . .");
+                                                                let _ = write!(lcd, "{:<20}", "");
+                                                            }
+                                                            println!("Starting auto upload thread.");
+                                                            let t_uploader = uploader.clone();
+                                                            let t_joiner = thread::spawn(move|| {
+                                                                t_uploader.run();
+                                                            });
+                                                            if let Ok(mut j) = self.joiners.lock() {
+                                                                j.push(t_joiner);
+                                                            }
                                                         }
                                                     }
                                                 } else {
-                                                    self.uploader.stop();
+                                                    if let Some(uploader) = &self.uploader {
+                                                        uploader.stop();
+                                                    }
                                                 }
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {

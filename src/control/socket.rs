@@ -262,6 +262,12 @@ pub fn control_loop(
             }
         }
     }
+    
+    if let Ok(mut screen) = screen.lock() {
+        if let Some(scr) = &mut *screen {
+            scr.set_uploader(uploader.clone());
+        }
+    }
 
     // Start our code to check the battery level.
     #[cfg(target_os = "linux")]

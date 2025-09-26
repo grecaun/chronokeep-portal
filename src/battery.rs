@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,6 +20,7 @@ pub struct Checker {
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     last_low: u64,
     last_crit: u64,
+    historical_voltages: VecDeque<u32>,
 }
 
 impl Checker {
@@ -39,6 +41,7 @@ impl Checker {
             sqlite,
             last_low: 0,
             last_crit: 0,
+            historical_voltages: VecDeque::with_capacity(50)
         }
     }
 
@@ -74,7 +77,7 @@ impl Checker {
                                     println!("Error checking voltage.");
                                 }
                             }
-                            thread::sleep(Duration::from_secs(1));
+                            thread::sleep(Duration::from_millis(15));
                             if let Ok(keepalive) = self.keepalive.lock() {
                                 if *keepalive == false {
                                     break;
@@ -96,6 +99,12 @@ impl Checker {
     }
 
     fn set_percentage(&mut self, voltage: u16) {
+        while self.historical_voltages.len() >= 50 {
+            _ = self.historical_voltages.pop_front()
+        }
+        _ = self.historical_voltages.push_back(voltage as u32);
+        let summed_voltage: u32 = self.historical_voltages.iter().sum();
+        let average_voltage: u32 = summed_voltage / 50;
         // Voltage is in mV
         // CHG  -- >  13800
         // 100% -- >  13550
@@ -110,29 +119,25 @@ impl Checker {
         //  10% -- >  12990
         //   0% -- <= 12990
         // Discharge is (mostly) linear up to 20% then sharply declines.
-        let percentage: u8 = if voltage > 13800 { 
+        let percentage: u8 = if average_voltage > 13800 { 
             // charging will be considered anything above 110%
             150
-        } else if voltage > 13550 {
+        } else if average_voltage >= 13400 { // 100% (ish)
             100
-        } else if voltage > 13180 {
-            90
-        } else if voltage > 13170 {
-            80
-        } else if voltage > 13160 {
-            70
-        } else if voltage > 13150 {
-            60
-        } else if voltage > 13100 {
-            50
-        } else if voltage > 13050 {
-            40
-        } else if voltage > 13030 {
-            30
-        } else if voltage > 13010 {
-            20
-        } else if voltage > 12990 {
-            10
+        } else if average_voltage >= 13300 { //  90% -> 100% -- 100 / 10  -> 10%
+            90 + ((average_voltage - 13300) / 10) as u8
+        } else if average_voltage >= 13250 { //  80% ->  90% --  50 / 5   -> 10%
+            80 + ((average_voltage - 13250) / 5) as u8
+        } else if average_voltage >= 13200 { //  70% ->  80% --  50 / 5   -> 10%
+            70 + ((average_voltage - 13200) / 5) as u8
+        } else if average_voltage >= 13100 { //  40% ->  70% -- 100 / 3.4 -> 29%
+            40 + ((average_voltage - 13100) as f32 / 3.4).floor() as u8
+        } else if average_voltage >= 13000 { //  30% ->  40% -- 100 / 10  -> 10%
+            30 + ((average_voltage - 13000) / 10) as u8
+        } else if average_voltage >= 12900 { //  20% ->  30% -- 100 / 10  -> 10%
+            20 + ((average_voltage - 12900) / 10) as u8
+        } else if average_voltage >= 12000 { //   0% ->  20% -- 900 / 45  -> 20%
+            ((average_voltage - 12000) / 45) as u8
         } else {
             0
         };
