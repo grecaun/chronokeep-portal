@@ -145,6 +145,7 @@ impl Checker {
             Ok(t) => { t.as_secs() }
             Err(_) => { 0 }
         };
+        println!("{} {}% {}mV", now, percentage, average_voltage);
         let mut batt = 0;
         if let Ok(mut control) = self.control.lock() {
             batt = control.battery;
