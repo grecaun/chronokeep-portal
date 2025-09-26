@@ -11,6 +11,9 @@ use chrono::{DateTime, Local};
 
 use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, screen::CharacterDisplay, notifier};
 
+pub const BATT_SLEEP_MILLISEC: u64 = 95;
+pub const BATT_VOLTAGE_COUNT: usize = 20;
+
 pub struct Checker {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
@@ -20,7 +23,7 @@ pub struct Checker {
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     last_low: u64,
     last_crit: u64,
-    historical_voltages: VecDeque<u32>,
+    historical_voltages: VecDeque<usize>,
 }
 
 impl Checker {
@@ -41,7 +44,7 @@ impl Checker {
             sqlite,
             last_low: 0,
             last_crit: 0,
-            historical_voltages: VecDeque::with_capacity(50)
+            historical_voltages: VecDeque::with_capacity(BATT_VOLTAGE_COUNT)
         }
     }
 
@@ -77,7 +80,7 @@ impl Checker {
                                     println!("Error checking voltage.");
                                 }
                             }
-                            thread::sleep(Duration::from_millis(15));
+                            thread::sleep(Duration::from_millis(BATT_SLEEP_MILLISEC));
                             if let Ok(keepalive) = self.keepalive.lock() {
                                 if *keepalive == false {
                                     break;
@@ -99,12 +102,12 @@ impl Checker {
     }
 
     fn set_percentage(&mut self, voltage: u16) {
-        while self.historical_voltages.len() >= 50 {
+        while self.historical_voltages.len() >= BATT_VOLTAGE_COUNT {
             _ = self.historical_voltages.pop_front()
         }
-        _ = self.historical_voltages.push_back(voltage as u32);
-        let summed_voltage: u32 = self.historical_voltages.iter().sum();
-        let average_voltage: u32 = summed_voltage / 50;
+        _ = self.historical_voltages.push_back(voltage as usize);
+        let summed_voltage: usize = self.historical_voltages.iter().sum();
+        let average_voltage: usize = summed_voltage / self.historical_voltages.len();
         // Voltage is in mV
         // CHG  -- >  13800
         // 100% -- >  13550
@@ -145,7 +148,7 @@ impl Checker {
             Ok(t) => { t.as_secs() }
             Err(_) => { 0 }
         };
-        println!("{} {}% {}mV", now, percentage, average_voltage);
+        println!("{} {}% {}mV -- {}mV", now, percentage, average_voltage, voltage);
         let mut batt = 0;
         if let Ok(mut control) = self.control.lock() {
             batt = control.battery;
