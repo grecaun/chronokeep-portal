@@ -44,7 +44,7 @@ impl Checker {
             sqlite,
             last_low: 0,
             last_crit: 0,
-            historical_voltages: VecDeque::with_capacity(BATT_VOLTAGE_COUNT)
+            historical_voltages: VecDeque::with_capacity(BATT_VOLTAGE_COUNT),
         }
     }
 
@@ -103,11 +103,10 @@ impl Checker {
 
     fn set_percentage(&mut self, voltage: u16) {
         while self.historical_voltages.len() >= BATT_VOLTAGE_COUNT {
-            _ = self.historical_voltages.pop_front()
+            _ = self.historical_voltages.pop_front();
         }
         _ = self.historical_voltages.push_back(voltage as usize);
-        let summed_voltage: usize = self.historical_voltages.iter().sum();
-        let average_voltage: usize = summed_voltage / self.historical_voltages.len();
+        let average_voltage: usize = self.historical_voltages.iter().sum::<usize>() / self.historical_voltages.len();
         // Voltage is in mV
         // CHG  -- >  13800
         // 100% -- >  13550
@@ -121,26 +120,16 @@ impl Checker {
         //  20% -- >  13010
         //  10% -- >  12990
         //   0% -- <= 12990
-        // Discharge is (mostly) linear up to 20% then sharply declines.
+        // Discharge is (mostly) linear from 90% to 20%. 100% to 90% is drastic. 10% -> 0% is...
         let percentage: u8 = if average_voltage > 13800 { 
             // charging will be considered anything above 110%
             150
-        } else if average_voltage >= 13400 { // 100% (ish)
+        } else if average_voltage >= 13660 { // 100% (ish)
             100
-        } else if average_voltage >= 13300 { //  90% -> 100% -- 100 / 10  -> 10%
-            90 + ((average_voltage - 13300) / 10) as u8
-        } else if average_voltage >= 13250 { //  80% ->  90% --  50 / 5   -> 10%
-            80 + ((average_voltage - 13250) / 5) as u8
-        } else if average_voltage >= 13200 { //  70% ->  80% --  50 / 5   -> 10%
-            70 + ((average_voltage - 13200) / 5) as u8
-        } else if average_voltage >= 13100 { //  40% ->  70% -- 100 / 3.4 -> 29%
-            40 + ((average_voltage - 13100) as f32 / 3.4).floor() as u8
-        } else if average_voltage >= 13000 { //  30% ->  40% -- 100 / 10  -> 10%
-            30 + ((average_voltage - 13000) / 10) as u8
-        } else if average_voltage >= 12900 { //  20% ->  30% -- 100 / 10  -> 10%
-            20 + ((average_voltage - 12900) / 10) as u8
-        } else if average_voltage >= 12000 { //   0% ->  20% -- 900 / 45  -> 20%
-            ((average_voltage - 12000) / 45) as u8
+        } else if average_voltage >= 13180 { //  90% -> 100% -- 480 / 48 -> 10%
+            90 + ((average_voltage - 13180) / 48) as u8
+        } else if average_voltage >= 12990 { //  10% ->  90% -- 190 * 1000 / 2375 -> 80%
+            10 + ((average_voltage - 12990) * 1000 / 2375) as u8
         } else {
             0
         };
@@ -148,7 +137,9 @@ impl Checker {
             Ok(t) => { t.as_secs() }
             Err(_) => { 0 }
         };
-        println!("{} {}% {}mV -- {}mV", now, percentage, average_voltage, voltage);
+        if now % 30 == 0 {
+            eprintln!("{} {}% {}mV -- {}mV", now, percentage, average_voltage, voltage);
+        }
         let mut batt = 0;
         if let Ok(mut control) = self.control.lock() {
             batt = control.battery;

@@ -182,8 +182,10 @@ impl CharacterDisplay {
             if let Ok(control) = self.control.lock() {
                 if control.battery > 135 {
                     info.title_bar.replace_range(17..20, "chg");
-                } else if control.battery >= 30 {
+                } else if control.battery >= 60 {
                     info.title_bar.replace_range(17..20, " ok");
+                } else if control.battery >= 30 {
+                    info.title_bar.replace_range(17..20, "mid");
                 } else if control.battery >= 15 {
                     info.title_bar.replace_range(17..20, "low");
                 } else {
