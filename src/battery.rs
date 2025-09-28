@@ -11,13 +11,12 @@ use chrono::{DateTime, Local};
 
 use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, screen::CharacterDisplay, notifier};
 
-pub const BATT_SLEEP_MILLISEC: u64 = 95;
-pub const BATT_VOLTAGE_COUNT: usize = 20;
+pub const BATT_SLEEP_MILLISEC: u64 = 300;
+pub const BATT_VOLTAGE_COUNT: usize = 15;
 
 pub struct Checker {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
-    screen: Arc<Mutex<Option<CharacterDisplay>>>,
     notifier: notifier::Notifier,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
@@ -30,7 +29,6 @@ impl Checker {
     pub fn new(
         keepalive: Arc<Mutex<bool>>,
         control: Arc<Mutex<Control>>,
-        screen: Arc<Mutex<Option<CharacterDisplay>>>,
         notifier: notifier::Notifier,
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
@@ -38,7 +36,6 @@ impl Checker {
         Self {
             keepalive,
             control,
-            screen,
             notifier,
             control_sockets,
             sqlite,
@@ -155,11 +152,6 @@ impl Checker {
             self.notifier.send_notification(notifier::Notification::BatteryCritical, format!("{}", date_time.format("%Y/%m/%d %T")));
             self.send_notification(APINotification::BatteryCritical);
             self.last_crit = now;
-        }
-        if let Ok(mut screen_opt) = self.screen.lock() {
-            if let Some(screen) = &mut *screen_opt {
-                screen.update_battery();
-            }
         }
     }
 

@@ -177,24 +177,6 @@ impl CharacterDisplay {
         }
     }
 
-    pub fn update_battery(&mut self) {
-        if let Ok(mut info) = self.info.lock() {
-            if let Ok(control) = self.control.lock() {
-                if control.battery > 135 {
-                    info.title_bar.replace_range(17..20, "chg");
-                } else if control.battery >= 60 {
-                    info.title_bar.replace_range(17..20, " ok");
-                } else if control.battery >= 30 {
-                    info.title_bar.replace_range(17..20, "mid");
-                } else if control.battery >= 15 {
-                    info.title_bar.replace_range(17..20, "low");
-                } else {
-                    info.title_bar.replace_range(17..20, "cri");
-                }
-            }
-        }
-    }
-
     pub fn update_readers(&mut self) {
         if let Ok(mut info) = self.info.lock() {
             info.reader_info.clear();
@@ -1599,17 +1581,26 @@ impl CharacterDisplay {
             {
                 let sys_time = SystemTime::now();
                 let date_time: DateTime<Local> = sys_time.into();
+                let mut messages: Vec<String> = vec!();
                 if let Ok(mut info) = self.info.lock() {
                     info.title_bar.replace_range(0..14, format!("{:<14}", date_time.format("%m-%d %H:%M:%S")).as_str());
-                }
-                let mut messages: Vec<String> = vec!();
-                if let Ok(info) = self.info.lock() {
-                    messages.push(info.title_bar.clone())
-                }
-                let _ = lcd.home();
-                match self.current_menu[0] {
-                    MAIN_MENU => { // main menu, max ix 3
-                        if let Ok(info) = self.info.lock() {
+                    if let Ok(control) = self.control.lock() {
+                        if control.battery > 135 {
+                            info.title_bar.replace_range(17..20, "chg");
+                        } else if control.battery >= 60 {
+                            info.title_bar.replace_range(17..20, " ok");
+                        } else if control.battery >= 30 {
+                            info.title_bar.replace_range(17..20, "mid");
+                        } else if control.battery >= 15 {
+                            info.title_bar.replace_range(17..20, "low");
+                        } else {
+                            info.title_bar.replace_range(17..20, "cri");
+                        }
+                    }
+                    messages.push(info.title_bar.clone());
+                    let _ = lcd.home();
+                    match self.current_menu[0] {
+                        MAIN_MENU => { // main menu, max ix 3
                             let max_ix: u8 = (info.main_menu.len() - 1).try_into().unwrap();
                             let mut disp_ix = self.current_menu[1] as usize;
                             if self.current_menu[1] == 0 {
@@ -1620,10 +1611,9 @@ impl CharacterDisplay {
                             messages.push(info.main_menu[disp_ix].clone());     // Interface writes lines odd lines before even lines,
                             messages.push(info.main_menu[disp_ix - 1].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
                             messages.push(info.main_menu[disp_ix + 1].clone()); // Messages comes pre-loaded with Line 1.
-                        }
-                    },
-                    SETTINGS_MENU => { // settings menu, max ix 9
-                        if let Ok(info) = self.info.lock() {
+                            drop(info);
+                        },
+                        SETTINGS_MENU => { // settings menu, max ix 9
                             let max_ix: u8 = (info.settings_menu.len() - 1).try_into().unwrap();
                             let mut disp_ix = self.current_menu[1] as usize;
                             if self.current_menu[1] == 0 {
@@ -1634,11 +1624,10 @@ impl CharacterDisplay {
                             messages.push(info.settings_menu[disp_ix].clone());     // Interface writes lines odd lines before even lines,
                             messages.push(info.settings_menu[disp_ix - 1].clone()); // So order Vec as [Line 1, Line 3, Line 2, Line 4]
                             messages.push(info.settings_menu[disp_ix + 1].clone()); // Messages comes pre-loaded with Line 1.
-                        }
-                    },
-                    READING_MENU => { // reader is reading
-                        self.update_readers();
-                        if let Ok(info) = self.info.lock() {
+                            drop(info);
+                        },
+                        READING_MENU => { // reader is reading
+                            self.update_readers();
                             match info.reader_info.len() {
                                 1 => {
                                     messages.push(format!("{:^20}", info.reader_info[0]));
@@ -1677,131 +1666,141 @@ impl CharacterDisplay {
                                     messages.push(format!("{:^20}", info.reader_info[third]));
                                 }
                             }
-                        }
-                    },
-                    ABOUT_MENU => { // about menu
-                        messages.clear();
-                        if let Ok(control) = self.control.try_lock() {
-                            messages.push(format!("{:^20}", "Chronokeep Portal"));
-                            messages.push(format!("{:^20}", "Device Name:"));
-                            messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
-                            messages.push(format!("{:^20}", control.name));
-                        } else {
-                            messages.push(format!("{:^20}", ""));
-                            messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
-                            messages.push(format!("{:^20}", "Chronokeep Portal"));
-                            messages.push(format!("{:^20}", ""));
-                        }
-                    },
-                    STARTUP_MENU => {
-                        messages.clear();
-                        messages.push(format!("{:^20}", ""));
-                        messages.push(format!("{:^20}", "Please wait."));
-                        messages.push(format!("{:^20}", "System Initializing."));
-                        messages.push(format!("{:^20}", ""));
-                    },
-                    SHUTDOWN_MENU => {
-                        messages.clear();
-                        messages.push(format!("{:^20}", ""));
-                        if self.current_menu[1] == 0 {
-                            messages.push(String::from("     YES    > NO    "));
-                        } else {
-                            messages.push(String::from("   > YES      NO    "));
-                        }
-                        messages.push(format!("{:^20}", "Shutdown Portal?"));
-                        messages.push(format!("{:^20}", ""));
-                    },
-                    UPDATE_MENU => {
-                        messages.clear();
-                        messages.push(format!("{:^20}", ""));
-                        if self.current_menu[1] == 0 {
-                            messages.push(String::from("     YES    > NO    "));
-                        } else {
-                            messages.push(String::from("   > YES      NO    "));
-                        }
-                        messages.push(format!("{:^20}", "Update Portal?"));
-                        messages.push(format!("{:^20}", ""));
-                    },
-                    RESTART_MENU => {
-                        messages.clear();
-                        messages.push(format!("{:^20}", ""));
-                        if self.current_menu[1] == 0 {
-                            messages.push(String::from("     YES    > NO    "));
-                        } else {
-                            messages.push(String::from("   > YES      NO    "));
-                        }
-                        messages.push(format!("{:^20}", "Restart Portal?"));
-                        messages.push(format!("{:^20}", ""));
-                    },
-                    DELETE_READS_MENU => {
-                        messages.clear();
-                        messages.push(format!("{:^20}", ""));
-                        if self.current_menu[1] == 0 {
-                            messages.push(String::from("     YES    > NO    "));
-                        } else {
-                            messages.push(String::from("   > YES      NO    "));
-                        }
-                        messages.push(format!("{:^20}", "Delete all reads?"));
-                        messages.push(format!("{:^20}", ""));
-                    },
-                    DELETE_READS_MENU_TWO => {
-                        messages.clear();
-                        messages.push(format!("{:^20}", ""));
-                        if self.current_menu[1] == 0 {
-                            messages.push(String::from("     YES    > NO    "));
-                        } else {
-                            messages.push(String::from("   > YES      NO    "));
-                        }
-                        messages.push(format!("{:^20}", "Are you sure?"));
-                        messages.push(format!("{:^20}", ""));
-                    },
-                    MANUAL_TIME_MENU => {
-                        messages.clear();
-                        messages.push(format!("{:<20}", ""));
-                        messages.push(format!("{:04}-{:02}-{:02}  {:02}:{:02}:{:02}", //yyyy-MM-dd HH:mm:ss
-                            self.year,
-                            self.month,
-                            self.day,
-                            self.hour,
-                            self.minute,
-                            self.seconds));
-                        match self.current_menu[1] {
-                            TIME_MENU_YEAR => {
-                                messages.push(String::from(" vv                 "));
-                                messages.push(String::from(" ^^                 "));
-                            },
-                            TIME_MENU_MONTH => {
-                                messages.push(String::from("     vv             "));
-                                messages.push(String::from("     ^^             "));
-                            },
-                            TIME_MENU_DAY => {
-                                messages.push(String::from("        vv          "));
-                                messages.push(String::from("        ^^          "));
-                            },
-                            TIME_MENU_HOUR => {
-                                messages.push(String::from("            vv      "));
-                                messages.push(String::from("            ^^      "));
-                            },
-                            TIME_MENU_MINUTE => {
-                                messages.push(String::from("               vv   "));
-                                messages.push(String::from("               ^^   "));
-                            },
-                            TIME_MENU_SECOND => {
-                                messages.push(String::from("                  vv"));
-                                messages.push(String::from("                  ^^"));
-                            },
-                            _ => {
+                            drop(info);
+                        },
+                        ABOUT_MENU => { // about menu
+                            drop(info);
+                            messages.clear();
+                            if let Ok(control) = self.control.try_lock() {
+                                messages.push(format!("{:^20}", "Chronokeep Portal"));
+                                messages.push(format!("{:^20}", "Device Name:"));
+                                messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
+                                messages.push(format!("{:^20}", control.name));
+                            } else {
                                 messages.push(format!("{:^20}", ""));
-                                messages.push(format!("{:^20}", "Cancel"));
-                            },
+                                messages.push(format!("{:^20}", format!("Version {}", env!("CARGO_PKG_VERSION"))));
+                                messages.push(format!("{:^20}", "Chronokeep Portal"));
+                                messages.push(format!("{:^20}", ""));
+                            }
+                        },
+                        STARTUP_MENU => {
+                            drop(info);
+                            messages.clear();
+                            messages.push(format!("{:^20}", ""));
+                            messages.push(format!("{:^20}", "Please wait."));
+                            messages.push(format!("{:^20}", "System Initializing."));
+                            messages.push(format!("{:^20}", ""));
+                        },
+                        SHUTDOWN_MENU => {
+                            drop(info);
+                            messages.clear();
+                            messages.push(format!("{:^20}", ""));
+                            if self.current_menu[1] == 0 {
+                                messages.push(String::from("     YES    > NO    "));
+                            } else {
+                                messages.push(String::from("   > YES      NO    "));
+                            }
+                            messages.push(format!("{:^20}", "Shutdown Portal?"));
+                            messages.push(format!("{:^20}", ""));
+                        },
+                        UPDATE_MENU => {
+                            drop(info);
+                            messages.clear();
+                            messages.push(format!("{:^20}", ""));
+                            if self.current_menu[1] == 0 {
+                                messages.push(String::from("     YES    > NO    "));
+                            } else {
+                                messages.push(String::from("   > YES      NO    "));
+                            }
+                            messages.push(format!("{:^20}", "Update Portal?"));
+                            messages.push(format!("{:^20}", ""));
+                        },
+                        RESTART_MENU => {
+                            drop(info);
+                            messages.clear();
+                            messages.push(format!("{:^20}", ""));
+                            if self.current_menu[1] == 0 {
+                                messages.push(String::from("     YES    > NO    "));
+                            } else {
+                                messages.push(String::from("   > YES      NO    "));
+                            }
+                            messages.push(format!("{:^20}", "Restart Portal?"));
+                            messages.push(format!("{:^20}", ""));
+                        },
+                        DELETE_READS_MENU => {
+                            drop(info);
+                            messages.clear();
+                            messages.push(format!("{:^20}", ""));
+                            if self.current_menu[1] == 0 {
+                                messages.push(String::from("     YES    > NO    "));
+                            } else {
+                                messages.push(String::from("   > YES      NO    "));
+                            }
+                            messages.push(format!("{:^20}", "Delete all reads?"));
+                            messages.push(format!("{:^20}", ""));
+                        },
+                        DELETE_READS_MENU_TWO => {
+                            drop(info);
+                            messages.clear();
+                            messages.push(format!("{:^20}", ""));
+                            if self.current_menu[1] == 0 {
+                                messages.push(String::from("     YES    > NO    "));
+                            } else {
+                                messages.push(String::from("   > YES      NO    "));
+                            }
+                            messages.push(format!("{:^20}", "Are you sure?"));
+                            messages.push(format!("{:^20}", ""));
+                        },
+                        MANUAL_TIME_MENU => {
+                            drop(info);
+                            messages.clear();
+                            messages.push(format!("{:<20}", ""));
+                            messages.push(format!("{:04}-{:02}-{:02}  {:02}:{:02}:{:02}", //yyyy-MM-dd HH:mm:ss
+                                self.year,
+                                self.month,
+                                self.day,
+                                self.hour,
+                                self.minute,
+                                self.seconds));
+                            match self.current_menu[1] {
+                                TIME_MENU_YEAR => {
+                                    messages.push(String::from(" vv                 "));
+                                    messages.push(String::from(" ^^                 "));
+                                },
+                                TIME_MENU_MONTH => {
+                                    messages.push(String::from("     vv             "));
+                                    messages.push(String::from("     ^^             "));
+                                },
+                                TIME_MENU_DAY => {
+                                    messages.push(String::from("        vv          "));
+                                    messages.push(String::from("        ^^          "));
+                                },
+                                TIME_MENU_HOUR => {
+                                    messages.push(String::from("            vv      "));
+                                    messages.push(String::from("            ^^      "));
+                                },
+                                TIME_MENU_MINUTE => {
+                                    messages.push(String::from("               vv   "));
+                                    messages.push(String::from("               ^^   "));
+                                },
+                                TIME_MENU_SECOND => {
+                                    messages.push(String::from("                  vv"));
+                                    messages.push(String::from("                  ^^"));
+                                },
+                                _ => {
+                                    messages.push(format!("{:^20}", ""));
+                                    messages.push(format!("{:^20}", "Cancel"));
+                                },
+                            }
                         }
+                        SCREEN_OFF => {
+                            drop(info);
+                            let _ = lcd.clear();
+                            //let _ = lcd.backlight(false);
+                            let _ = lcd.show_display(false);
+                        }
+                        _ => {}
                     }
-                    SCREEN_OFF => {
-                        let _ = lcd.clear();
-                        //let _ = lcd.backlight(false);
-                        let _ = lcd.show_display(false);
-                    }
-                    _ => {}
                 }
                 for msg in &*messages {
                     let _ = write!(lcd, "{msg}");

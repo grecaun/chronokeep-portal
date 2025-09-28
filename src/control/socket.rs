@@ -271,7 +271,7 @@ pub fn control_loop(
 
     // Start our code to check the battery level.
     #[cfg(target_os = "linux")]
-    let mut bat_check = battery::Checker::new(keepalive.clone(), control.clone(), screen.clone(), notifier.clone(), control_sockets.clone(), sqlite.clone());
+    let mut bat_check = battery::Checker::new(keepalive.clone(), control.clone(), notifier.clone(), control_sockets.clone(), sqlite.clone());
     #[cfg(target_os = "linux")]
     let b_joiner = thread::spawn(move|| {
         #[cfg(target_os = "linux")]
