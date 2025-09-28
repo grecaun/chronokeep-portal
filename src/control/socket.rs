@@ -698,9 +698,9 @@ fn handle_stream(
                             auto_connect::State::Finished |
                             auto_connect::State::Unknown => {
                                 if let Ok(sq) = sqlite.lock() {
-                                    match sq.delete_reader(&id) {
-                                        Ok(_) => {
-                                            if let Ok(mut u_readers) = readers.lock() {
+                                    if let Ok(mut u_readers) = readers.lock() {
+                                        match sq.delete_reader(&id) {
+                                            Ok(_) => {
                                                 match u_readers.iter().position(|x| x.id() == id) {
                                                     Some(ix) => {
                                                         u_readers.remove(ix);
@@ -708,30 +708,28 @@ fn handle_stream(
                                                     },
                                                     None => {},
                                                 }
-                                            }
-                                        },
-                                        Err(e) => {
-                                            println!("Error removing database from reader: {e}");
-                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                message: format!("unexpected error removing reader from database: {e}")
-                                            });
-                                        },
-                                    }
-                                }
-                                if let Ok(u_readers) = readers.lock() {
-                                    if let Ok(c_socks) = control_sockets.lock() {
-                                        for sock in c_socks.iter() {
-                                            if let Some(sock) = sock {
-                                                // we might be writing to other sockets
-                                                // so errors here shouldn't close our connection
-                                                _ = write_reader_list(&sock, &*u_readers);
-                                            }
+                                            },
+                                            Err(e) => {
+                                                println!("Error removing database from reader: {e}");
+                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    message: format!("unexpected error removing reader from database: {e}")
+                                                });
+                                            },
                                         }
-                                    } else {
-                                        no_error = write_reader_list(&stream, &*u_readers);
+                                        if let Ok(c_socks) = control_sockets.lock() {
+                                            for sock in c_socks.iter() {
+                                                if let Some(sock) = sock {
+                                                    // we might be writing to other sockets
+                                                    // so errors here shouldn't close our connection
+                                                    _ = write_reader_list(&sock, &*u_readers);
+                                                }
+                                            }
+                                        } else {
+                                            no_error = write_reader_list(&stream, &*u_readers);
+                                        }
                                     }
                                 }
-                            }
+                            },
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);

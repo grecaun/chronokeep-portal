@@ -25,6 +25,7 @@ pub const ANTENNA_STATUS_CONNECTED: u8 = 2;
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ReaderStatus {
     Disconnected,
+    Errored,
     ConnectingKeepalive,
     ConnectingPurgeTags,
     ConnectingSetNoFilter,
@@ -245,9 +246,6 @@ impl Reader {
         if let Ok(mut keepalive) = self.keepalive.lock() {
             *keepalive = false;
         };
-        if let Ok(mut con) = self.status.lock() {
-            *con = ReaderStatus::Disconnected;
-        }
         Ok(())
     }
 

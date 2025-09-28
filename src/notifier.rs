@@ -92,6 +92,7 @@ impl Notifier {
             }
             *waiting = true;
             drop(waiting);
+            // Send NTFY notification.
             let mut work_list: Vec<(Notification, String)> = vec!();
             if let Ok(mut notifications) = self.notifications.lock() {
                 work_list.append(&mut *notifications);
@@ -183,6 +184,7 @@ impl Notifier {
                         };
                 }
             };
+            // Send notifications to Chronokeep APIs
             let mut api_list: Vec<(Api, APINotification)> = vec!();
             if let Ok(mut notifications) = self.api_notifications.lock() {
                 api_list.append(&mut notifications);

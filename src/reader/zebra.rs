@@ -13,7 +13,7 @@ pub mod requests;
 pub const DEFAULT_ZEBRA_PORT: u16 = 5084;
 pub const BUFFER_SIZE: usize = 65536;
 // FX7500 stops around 750k -> 900k tags, FX9600 stops around 5.5 million tags
-pub const TAG_LIMIT: usize = 100000;
+pub const TAG_LIMIT: usize = 50000;
 
 pub const WRITEABLE_FILE_PATH: &str = "PORTAL_WRITEABLE_FILE_PATH";
 pub const ZEBRA_SHIFT: &str = "PORTAL_ZEBRA_SHIFT";
@@ -71,6 +71,9 @@ pub fn connect(
             reader.socket = match tcp_stream.try_clone() {
                 Ok(stream) => sync::Mutex::new(Some(stream)),
                 Err(_) => {
+                    if let Ok(mut con) = reader.status.lock() {
+                        *con = ReaderStatus::Errored;
+                    }
                     sound.notify_custom(SoundType::Disconnected);
                     return Err("error copying stream to thread")
                 }
@@ -104,7 +107,6 @@ pub fn connect(
                 }
                 let mut read_map: HashMap<u128, (u128, TagData)> = HashMap::new();
                 let mut count: usize = 0;
-                let mut purge_count: usize = 0;
                 let mut last_ka_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                 let mut reconnect = false;
                 let mut unsaved_reads: Vec<read::Read> = Vec::new();
@@ -150,7 +152,7 @@ pub fn connect(
                                                                     println!("-- Purge Tags request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending purge tags message: {e}")
                                                                 },
                                                             }
@@ -162,7 +164,7 @@ pub fn connect(
                                                                     println!("-- Set Reader Config request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending set reader config message: {e}")
                                                                 },
                                                             }
@@ -175,7 +177,7 @@ pub fn connect(
                                                                     println!("-- Send Enable Events and Reports request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending enable events and reports message: {e}")
                                                                 },
                                                             }
@@ -184,7 +186,7 @@ pub fn connect(
                                                                     println!("-- Get Reader Config request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending get reader config message: {e}")
                                                                 },
                                                             }
@@ -193,19 +195,19 @@ pub fn connect(
                                                                     println!("-- Delete Access Spec request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending delete access spec message: {e}")
                                                                 },
                                                             }
                                                         },
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing SET_READER_CONFIG_RESPONSE")
                                                         },
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::ConnectingKeepalive => {
@@ -214,7 +216,7 @@ pub fn connect(
                                                                         println!("-- Set Keepalive request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending set keepalive message: {e}")
                                                                     },
                                                                 }
@@ -225,7 +227,7 @@ pub fn connect(
                                                                         println!("-- Set No Filter request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending set no filter message: {e}")
                                                                     },
                                                                 }
@@ -236,13 +238,13 @@ pub fn connect(
                                                                         println!("-- Set Reader Config request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending set reader config message: {e}")
                                                                     },
                                                                 }
                                                             },
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing SET_READER_CONFIG_RESPONSE")
                                                             },
                                                         }
@@ -265,7 +267,7 @@ pub fn connect(
                                                                     println!("-- Set No Filter request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending set no filter message: {e}")
                                                                 },
                                                             }
@@ -274,13 +276,13 @@ pub fn connect(
                                                             println!("Successfully purged tags while connected.");
                                                         },
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing CUSTOM_MESSAGE")
                                                         }
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::ConnectingPurgeTags => {
@@ -289,7 +291,7 @@ pub fn connect(
                                                                         println!("-- Purge Tags request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending purge tags message: {e}")
                                                                     },
                                                                 }
@@ -298,7 +300,7 @@ pub fn connect(
                                                                 println!("Successfully purged tags while connected.");
                                                             },
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing CUSTOM_MESSAGE")
                                                             }
                                                         }
@@ -321,19 +323,19 @@ pub fn connect(
                                                                     println!("-- Delete Rospec request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending delete rospec message: {e}")
                                                                 },
                                                             }
                                                         }
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing DELETE_ACCESS_SPEC_RESPONSE")
                                                         }
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::ConnectingDeleteRospec => {
@@ -342,13 +344,13 @@ pub fn connect(
                                                                         println!("-- Delete Access Spec request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending delete access spec message: {e}")
                                                                     },
                                                                 }
                                                             }
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing DELETE_ACCESS_SPEC_RESPONSE")
                                                             }
                                                         }
@@ -371,19 +373,19 @@ pub fn connect(
                                                                     println!("-- Delete Rospec request on disconnect sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending delete rospec message: {e}")
                                                                 },
                                                             }
                                                         }
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
                                                         }
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::StoppingDisableRospec => {
@@ -393,13 +395,13 @@ pub fn connect(
                                                                         println!("-- Delete Rospec request on disconnect sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending delete rospec message: {e}")
                                                                     },
                                                                 }
                                                             }
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing DISABLE_ROSPEC_RESPONSE")
                                                             }
                                                         }
@@ -422,23 +424,24 @@ pub fn connect(
                                                                     println!("-- Add Rospec request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending add rospec message: {e}")
                                                                 },
                                                             }
                                                         },
                                                         ReaderStatus::StoppingDeleteRospec => {
                                                             *stat = ReaderStatus::Disconnected;
-                                                            println!("-- Reader successfully disconnected.")
+                                                            println!("-- Reader successfully disconnected.");
+                                                            break;
                                                         },
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
                                                         }
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::ConnectingAddRospec => {
@@ -447,17 +450,18 @@ pub fn connect(
                                                                         println!("-- Delete Rospec request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending delete rospec message: {e}")
                                                                     },
                                                                 }
                                                             },
                                                             ReaderStatus::StoppingDeleteRospec => {
                                                                 *stat = ReaderStatus::Disconnected;
-                                                                println!("-- Reader successfully disconnected.")
+                                                                println!("-- Reader successfully disconnected.");
+                                                                break;
                                                             },
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing DELETE_ROSPEC_RESPONSE")
                                                             }
                                                         }
@@ -480,19 +484,19 @@ pub fn connect(
                                                                     println!("-- Enable Rospec request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending enable rospec message: {e}")
                                                                 },
                                                             }
                                                         }
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing ADD_ROSPEC_RESPONSE")
                                                         }
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::ConnectingAddRospec => {
@@ -501,13 +505,13 @@ pub fn connect(
                                                                         println!("-- Add Rospec request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending add rospec message: {e}")
                                                                     },
                                                                 }
                                                             },
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing ADD_ROSPEC_RESPONSE")
                                                             }
                                                         }
@@ -530,19 +534,19 @@ pub fn connect(
                                                                     println!("-- Start Rospec request on connection sent.")
                                                                 },
                                                                 Err(e) => {
-                                                                    *stat = ReaderStatus::Disconnected;
+                                                                    *stat = ReaderStatus::Errored;
                                                                     eprintln!("error sending start rospec message: {e}")
                                                                 },
                                                             }
                                                         }
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing ENABLE_ROSPEC_RESPONSE")
                                                         }
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::ConnectingEnableRospec => {
@@ -551,13 +555,13 @@ pub fn connect(
                                                                         println!("-- Enable Rospec request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending enable rospec message: {e}")
                                                                     },
                                                                 }
                                                             },
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing ENABLE_ROSPEC_RESPONSE")
                                                             }
                                                         }
@@ -579,13 +583,13 @@ pub fn connect(
                                                             // inform control sockets of reader connection change?
                                                         }
                                                         _ => {
-                                                            *stat = ReaderStatus::Disconnected;
+                                                            *stat = ReaderStatus::Errored;
                                                             println!("unknown reader status while processing START_ROSPEC_RESPONSE")
                                                         }
                                                     }
                                                 } else {
                                                     if attempt > 5 {
-                                                        *stat = ReaderStatus::Disconnected;
+                                                        *stat = ReaderStatus::Errored;
                                                     } else {
                                                         match *stat {
                                                             ReaderStatus::ConnectingStartRospec => {
@@ -594,13 +598,13 @@ pub fn connect(
                                                                         println!("-- Start Rospec request on connection sent.")
                                                                     },
                                                                     Err(e) => {
-                                                                        *stat = ReaderStatus::Disconnected;
+                                                                        *stat = ReaderStatus::Errored;
                                                                         eprintln!("error sending start rospec message: {e}")
                                                                     },
                                                                 }
                                                             },
                                                             _ => {
-                                                                *stat = ReaderStatus::Disconnected;
+                                                                *stat = ReaderStatus::Errored;
                                                                 println!("unknown reader status while processing START_ROSPEC_RESPONSE")
                                                             }
                                                         }
@@ -725,8 +729,6 @@ pub fn connect(
                         }
                     }
                     if count > TAG_LIMIT {
-                        purge_count += 1;
-                        println!("Purging tags. This is purge number {purge_count}.");
                         match send_purge_tags(&mut t_stream, &msg_id) {
                             Ok(_) => {
                                 count = 0;
@@ -745,6 +747,9 @@ pub fn connect(
                         {
                             // Changed to disconnected then close the socket.
                             if *stat == ReaderStatus::Disconnected {
+                                break;
+                            } else if *stat == ReaderStatus::Errored {
+                                reconnect = true;
                                 break;
                             } else if *stat == ReaderStatus::Connected {
                                 send_reader_list = true;
@@ -781,6 +786,16 @@ pub fn connect(
                 }
                 if let Ok(mut con) = t_reader_status.lock() {
                     *con = ReaderStatus::Disconnected;
+                }
+                if let Ok(u_readers) = t_readers.lock() {
+                    if let Ok(c_socks) = t_control_sockets.lock() {
+                        for sock in c_socks.iter() {
+                            if let Some(sock) = sock {
+                                println!("Sending reader list!");
+                                _ = socket::write_reader_list(&sock, &*u_readers);
+                            }
+                        }
+                    }
                 }
                 if reconnect == true {
                     if let Some(rec) = t_reconnector {
@@ -921,7 +936,7 @@ fn stop(
     msg_mtx: &Arc<sync::Mutex<u32>>
 ) {
     if let Ok(mut r) = status.lock() {
-        if ReaderStatus::Disconnected == *r {
+        if ReaderStatus::Disconnected == *r || ReaderStatus::Errored == *r {
             return
         }
         *r = ReaderStatus::StoppingDisableRospec;
@@ -966,9 +981,7 @@ fn save_reads(
         match sqlite.lock() {
             Ok(mut db) => {
                 match db.save_reads(&reads) {
-                    Ok(_num) => {
-                        //println!("Saved {_num} reads.")
-                    },
+                    Ok(_num) => {},
                     Err(e) => println!("Error saving reads. {e}"),
                 }
             },
@@ -1190,7 +1203,7 @@ fn finalize(
         Err(_) => 0,
     };
     if let Ok(r) = status.lock() {
-        if ReaderStatus::Disconnected != *r {
+        if ReaderStatus::Disconnected != *r && ReaderStatus::Errored != *r {
             match stop_reading(t_stream, fin_id) {
                 Ok(_) => (),
                 Err(e) => println!("Error trying to stop reading. {e}"),
