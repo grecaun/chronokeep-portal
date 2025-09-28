@@ -155,10 +155,6 @@ impl CharacterDisplay {
         self.uploader = Some(upload);
     }
 
-    pub fn set_shutdown(&mut self) {
-        self.current_menu[0] = SCREEN_OFF;
-    }
-
     pub fn update_upload_status(&mut self, status: uploader::Status, err_count: usize) {
         if let Ok(mut info) = self.info.lock() {
             if err_count > 99 {
@@ -177,36 +173,7 @@ impl CharacterDisplay {
         }
     }
 
-    pub fn update_readers(&mut self) {
-        if let Ok(mut info) = self.info.lock() {
-            info.reader_info.clear();
-            // Collect all connected readers.
-            if let Ok(readers) = self.readers.lock() {
-                for read in readers.iter() {
-                    if let Some(is_con) = read.is_connected() {
-                        if is_con {
-                            if let Ok(ants) = read.antennas.lock() {
-                                info.reader_info.push(
-                                    format!("{} {}{}{}{}{}{}{}{}",
-                                        read.nickname(),
-                                        reader::helpers::antenna_status_str(ants[0]),
-                                        reader::helpers::antenna_status_str(ants[1]),
-                                        reader::helpers::antenna_status_str(ants[2]),
-                                        reader::helpers::antenna_status_str(ants[3]),
-                                        reader::helpers::antenna_status_str(ants[4]),
-                                        reader::helpers::antenna_status_str(ants[5]),
-                                        reader::helpers::antenna_status_str(ants[6]),
-                                        reader::helpers::antenna_status_str(ants[7]),
-                                    ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn update_menu(&mut self) {
+    fn update_menu(&mut self) {
         if let Ok(mut info) = self.info.lock() {
             match self.current_menu[0] {
                 MAIN_MENU => { // main menu, max ix 4
@@ -226,7 +193,7 @@ impl CharacterDisplay {
         }
     }
 
-    pub fn update_settings(&mut self) {
+    fn update_settings(&mut self) {
         if let Ok(mut info) = self.info.lock() {
             info.settings_menu.clear();
             if let Ok(control) = self.control.lock() {
@@ -1627,7 +1594,32 @@ impl CharacterDisplay {
                             drop(info);
                         },
                         READING_MENU => { // reader is reading
-                            self.update_readers();
+                            // START update_readers() code
+                            info.reader_info.clear();
+                            // Collect all connected readers.
+                            if let Ok(readers) = self.readers.lock() {
+                                for read in readers.iter() {
+                                    if let Some(is_con) = read.is_connected() {
+                                        if is_con {
+                                            if let Ok(ants) = read.antennas.lock() {
+                                                info.reader_info.push(
+                                                    format!("{} {}{}{}{}{}{}{}{}",
+                                                        read.nickname(),
+                                                        reader::helpers::antenna_status_str(ants[0]),
+                                                        reader::helpers::antenna_status_str(ants[1]),
+                                                        reader::helpers::antenna_status_str(ants[2]),
+                                                        reader::helpers::antenna_status_str(ants[3]),
+                                                        reader::helpers::antenna_status_str(ants[4]),
+                                                        reader::helpers::antenna_status_str(ants[5]),
+                                                        reader::helpers::antenna_status_str(ants[6]),
+                                                        reader::helpers::antenna_status_str(ants[7]),
+                                                    ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // END update_readers() code
                             match info.reader_info.len() {
                                 1 => {
                                     messages.push(format!("{:^20}", info.reader_info[0]));

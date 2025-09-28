@@ -9,7 +9,7 @@ use chrono::Utc;
 use std::net::TcpStream;
 use chrono::{DateTime, Local};
 
-use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, screen::CharacterDisplay, notifier};
+use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, notifier};
 
 pub const BATT_SLEEP_MILLISEC: u64 = 300;
 pub const BATT_VOLTAGE_COUNT: usize = 15;
