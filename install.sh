@@ -100,7 +100,7 @@ if ! [[ -e ${DEST}logs/ ]]; then
 fi;
 sudo chown -R $USER:root ${DEST}
 if ! [[ -e ${DEST}files.sh ]]; then
-    curl -L ${FILES_SCRIPT_URL} -o ${DEST}update.sh > /dev/null 2>&1
+    curl -L ${FILES_SCRIPT_URL} -o ${DEST}files.sh > /dev/null 2>&1
 fi;
 ${DEST}files.sh $FORCE_CREATE
 echo "---------- Setting base volume to 100% ---------"
