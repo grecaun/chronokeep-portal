@@ -6,7 +6,7 @@ QUIT_SERVICE_NAME=portal-quit
 UPDATE_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/update.sh'
 UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/uninstall.sh'
 
-VERSION=1
+VERSION=2
 
 help_function()
 {
@@ -89,7 +89,7 @@ fi;
 if ! [[ -e /etc/systemd/system/${SERVICE_NAME}.service ]] || [[ $FORCE_CREATE == true ]]; then
     echo "------------ Creating portal service -----------"
     echo "------------------------------------------------"
-    sudo echo "    [Unit]" | sudo tee /etc/systemd/system/${SERVICE_NAME}.service
+    sudo echo "[Unit]" | sudo tee /etc/systemd/system/${SERVICE_NAME}.service 2>&1
     sudo echo "Description=Chronokeep Portal Service" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "Wants=network-online.target" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "After=network.target network-online.target" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
@@ -111,7 +111,7 @@ fi;
 if ! [[ -e /etc/systemd/system/${QUIT_SERVICE_NAME}.service ]] || [[ $FORCE_CREATE == true ]]; then
     echo "--------- Creating portal quit service ---------"
     echo "------------------------------------------------"
-    sudo echo "[Unit]" | sudo tee /etc/systemd/system/${QUIT_SERVICE_NAME}.service
+    sudo echo "[Unit]" | sudo tee /etc/systemd/system/${QUIT_SERVICE_NAME}.service 2>&1
     sudo echo "Description=Ensure Chronokeep Portal closes before a server shutdown occurs." | sudo tee -a /etc/systemd/system/${QUIT_SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "DefaultDependencies=no" | sudo tee -a /etc/systemd/system/${QUIT_SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "Before=shutdown.target" | sudo tee -a /etc/systemd/system/${QUIT_SERVICE_NAME}.service > /dev/null 2>&1
