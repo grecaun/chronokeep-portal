@@ -1092,7 +1092,8 @@ fn handle_stream(
                                     super::SETTING_NTFY_USER |
                                     super::SETTING_NTFY_PASS |
                                     super::SETTING_NTFY_TOPIC | 
-                                    super::SETTING_ENABLE_NTFY => {
+                                    super::SETTING_ENABLE_NTFY |
+                                    super::SETTING_SCREEN_TYPE => {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
                                                 if let Ok(new_control) = super::Control::new(&sq) {
@@ -2028,6 +2029,7 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
         super::SETTING_NTFY_PASS,
         super::SETTING_NTFY_TOPIC,
         super::SETTING_ENABLE_NTFY,
+        super::SETTING_SCREEN_TYPE,
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

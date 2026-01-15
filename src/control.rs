@@ -18,6 +18,7 @@ pub const SETTING_NTFY_USER: &str = "SETTING_NTFY_USER";
 pub const SETTING_NTFY_PASS: &str = "SETTING_NTFY_PASS";
 pub const SETTING_NTFY_TOPIC: &str = "SETTING_NTFY_TOPIC";
 pub const SETTING_ENABLE_NTFY: &str = "SETTING_ENABLE_NTFY";
+pub const SETTING_SCREEN_TYPE: &str = "SETTING_SCREEN_TYPE";
 
 pub struct Control {
     pub name: String,
@@ -34,6 +35,7 @@ pub struct Control {
     pub ntfy_topic: String,
     pub enable_ntfy: bool,
     pub battery: u8,
+    pub screen_type: String,
 }
 
 impl Control {
@@ -74,6 +76,9 @@ impl Control {
         if self.enable_ntfy != new_control.enable_ntfy {
             self.enable_ntfy = new_control.enable_ntfy
         }
+        if self.screen_type != new_control.screen_type {
+            self.screen_type = new_control.screen_type;
+        }
         if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
             return self.sound_board.change_voice(new_control.sound_board.get_voice())
         }
@@ -95,7 +100,8 @@ impl Control {
             ntfy_pass: String::from(""),
             ntfy_topic: String::from(""),
             enable_ntfy: defaults::DEFAULT_ENABLE_NTFY,
-            battery: 0
+            battery: 0,
+            screen_type: String::from(defaults::DEFAULT_SCREEN_TYPE),
         };
         match sqlite.get_setting(SETTING_PORTAL_NAME) {
             Ok(s) => {
@@ -367,6 +373,26 @@ impl Control {
                     Err(e) => return Err(e)
                 }
             },
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_SCREEN_TYPE) {
+            Ok(s) => {
+                output.screen_type = String::from(s.value());
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_SCREEN_TYPE),
+                    String::from(defaults::DEFAULT_SCREEN_TYPE),
+                )) {
+                    Ok(s) => {
+                        output.screen_type = String::from(s.value());
+                        println!("Chip type successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            }
             Err(e) => {
                 return Err(e)
             }
