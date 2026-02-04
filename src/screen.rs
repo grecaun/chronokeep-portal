@@ -94,6 +94,8 @@ pub struct DisplayInfo {
     reader_info: Vec<String>,
     main_menu: Vec<String>,
     settings_menu: Vec<String>,
+    upload_status: Status,
+    upload_errors: usize,
 }
 
 pub enum ButtonPress {
@@ -139,6 +141,8 @@ impl CharacterDisplay {
                     "   Shutdown         ".to_string(),
                 ],
                 settings_menu: Vec::new(),
+                upload_status: Status::Unknown,
+                upload_errors: 0,
             })),
             current_menu: [0, 0, 0],
             ac_state,
@@ -164,19 +168,8 @@ impl CharacterDisplay {
 
     pub fn update_upload_status(&mut self, status: uploader::Status, err_count: usize) {
         if let Ok(mut info) = self.info.lock() {
-            if err_count > 99 {
-                info.title_bar.replace_range(14..16, "99");
-            } else if err_count > 0 {
-                info.title_bar.replace_range(14..16, format!("{:>2}", err_count).as_str());
-            } else {
-                let mut upload_status = " ?";
-                if status == Status::Running {
-                    upload_status = " +";
-                } else if status == Status::Stopped || status == Status::Stopping {
-                    upload_status = " -";
-                }
-                info.title_bar.replace_range(14..16, upload_status);
-            }
+            info.upload_errors = err_count;
+            info.upload_status = status;
         }
     }
 
@@ -1539,6 +1532,19 @@ impl CharacterDisplay {
                     } else {
                         info.title_bar.replace_range(17..20, "cri");
                     }
+                }
+                if info.upload_errors > 99 {
+                    info.title_bar.replace_range(14..16, "99");
+                } else if err_count > 0 {
+                    info.title_bar.replace_range(14..16, format!("{:>2}", info.upload_errors).as_str());
+                } else {
+                    let mut upload_status = "  ";
+                    if info.upload_status == Status::Running {
+                        upload_status = " +";
+                    } else if info.upload_status == Status::Stopped || info.upload_status == Status::Stopping {
+                        upload_status = " -";
+                    }
+                    info.title_bar.replace_range(14..16, upload_status);
                 }
                 messages.push(info.title_bar.clone());
                 let _ = lcd.home();

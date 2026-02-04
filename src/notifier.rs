@@ -50,6 +50,7 @@ impl Notifier {
         let mut waiting = lock.lock().unwrap();
         *waiting = false;
         cvar.notify_one();
+        drop(waiting);
     }
 
     pub fn send_api_notification(&self, api: &Api, note: APINotification) {
@@ -60,6 +61,7 @@ impl Notifier {
         let mut waiting = lock.lock().unwrap();
         *waiting = false;
         cvar.notify_one();
+        drop(waiting);
     }
 
     pub fn run(&mut self) {
@@ -161,7 +163,6 @@ impl Notifier {
                     }
                 };
                 if enabled && !url.is_empty() && !topic.is_empty() && !user.is_empty() && !pass.is_empty() {
-                    println!("Sending notification...");
                     match http_client.post(format!("{}{}", url, topic))
                         .headers(construct_headers(priority, tag))
                         .basic_auth(user, Some(pass))

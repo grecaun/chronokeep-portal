@@ -73,11 +73,15 @@ impl Uploader {
     pub fn run(&self) {
         let mut err_count: usize = 0;
         // check if we're already running, exit if so, otherwise set to running
+        let mut exit = false;
         if let Ok(mut r) = self.status.lock() {
             if *r == Status::Running {
-                return;
+                exit = true;
             }
             *r = Status::Running;
+        }
+        if exit == true {
+            return;
         }
         // let everyone know we're running
         self.update_control_socks(err_count);
@@ -196,11 +200,10 @@ impl Uploader {
                     }
                     if e_count > 0 {
                         err_count += e_count;
-                        self.update_control_socks(err_count);
                     } else if err_count != 0 {
                         err_count = 0;
-                        self.update_control_socks(err_count);
                     }
+                    self.update_control_socks(err_count);
                 }
             }
 

@@ -2603,7 +2603,6 @@ pub fn upload_reads(
         .send() {
             Ok(resp) => resp,
             Err(e) => {
-                println!("error trying to talk to api: {e}");
                 return Err(errors::Errors::ServerError { message: format!("error trying to talk to api: {e}") })
             }
         };
@@ -2612,14 +2611,12 @@ pub fn upload_reads(
             let resp_body: remote::responses::UploadReadsResponse = match response.json() {
                 Ok(it) => it,
                 Err(e) => {
-                    println!("error trying to parse response from api: {e}");
                     return Err(errors::Errors::ServerError { message: format!("error trying to parse response from api: {e}") })
                 }
             };
             resp_body.count
         },
         other => {
-            println!("invalid status code: {other}");
             return Err(errors::Errors::ServerError { message: format!("invalid status code: {other}") })
         }
     };
