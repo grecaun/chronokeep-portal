@@ -85,7 +85,7 @@ impl Control {
         Ok(())
     }
 
-    pub fn new(sqlite: &sqlite::SQLite) -> Result<Control, database::DBError> {
+    pub fn new(sqlite: &mut sqlite::SQLite) -> Result<Control, database::DBError> {
         let mut output = Control {
             name: String::from(""),
             chip_type: String::from(defaults::DEFAULT_CHIP_TYPE),

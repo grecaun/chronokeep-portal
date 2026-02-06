@@ -618,7 +618,7 @@ fn handle_stream(
                         match *ac {
                             auto_connect::State::Finished |
                             auto_connect::State::Unknown => {
-                                if let Ok(sq) = sqlite.lock() {
+                                if let Ok(mut sq) = sqlite.lock() {
                                     let mut loc_ac = reader::AUTO_CONNECT_FALSE;
                                     if auto_connect == true {
                                         loc_ac = reader::AUTO_CONNECT_TRUE
@@ -697,7 +697,7 @@ fn handle_stream(
                         match *ac {
                             auto_connect::State::Finished |
                             auto_connect::State::Unknown => {
-                                if let Ok(sq) = sqlite.lock() {
+                                if let Ok(mut sq) = sqlite.lock() {
                                     if let Ok(mut u_readers) = readers.lock() {
                                         match sq.delete_reader(&id) {
                                             Ok(_) => {
@@ -1055,7 +1055,7 @@ fn handle_stream(
                         let old_play_sound = control.play_sound;
                         let old_voice = control.sound_board.get_voice();
                         let mut custom_error = false;
-                        if let Ok(sq) = sqlite.lock() {
+                        if let Ok(mut sq) = sqlite.lock() {
                             for setting in settings {
                                 match setting.name() {
                                     super::SETTING_VOICE => {
@@ -1066,7 +1066,7 @@ fn handle_stream(
                                         } else {
                                             match sq.set_setting(&setting) {
                                                 Ok(_) => {
-                                                    if let Ok(new_control) = super::Control::new(&sq) {
+                                                    if let Ok(new_control) = super::Control::new(&mut sq) {
                                                         _ = control.update(new_control);
                                                     } else {
                                                         let settings = get_settings(&sq);
@@ -1096,7 +1096,7 @@ fn handle_stream(
                                     super::SETTING_SCREEN_TYPE => {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
-                                                if let Ok(new_control) = super::Control::new(&sq) {
+                                                if let Ok(new_control) = super::Control::new(&mut sq) {
                                                     _ = control.update(new_control);
                                                     
                                                 } else {
@@ -1233,7 +1233,7 @@ fn handle_stream(
                     match kind.as_str() {
                         api::API_TYPE_CHRONOKEEP_REMOTE |
                         api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
-                            if let Ok(sq) = sqlite.lock() {
+                            if let Ok(mut sq) = sqlite.lock() {
                                 let mut t_uri = match kind.as_str() {
                                     api::API_TYPE_CHRONOKEEP_REMOTE => {
                                         String::from(api::API_URI_CHRONOKEEP_REMOTE)
@@ -1315,7 +1315,7 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ApiSaveAll { list } => {
-                    if let Ok(sq) = sqlite.lock() {
+                    if let Ok(mut sq) = sqlite.lock() {
                         let mut remote_api: Option<Api> = None;
                         // check if we have a remote api already set, there can only be one
                         match sq.get_apis() {
@@ -1487,7 +1487,7 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ApiRemove { id } => {
-                    if let Ok(sq) = sqlite.lock() {
+                    if let Ok(mut sq) = sqlite.lock() {
                         match sq.delete_api(&id) {
                             Ok(_) => {
                                 match sq.get_apis() {
@@ -1589,7 +1589,7 @@ fn handle_stream(
                                     j.push(t_joiner);
                                 }
                             }
-                            if let Ok(sq) = sqlite.lock() {
+                            if let Ok(mut sq) = sqlite.lock() {
                                 match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("true"))) {
                                     Ok(_) => {
                                         if let Ok(mut control) = control.lock() {
@@ -1609,7 +1609,7 @@ fn handle_stream(
                             } else {
                                 no_error = write_error(&stream, errors::Errors::NotRunning);
                             }
-                            if let Ok(sq) = sqlite.lock() {
+                            if let Ok(mut sq) = sqlite.lock() {
                                 match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("false"))) {
                                     Ok(_) => {
                                         if let Ok(mut control) = control.lock() {
@@ -1693,7 +1693,7 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ReadsDelete { start_seconds, end_seconds } => {
-                    if let Ok(sq) = sqlite.lock() {
+                    if let Ok(mut sq) = sqlite.lock() {
                         match sq.delete_reads(start_seconds, end_seconds) {
                             Ok(count) => {
                                 no_error = write_success(&stream, count);
@@ -1708,7 +1708,7 @@ fn handle_stream(
                     }
                 },
                 requests::Request::ReadsDeleteAll => {
-                    if let Ok(sq) = sqlite.lock() {
+                    if let Ok(mut sq) = sqlite.lock() {
                         match sq.delete_all_reads() {
                             Ok(count) => {
                                 no_error = write_success(&stream, count);

@@ -144,7 +144,7 @@ fn test_set_setting() {
     let setting_value = "random_value";
     let setting_updated_value = "new_random_value";
 
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
 
     let num = sqlite.set_setting(&setting::Setting::new(String::from(setting_name), String::from(setting_value)));
     match num {
@@ -180,7 +180,7 @@ fn test_get_setting() {
     let setting_value = "random_value";
     let setting_updated_value = "new_random_value";
 
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
 
     assert!(sqlite.set_setting(&setting::Setting::new(String::from(setting_name), String::from(setting_value))).is_ok());
     let setting = sqlite.get_setting(setting_name);
@@ -224,7 +224,7 @@ fn test_save_reader() {
     );
     assert!(original.is_ok());
     let original = original.unwrap();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     let result = sqlite.save_reader(&original);
     assert!(result.is_ok());
     // returns the row id, brand new sqlite instance, so 1 should be the id
@@ -329,7 +329,7 @@ fn test_get_reader() {
     );
     assert!(original.is_ok());
     let original = original.unwrap();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     _ = sqlite.save_reader(&original);
     let readers = sqlite.get_readers().unwrap();
     let first = readers.first().unwrap();
@@ -365,7 +365,7 @@ fn test_get_readers() {
     );
     assert!(original.is_ok());
     let original = original.unwrap();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     _ = sqlite.save_reader(&original);
     let results = sqlite.get_readers();
     assert!(results.is_ok());
@@ -414,7 +414,7 @@ fn test_delete_reader() {
     );
     assert!(original.is_ok());
     let mut original = original.unwrap();
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     original.set_id(sqlite.save_reader(&original).unwrap());
     let readers = sqlite.get_readers().unwrap();
     assert_eq!(1, readers.len());
@@ -464,7 +464,7 @@ fn test_save_api() {
         String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
         String::from("random-token-value"),
         String::from("https:://example.com/"));
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     let results = sqlite.save_api(&original);
     assert!(results.is_ok());
     assert_ne!(0, results.unwrap());
@@ -547,7 +547,7 @@ fn test_get_apis() {
         String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
         String::from("random-token-value"),
         String::from("https:://example.com/"));
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     _ = sqlite.save_api(&original);
     let result = sqlite.get_apis();
     assert!(result.is_ok());
@@ -579,7 +579,7 @@ fn test_delete_api() {
         String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
         String::from("random-token-value"),
         String::from("https:://example.com/"));
-    let sqlite = setup_tests(unique_path);
+    let mut sqlite = setup_tests(unique_path);
     let orig_id = sqlite.save_api(&original).unwrap_or(0);
     let apis = sqlite.get_apis().unwrap();
     assert_eq!(1, apis.len());

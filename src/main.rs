@@ -186,7 +186,7 @@ fn main() {
             Err(_) => (),
         };
     }
-    let control = Arc::new(Mutex::new(control::Control::new(&sqlite).unwrap()));
+    let control = Arc::new(Mutex::new(control::Control::new(&mut sqlite).unwrap()));
     let sqlite = Arc::new(Mutex::new(sqlite));
     println!("Control values retrieved from database.");
     if let Ok(control) = control.lock() {
@@ -199,8 +199,8 @@ fn main() {
     }
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
     control::socket::control_loop(sqlite.clone(), &control, keepalive.clone(), quick);
-    if let Ok(sq) = sqlite.lock() {
-        let control: control::Control = control::Control::new(&sq).unwrap();
+    if let Ok(mut sq) = sqlite.lock() {
+        let control: control::Control = control::Control::new(&mut sq).unwrap();
         let readers = sq.get_readers().unwrap();
         let api = sq.get_apis().unwrap();
         let backup = Backup{

@@ -307,7 +307,7 @@ impl super::Database for SQLite {
     }
 
     // Settings
-    fn set_setting(&self, setting: &setting::Setting) -> Result<setting::Setting, DBError> {
+    fn set_setting(&mut self, setting: &setting::Setting) -> Result<setting::Setting, DBError> {
         // Block until we can do something.
         let res = self.conn.execute(
             "INSERT INTO settings (setting, value) VALUES (?1, ?2);",
@@ -334,7 +334,7 @@ impl super::Database for SQLite {
     }
 
     // Readers
-    fn save_reader(&self, reader: &reader::Reader) -> Result<i64, DBError> {
+    fn save_reader(&mut self, reader: &reader::Reader) -> Result<i64, DBError> {
         match reader.kind() {
             reader::READER_KIND_ZEBRA => {},
             reader::READER_KIND_IMPINJ => return Err(DBError::DataInsertionError(String::from("not yet implemented"))),
@@ -436,7 +436,7 @@ impl super::Database for SQLite {
         Ok(output)
     }
 
-    fn delete_reader(&self, id: &i64) -> Result<usize, DBError> {
+    fn delete_reader(&mut self, id: &i64) -> Result<usize, DBError> {
         match self.conn.execute("DELETE FROM readers WHERE reader_id=?1", [id]) {
             Ok(num) => return Ok(num),
             Err(e) => return Err(DBError::DataDeletionError(e.to_string()))
@@ -444,7 +444,7 @@ impl super::Database for SQLite {
     }
 
     // Results API
-    fn save_api(&self, api: &api::Api) -> Result<i64, DBError> {
+    fn save_api(&mut self, api: &api::Api) -> Result<i64, DBError> {
         match api.kind() {
             api::API_TYPE_CHRONOKEEP_REMOTE |
             api::API_TYPE_CHRONOKEEP_REMOTE_SELF =>
@@ -517,7 +517,7 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn delete_api(&self, id: &i64) -> Result<usize, DBError> {
+    fn delete_api(&mut self, id: &i64) -> Result<usize, DBError> {
         match self.conn.execute("DELETE FROM results_api WHERE api_id=?1", [id]) {
             Ok(num) => return Ok(num),
             Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
@@ -627,7 +627,7 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn delete_reads(&self, start: i64, end: i64) -> Result<usize, DBError> {
+    fn delete_reads(&mut self, start: i64, end: i64) -> Result<usize, DBError> {
         match self.conn.execute(
             "DELETE FROM chip_reads WHERE seconds >= ?1 AND seconds <= ?2;",
             [start, end]
@@ -637,7 +637,7 @@ impl super::Database for SQLite {
         }
     }
 
-    fn delete_all_reads(&self) -> Result<usize, DBError> {
+    fn delete_all_reads(&mut self) -> Result<usize, DBError> {
         match self.conn.execute(
             "DELETE FROM chip_reads;",
             []
@@ -683,7 +683,7 @@ impl super::Database for SQLite {
         return Ok(output);
     }
 
-    fn reset_reads_upload(&self) -> Result<usize, DBError> {
+    fn reset_reads_upload(&mut self) -> Result<usize, DBError> {
         match self.conn.execute(
             "UPDATE chip_reads SET uploaded=?1;",
             [read::READ_UPLOADED_FALSE]

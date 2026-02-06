@@ -79,6 +79,28 @@ pub struct Reader {
     readers: Arc<Mutex<Vec<Reader>>>,
 }
 
+impl Clone for Reader {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            nickname: self.nickname.clone(),
+            kind: self.kind.clone(),
+            ip_address: self.ip_address.clone(),
+            port: self.port.clone(),
+            auto_connect: self.auto_connect.clone(),
+            antennas: self.antennas.clone(),
+            socket: Mutex::new(None),
+            keepalive: self.keepalive.clone(),
+            msg_id: self.msg_id.clone(),
+            status: self.status.clone(),
+            status_retries: self.status_retries.clone(),
+            control_sockets: self.control_sockets.clone(),
+            read_repeaters: self.read_repeaters.clone(),
+            readers: self.readers.clone()
+        }
+    }
+}
+
 impl Reader {
     pub(crate) fn new_internal(
         id: i64,

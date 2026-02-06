@@ -64,7 +64,7 @@ impl ReadSaver {
         loop {
             if let Ok(ka) = self.keepalive.lock() {
                 if *ka == false {
-                    println!("Sightings processor told to quit. /1/");
+                    println!("Read saver notified that global shutdown has been initiated. /1/");
                     break;
                 }
             } else {
@@ -73,7 +73,7 @@ impl ReadSaver {
             }
             if let Ok(run) = self.running.lock() {
                 if *run == false {
-                    println!("Sightings processor told to quit. /2/");
+                    println!("Read saver told to stop. /2/");
                     break;
                 }
             }

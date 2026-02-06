@@ -4,6 +4,7 @@ use crate::reader;
 use std::fmt;
 
 pub mod sqlite;
+mod memstore;
 
 #[derive(Debug)]
 pub enum DBError {
@@ -38,24 +39,24 @@ pub trait Database {
     // Setup functions
     fn setup(&mut self) -> Result<(), DBError>;
     // Application settings
-    fn set_setting(&self, setting: &setting::Setting) -> Result<setting::Setting, DBError>;
+    fn set_setting(&mut self, setting: &setting::Setting) -> Result<setting::Setting, DBError>;
     fn get_setting(&self, name: &str) -> Result<setting::Setting, DBError>;
     // Reader information
-    fn save_reader(&self, reader: &reader::Reader) -> Result<i64, DBError>;
+    fn save_reader(&mut self, reader: &reader::Reader) -> Result<i64, DBError>;
     fn get_reader(&self, id: &i64) -> Result<reader::Reader, DBError>;
     fn get_readers(&self) -> Result<Vec<reader::Reader>, DBError>;
-    fn delete_reader(&self, id: &i64) -> Result<usize, DBError>;
+    fn delete_reader(&mut self, id: &i64) -> Result<usize, DBError>;
     // API information
-    fn save_api(&self, api: &api::Api) -> Result<i64, DBError>;
+    fn save_api(&mut self, api: &api::Api) -> Result<i64, DBError>;
     fn get_apis(&self) -> Result<Vec<api::Api>, DBError>;
-    fn delete_api(&self, id: &i64) -> Result<usize, DBError>;
+    fn delete_api(&mut self, id: &i64) -> Result<usize, DBError>;
     // Information gathered from readers
     fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
     fn get_reads(&self, start: i64, end: i64) -> Result<Vec<read::Read>, DBError>;
     fn get_all_reads(&self) -> Result<Vec<read::Read>, DBError>;
-    fn delete_reads(&self, start: i64, end: i64) -> Result<usize, DBError>;
-    fn delete_all_reads(&self) -> Result<usize, DBError>;
-    fn reset_reads_upload(&self) -> Result<usize, DBError>;
+    fn delete_reads(&mut self, start: i64, end: i64) -> Result<usize, DBError>;
+    fn delete_all_reads(&mut self) -> Result<usize, DBError>;
+    fn reset_reads_upload(&mut self) -> Result<usize, DBError>;
     fn get_not_uploaded_reads(&self) -> Result<Vec<read::Read>, DBError>;
     fn update_reads_status(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError>;
 }
