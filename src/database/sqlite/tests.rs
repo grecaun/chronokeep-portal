@@ -8,7 +8,7 @@ use crate::objects::read;
 use crate::objects::setting;
 use crate::reader::{self, zebra};
 
-fn setup_tests(path: &str) -> SQLite {
+pub fn setup_tests(path: &str) -> SQLite {
     let new_conn = rusqlite::Connection::open(path).unwrap();
     let drop_tables = [
         "DROP TABLE IF EXISTS sightings;",
@@ -679,7 +679,7 @@ fn test_save_reads() {
     let mut sqlite = setup_tests(unique_path);
     let result = sqlite.save_reads(&new_reads);
     assert!(result.is_ok());
-    assert_eq!(new_reads.len() - 1, result.unwrap());
+    assert_eq!(new_reads.len() - 1, result.unwrap().len());
     // test if we can add a read we already know about, this should return 0
     let temp_read = new_reads.first().unwrap();
     let updated_read = read::Read::new(
@@ -696,7 +696,7 @@ fn test_save_reads() {
     );
     let result = sqlite.save_reads(&vec![updated_read]);
     assert!(result.is_ok());
-    assert_eq!(0, result.unwrap());
+    assert_eq!(0, result.unwrap().len());
     // test if we can add a status that we don't know about
     let updated_read = read::Read::new(
         0,
@@ -780,15 +780,15 @@ fn test_delete_reads() {
     let unique_path = "./test_delete_reads.sqlite";
     let new_reads = make_reads();
     let mut sqlite = setup_tests(unique_path);
-    let count = sqlite.save_reads(&new_reads).unwrap();
+    let saved = sqlite.save_reads(&new_reads).unwrap();
     let result = sqlite.delete_reads(2000, 90000);
     assert!(result.is_ok());
     assert_eq!(1, result.unwrap());
     let reads = sqlite.get_all_reads().unwrap();
-    assert_eq!(count-1, reads.len());
+    assert_eq!(saved.len()-1, reads.len());
     let result = sqlite.delete_reads(0, 2000);
     assert!(result.is_ok());
-    assert_eq!(count-1, result.unwrap());
+    assert_eq!(saved.len()-1, result.unwrap());
     let reads = sqlite.get_all_reads().unwrap();
     assert_eq!(0, reads.len());
     let result = sqlite.delete_reads(0, 90000);
@@ -803,10 +803,10 @@ fn test_delete_all_reads() {
     let unique_path = "./test_delete_all_reads.sqlite";
     let new_reads = make_reads();
     let mut sqlite = setup_tests(unique_path);
-    let count = sqlite.save_reads(&new_reads).unwrap();
+    let saved = sqlite.save_reads(&new_reads).unwrap();
     let result = sqlite.delete_all_reads();
     assert!(result.is_ok());
-    assert_eq!(count, result.unwrap());
+    assert_eq!(saved.len(), result.unwrap());
     let reads = sqlite.get_all_reads().unwrap();
     assert_eq!(0, reads.len());
     drop(sqlite);
@@ -818,16 +818,16 @@ fn test_reset_reads_upload() {
     let unique_path = "./test_reset_reads_upload.sqlite";
     let new_reads = make_reads();
     let mut sqlite = setup_tests(unique_path);
-    let count = sqlite.save_reads(&new_reads).unwrap();
+    let saved = sqlite.save_reads(&new_reads).unwrap();
     let not_uploaded = sqlite.get_not_uploaded_reads().unwrap();
-    assert_ne!(count, not_uploaded.len());
+    assert_ne!(saved.len(), not_uploaded.len());
     assert_ne!(0, not_uploaded.len());
     let result = sqlite.reset_reads_upload();
     assert!(result.is_ok());
     let res_count = result.unwrap();
-    assert_eq!(count, res_count);
+    assert_eq!(saved.len(), res_count);
     let not_uploaded = sqlite.get_not_uploaded_reads().unwrap();
-    assert_eq!(count, not_uploaded.len());
+    assert_eq!(saved.len(), not_uploaded.len());
     drop(sqlite);
     finalize_tests(unique_path);
 }

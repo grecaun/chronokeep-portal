@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rand::random;
 
-use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_NTFY_PASS, SETTING_NTFY_TOPIC, SETTING_NTFY_URL, SETTING_NTFY_USER, SETTING_PLAY_SOUND, SETTING_PORTAL_NAME, SETTING_READ_WINDOW, SETTING_SCREEN_TYPE, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{DBError, sqlite::SQLite}, defaults::{DEFAULT_AUTO_REMOTE, DEFAULT_CHIP_TYPE, DEFAULT_ENABLE_NTFY, DEFAULT_PLAY_SOUND, DEFAULT_READ_WINDOW, DEFAULT_SCREEN_TYPE, DEFAULT_UPLOAD_INTERVAL, DEFAULT_VOLUME}, network::api, objects::{self, read, setting}, reader, sound_board::Voice};
+use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_NTFY_PASS, SETTING_NTFY_TOPIC, SETTING_NTFY_URL, SETTING_NTFY_USER, SETTING_PLAY_SOUND, SETTING_PORTAL_NAME, SETTING_READ_WINDOW, SETTING_SCREEN_TYPE, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME}, database::{DBError, sqlite::SQLite}, defaults::{DEFAULT_AUTO_REMOTE, DEFAULT_CHIP_TYPE, DEFAULT_ENABLE_NTFY, DEFAULT_PLAY_SOUND, DEFAULT_READ_WINDOW, DEFAULT_SCREEN_TYPE, DEFAULT_UPLOAD_INTERVAL, DEFAULT_VOLUME}, network::api, objects::{read, setting}, reader, sound_board::Voice};
 
 
 #[cfg(test)]
@@ -225,46 +225,129 @@ impl super::Database for MemStore {
     }
 
     fn save_api(&mut self, api: &api::Api) -> Result<i64, super::DBError> {
-        todo!()
+        match self.backend.save_api(api) {
+            Ok(i) => {
+                let n_api = api::Api::new(
+                    i,
+                    String::from(api.nickname()),
+                    String::from(api.kind()),
+                    String::from(api.token()),
+                    String::from(api.uri())
+                );
+                self.api.insert(i, n_api);
+                Ok(i)
+            }
+            Err(e) => Err(e)
+        }
     }
 
     fn get_apis(&self) -> Result<Vec<api::Api>, super::DBError> {
-        todo!()
+        let mut output: Vec<api::Api> = Vec::new();
+        for api in self.api.values() {
+            output.push(api.clone());
+        }
+        Ok(output)
     }
 
     fn delete_api(&mut self, id: &i64) -> Result<usize, super::DBError> {
-        todo!()
+        match self.backend.delete_api(id) {
+            Ok(s) => {
+                self.api.remove(id);
+                Ok(s)
+            }
+            Err(e) => Err(e)
+        }
     }
 
-    fn save_reads(&mut self, reads: &Vec<objects::read::Read>) -> Result<usize, super::DBError> {
-        todo!()
+    fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<Vec<read::Read>, super::DBError> {
+        match self.backend.save_reads(reads) {
+            Ok(new_reads) => {
+                for read in &new_reads {
+                    self.reads.insert(read.id(), read.clone());
+                }
+                Ok(new_reads)
+            }
+            Err(e) => Err(e)
+        }
     }
 
-    fn get_reads(&self, start: i64, end: i64) -> Result<Vec<objects::read::Read>, super::DBError> {
-        todo!()
+    fn get_reads(&self, start: i64, end: i64) -> Result<Vec<read::Read>, super::DBError> {
+        let mut output: Vec<read::Read> = Vec::new();
+        for read in self.reads.values() {
+            if read.seconds() >= start as u64 && read.seconds() <= end as u64 {
+                output.push(read.clone());
+            }
+        }
+        Ok(output)
     }
 
-    fn get_all_reads(&self) -> Result<Vec<objects::read::Read>, super::DBError> {
-        todo!()
+    fn get_all_reads(&self) -> Result<Vec<read::Read>, super::DBError> {
+        let mut output: Vec<read::Read> = Vec::new();
+        for read in self.reads.values() {
+            output.push(read.clone());
+        }
+        Ok(output)
     }
 
     fn delete_reads(&mut self, start: i64, end: i64) -> Result<usize, super::DBError> {
-        todo!()
+        match self.backend.delete_reads(start, end) {
+            Ok(val) => {
+                let mut to_delete: Vec<u64> = Vec::new();
+                for read in self.reads.values() {
+                    if read.seconds() >= start as u64 && read.seconds() <= end as u64 {
+                        to_delete.push(read.id());
+                    }
+                }
+                for id in to_delete {
+                    self.reads.remove(&id);
+                }
+                Ok(val)
+            }
+            Err(e) => Err(e)
+        }
     }
 
     fn delete_all_reads(&mut self) -> Result<usize, super::DBError> {
-        todo!()
+        match self.backend.delete_all_reads() {
+            Ok(val) => {
+                self.reads = HashMap::new();
+                Ok(val)
+            }
+            Err(e) => Err(e)
+        }
     }
 
     fn reset_reads_upload(&mut self) -> Result<usize, super::DBError> {
-        todo!()
+        match self.backend.reset_reads_upload() {
+            Ok(val) => {
+                for read in self.reads.values_mut() {
+                    read.set_uploaded(read::READ_UPLOADED_FALSE);
+                }
+                Ok(val)
+            }
+            Err(e) => Err(e)
+        }
     }
 
-    fn get_not_uploaded_reads(&self) -> Result<Vec<objects::read::Read>, super::DBError> {
-        todo!()
+    fn get_not_uploaded_reads(&self) -> Result<Vec<read::Read>, super::DBError> {
+        let mut output: Vec<read::Read> = Vec::new();
+        for read in self.reads.values() {
+            if read.uploaded() == read::READ_UPLOADED_FALSE {
+                output.push(read.clone());
+            }
+        }
+        Ok(output)
     }
 
-    fn update_reads_status(&mut self, reads: &Vec<objects::read::Read>) -> Result<usize, super::DBError> {
-        todo!()
+    fn update_reads_status(&mut self, reads: &Vec<read::Read>) -> Result<usize, super::DBError> {
+        match self.backend.update_reads_status(reads) {
+            Ok(val) => {
+                for read in reads {
+                    self.reads.insert(read.id(), read.clone());
+                }
+                Ok(val)
+            }
+            Err(e) => Err(e)
+        }
     }
 }
