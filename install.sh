@@ -101,6 +101,7 @@ fi;
 sudo chown -R $USER:root ${DEST}
 if ! [[ -e ${DEST}files.sh ]]; then
     curl -L ${FILES_SCRIPT_URL} -o ${DEST}files.sh > /dev/null 2>&1
+    sudo chmod +x ${DEST}files.sh
 fi;
 ${DEST}files.sh $FORCE_CREATE
 echo "---------- Setting base volume to 100% ---------"
