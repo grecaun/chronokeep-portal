@@ -4,7 +4,6 @@ use crate::reader;
 use std::fmt;
 
 pub mod sqlite;
-mod memstore;
 
 #[derive(Debug)]
 pub enum DBError {
