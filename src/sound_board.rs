@@ -390,6 +390,20 @@ impl SoundBoard {
         }
     }
 
+    pub fn play_success(&self, volume: f32) {
+        if let Ok(_voice) = self.current_voice.lock() {
+            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
+                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
+                    sink.set_volume(volume);
+                    // this should be a beep
+                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY+500.0);
+                    sink.append(source);
+                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
+                }
+            }
+        }
+    }
+
     pub fn play_disconnected(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
             if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {

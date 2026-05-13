@@ -62,6 +62,10 @@ pub const TIME_MENU_HOUR: u8 = 3;
 pub const TIME_MENU_MINUTE: u8 = 4;
 pub const TIME_MENU_SECOND: u8 = 5;
 
+pub const READING_MENU_NIL: u8 = 0;
+pub const READING_MENU_STOP: u8 = 1;
+pub const READING_MENU_UPLOAD: u8 = 2;
+
 #[allow(unused)]
 #[derive(Clone)]
 pub struct CharacterDisplay {

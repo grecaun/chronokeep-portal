@@ -84,15 +84,22 @@ impl CharacterDisplay {
                                         self.current_menu[1] = MAIN_SHUTDOWN;
                                     }
                                 }
-                                READING_MENU => {
-                                    if let Ok(info) = self.info.lock() {
-                                        if info.reader_info.len() > 3 {
-                                            if self.current_menu[1] > 0 {
-                                                self.current_menu[1] -= 1;
-                                            } else {
-                                                self.current_menu[1] = (info.reader_info.len() - 1) as u8;
+                                READING_MENU => { // currently reading chips, raise volume
+                                    if self.volume < 0 {
+                                        self.volume = 0;
+                                    } else if self.volume < 10 {
+                                        self.volume += 1;
+                                    } else {
+                                        self.volume = 10;
+                                    }
+                                    if let Ok(mut control) = self.control.lock() {
+                                        if let Ok(sq) = self.sqlite.lock() {
+                                            control.volume = (self.volume as f32) / 10.0;
+                                            if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
+                                                println!("Error saving setting: {e}");
                                             }
                                         }
+                                        control.sound_board.play_success(control.volume);
                                     }
                                 }
                                 SETTINGS_MENU => {
@@ -182,9 +189,9 @@ impl CharacterDisplay {
                                         _ => {}
                                     }
                                 },
-                                _ => {}, // 2 = currently reading, do nothing
+                                _ => {}, // unknown
                             }
-                            self.current_menu[2] = 0; // current_menu[2] is only used for proper stop reading command
+                            self.current_menu[2] = READING_MENU_NIL; // current_menu[2] is only used for proper stop reading command
                             self.update_menu();
                         },
                         ButtonPress::Down => {
@@ -196,15 +203,22 @@ impl CharacterDisplay {
                                         self.current_menu[1] = MAIN_START_READING;
                                     }
                                 },
-                                READING_MENU => {
-                                    if let Ok(info) = self.info.lock() {
-                                        if info.reader_info.len() > 3 {
-                                            if self.current_menu[1] < (info.reader_info.len() - 1) as u8 {
-                                                self.current_menu[1] += 1;
-                                            } else {
-                                                self.current_menu[1] = 0;
+                                READING_MENU => { // currently reading chips, lower volume
+                                    if self.volume > 10 {
+                                        self.volume = 10;
+                                    } else if self.volume > 0 {
+                                        self.volume -= 1;
+                                    } else {
+                                        self.volume = 0;
+                                    }
+                                    if let Ok(mut control) = self.control.lock() {
+                                        if let Ok(sq) = self.sqlite.lock() {
+                                            control.volume = (self.volume as f32) / 10.0;
+                                            if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
+                                                println!("Error saving setting: {e}");
                                             }
                                         }
+                                        control.sound_board.play_success(control.volume);
                                     }
                                 }
                                 SETTINGS_MENU => { // settings menu, max ix SETTINGS_SET_TIME_MANUAL
@@ -290,12 +304,13 @@ impl CharacterDisplay {
                                         _ => {}
                                     }
                                 },
-                                _ => {}, // 2 = currently reading, do nothing
+                                _ => {}, // unknown
                             }
-                            self.current_menu[2] = 0;
+                            self.current_menu[2] = READING_MENU_NIL;
                             self.update_menu();
                         },
                         ButtonPress::Left => {
+                            let mut third_menu: u8 = READING_MENU_NIL;
                             match self.current_menu[0] {
                                 SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
@@ -499,9 +514,12 @@ impl CharacterDisplay {
                                         self.current_menu[1] -= 1;
                                     }
                                 },
+                                READING_MENU => { // currently reading
+                                    third_menu = READING_MENU_UPLOAD; // used to allow change in auto upload
+                                },
                                 _ => {}, // main menu, reading menu, and shutdown menu
                             }
-                            self.current_menu[2] = 0;
+                            self.current_menu[2] = third_menu;
                         },
                         ButtonPress::Right => {
                             match self.current_menu[0] {
@@ -594,7 +612,7 @@ impl CharacterDisplay {
                                     }
                                 },
                                 READING_MENU => {
-                                    if self.current_menu[2] == 1 {
+                                    if self.current_menu[2] == READING_MENU_STOP {
                                         if let Ok(ac) = self.ac_state.lock() {
                                             match *ac {
                                                 auto_connect::State::Finished |
@@ -642,6 +660,35 @@ impl CharacterDisplay {
                                             self.current_menu[1] = MAIN_START_READING;
                                         }
                                         self.update_menu();
+                                    } else if self.current_menu[2] == READING_MENU_UPLOAD {
+                                        if let Ok(mut control) = self.control.lock() {
+                                            control.auto_remote = !control.auto_remote;
+                                            // start uploader if true, otherwise stop it
+                                            if control.auto_remote {
+                                                if let Some(uploader) = &self.uploader {
+                                                    if !uploader.running() {
+                                                        println!("Starting auto upload thread.");
+                                                        let t_uploader = uploader.clone();
+                                                        let t_joiner = thread::spawn(move|| {
+                                                            t_uploader.run();
+                                                        });
+                                                        if let Ok(mut j) = self.joiners.lock() {
+                                                            j.push(t_joiner);
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                if let Some(uploader) = &self.uploader {
+                                                    uploader.stop();
+                                                }
+                                            }
+                                            if let Ok(sq) = self.sqlite.lock() {
+                                                if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
+                                                    println!("Error saving setting: {e}");
+                                                }
+                                            }
+                                            control.sound_board.play_success(control.volume);
+                                        }
                                     }
                                 },
                                 SETTINGS_MENU => {
@@ -848,9 +895,10 @@ impl CharacterDisplay {
                                 },
                                 _ => {},
                             }
-                            self.current_menu[2] = 0;
+                            self.current_menu[2] = READING_MENU_NIL;
                         },
                         ButtonPress::Enter => {
+                            let mut third_menu: u8 = READING_MENU_NIL;
                             match self.current_menu[0] {
                                 MAIN_MENU => { // main
                                     match self.current_menu[1] {
@@ -1084,7 +1132,7 @@ impl CharacterDisplay {
                                     }
                                 },
                                 READING_MENU => { // currently reading
-                                    self.current_menu[2] = 1; // used to allow readers to stop
+                                    third_menu = READING_MENU_STOP; // used to allow readers to stop
                                 },
                                 ABOUT_MENU | STARTUP_MENU => {
                                     self.current_menu[0] = MAIN_MENU;
@@ -1255,6 +1303,7 @@ impl CharacterDisplay {
                                 },
                                 _ => {},
                             }
+                            self.current_menu[2] = third_menu;
                         },
                     } 
                 }
@@ -1295,6 +1344,19 @@ impl CharacterDisplay {
                     } else {
                         info.title_bar.replace_range(17..20, "cri");
                     }
+                }
+                if info.upload_errors > 99 {
+                    info.title_bar.replace_range(14..16, "99");
+                } else if err_count > 0 {
+                    info.title_bar.replace_range(14..16, format!("{:>2}", info.upload_errors).as_str());
+                } else {
+                    let mut upload_status = "  ";
+                    if info.upload_status == Status::Running {
+                        upload_status = " +";
+                    } else if info.upload_status == Status::Stopped || info.upload_status == Status::Stopping {
+                        upload_status = " -";
+                    }
+                    info.title_bar.replace_range(14..16, upload_status);
                 }
                 messages.push(info.title_bar.clone());
                 let _ = lcd.home();
