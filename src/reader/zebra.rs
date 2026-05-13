@@ -620,9 +620,9 @@ pub fn connect(
                             }
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
-                                t_sound.notify_one();
                                 count += data.tags.len();
                                 let mut tags = data.tags;
+                                t_sound.notify_tags(&tags);
                                 match process_tags(&mut read_map, &mut tags, &mut unsaved_reads, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                     Ok(new_reads) => {
                                         if new_reads.len() > 0 {
@@ -1642,6 +1642,12 @@ pub struct TagData {
     last_seen: u128,        // time since 00:00:00 UTC Jan 1 1970 in microseconds
     reader_time: u128,
     portal_time: u128,      // time since 00:00:00 UTC Jan 1 1970 in microseconds (1,000,000 per second, 1,000 per millisecond)
+}
+
+impl TagData {
+    pub fn tag(&self) -> u128 {
+        return self.tag;
+    }
 }
 
 fn process_reader_event_notification(buf: &[u8;BUFFER_SIZE], start_ix: usize, max_ix: &usize) -> Result<Option<(usize, u8)>, &'static str> {

@@ -1,8 +1,8 @@
-use std::{sync::{Arc, Mutex, Condvar}, time::{Duration, Instant}};
+use std::{collections::HashMap, sync::{Arc, Condvar, Mutex}, time::{Duration, Instant, SystemTime}};
 
 use rand::Rng;
 
-use crate::sound_board;
+use crate::{reader::zebra::TagData, sound_board};
 
 pub struct Sounds {
     control: Arc<Mutex<super::Control>>,
@@ -14,6 +14,7 @@ pub struct Sounds {
 pub struct SoundNotifier {
     notifier: Arc<Condvar>,
     beep: Arc<Mutex<bool>>,
+    tag_list: Arc<Mutex<HashMap<u128, u64>>>,
     sound_list: Arc<Mutex<Vec<SoundType>>>
 }
 
@@ -32,9 +33,29 @@ impl SoundNotifier {
     pub fn new() -> SoundNotifier {
         SoundNotifier {
             beep: Arc::new(Mutex::new(false)),
+            notifier: Arc::new(Condvar::new()),
+            tag_list: Arc::new(Mutex::new(HashMap::new())),
             sound_list: Arc::new(Mutex::new(Vec::new())),
-            notifier: Arc::new(Condvar::new())
         }
+    }
+
+    pub fn notify_tags(&self, tags: &Vec<TagData>) {
+        if let Ok(cur_dur) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+            let cur_time = cur_dur.as_secs(); // current time as unix timestamp
+            if let Ok(mut t_list) = self.tag_list.lock() {
+                for tag in tags {
+                    // Play a sound if we haven't seen the tag ever, or if we've not seen it in the past 60 seconds.
+                    if !t_list.contains_key(&tag.tag()) || (t_list.get(&tag.tag()).unwrap() + 60) > cur_time {
+                        if let Ok(mut val) = self.beep.lock() {
+                            *val = true;
+                        }
+                        // Update the time we've played a sound.
+                        t_list.insert(tag.tag(), cur_time);
+                    }
+                }
+            }
+        }
+        self.notifier.notify_one()
     }
 
     pub fn notify_one(&self) {
