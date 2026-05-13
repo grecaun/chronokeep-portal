@@ -1,21 +1,7 @@
 use std::{net::TcpStream, sync::{Arc, Mutex}, thread::JoinHandle};
-#[cfg(target_os = "linux")]
-use std::{env, thread, time::Duration};
-
-#[cfg(target_os = "linux")]
-use std::time::SystemTime;
-#[cfg(target_os = "linux")]
-use std::fmt::Write;
-#[cfg(target_os = "linux")]
-use chrono::{DateTime, Datelike, Local, Timelike};
-#[cfg(target_os = "linux")]
-use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType, CharacterDisplayPCF8574T};
-#[cfg(target_os = "linux")]
-use rppal::{hal, i2c::I2c};
-
 use crate::{control::{Control, socket::MAX_CONNECTED, sound::SoundNotifier}, database::sqlite, notifier, processor, reader::{self, auto_connect}, remote::uploader::{self, Status, Uploader}};
 #[cfg(target_os = "linux")]
-use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME, socket::{self, CONNECTION_CHANGE_PAUSE, UPDATE_SCRIPT_ENV}, sound::SoundType}, database::Database, network::api, objects::{read, setting::Setting}, reader::reconnector::Reconnector, remote::remote_util, sound_board::Voice, types};
+use crate::{types};
 
 mod ada;
 mod pcf;

@@ -1,5 +1,5 @@
 #[cfg(target_os = "linux")]
-use std::{net::TcpStream, sync::{Arc, Mutex}, thread::JoinHandle};
+use std::net::TcpStream;
 #[cfg(target_os = "linux")]
 use std::{env, thread, time::Duration};
 #[cfg(target_os = "linux")]
@@ -9,19 +9,21 @@ use std::fmt::Write;
 #[cfg(target_os = "linux")]
 use chrono::{DateTime, Datelike, Local, Timelike};
 #[cfg(target_os = "linux")]
-use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType, CharacterDisplayPCF8574T};
+use i2c_character_display::{LcdDisplayType, CharacterDisplayPCF8574T};
 #[cfg(target_os = "linux")]
 use rppal::{hal, i2c::I2c};
 #[cfg(target_os = "linux")]
-use crate::{control::{Control, socket::MAX_CONNECTED, sound::SoundNotifier}, database::sqlite, notifier, processor, reader::{self, auto_connect}, remote::uploader::{self, Status, Uploader}};
+use crate::{reader::{self, auto_connect}, remote::uploader::Status};
 #[cfg(target_os = "linux")]
 use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME, socket::{self, CONNECTION_CHANGE_PAUSE, UPDATE_SCRIPT_ENV}, sound::SoundType}, database::Database, network::api, objects::{read, setting::Setting}, reader::reconnector::Reconnector, remote::remote_util, sound_board::Voice, types};
+#[cfg(target_os = "linux")]
+use crate::screen::{ButtonPress, ABOUT_MENU, DELETE_READS_MENU, DELETE_READS_MENU_TWO, MAIN_ABOUT, MAIN_MENU, MAIN_RESTART, MAIN_SETTINGS, MAIN_SHUTDOWN, MAIN_START_READING, MAIN_UPDATE, MANUAL_TIME_MENU, READING_MENU, RESTART_MENU, SCREEN_OFF, SETTINGS_AUTO_UPLOAD, SETTINGS_CHIP_TYPE, SETTINGS_DELETE_CHIP_READS, SETTINGS_ENABLE_NTFY, SETTINGS_MANUAL_UPLOAD, SETTINGS_MENU, SETTINGS_PLAY_SOUND, SETTINGS_READ_WINDOW, SETTINGS_SET_TIME_MANUAL, SETTINGS_SET_TIME_WEB, SETTINGS_UPLOAD_INTERVAL, SETTINGS_VOICE, SETTINGS_VOLUME, SHUTDOWN_MENU, STARTUP_MENU, TIME_MENU_DAY, TIME_MENU_HOUR, TIME_MENU_MINUTE, TIME_MENU_MONTH, TIME_MENU_SECOND, TIME_MENU_YEAR, UPDATE_MENU, READING_MENU_STOP, READING_MENU_NIL, READING_MENU_UPLOAD};
 
 use super::CharacterDisplay;
 
 impl CharacterDisplay {
     #[cfg(target_os = "linux")]
-    fn pcf_run(&mut self, bus: u8) {
+    pub fn pcf_run(&mut self, bus: u8) {
         println!("Screen set to PCF8574T type.");
         println!("Attempting to connect to screen on i2c{bus}.");
         let i2c_res = I2c::with_bus(bus);
@@ -85,15 +87,13 @@ impl CharacterDisplay {
                                     }
                                 }
                                 READING_MENU => { // currently reading chips, raise volume
-                                    if self.volume < 0 {
-                                        self.volume = 0;
-                                    } else if self.volume < 10 {
+                                    if self.volume < 10 {
                                         self.volume += 1;
                                     } else {
                                         self.volume = 10;
                                     }
                                     if let Ok(mut control) = self.control.lock() {
-                                        if let Ok(sq) = self.sqlite.lock() {
+                                        if let Ok(mut sq) = self.sqlite.lock() {
                                             control.volume = (self.volume as f32) / 10.0;
                                             if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                 println!("Error saving setting: {e}");
@@ -212,7 +212,7 @@ impl CharacterDisplay {
                                         self.volume = 0;
                                     }
                                     if let Ok(mut control) = self.control.lock() {
-                                        if let Ok(sq) = self.sqlite.lock() {
+                                        if let Ok(mut sq) = self.sqlite.lock() {
                                             control.volume = (self.volume as f32) / 10.0;
                                             if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                 println!("Error saving setting: {e}");
@@ -317,7 +317,7 @@ impl CharacterDisplay {
                                         match self.current_menu[1] {
                                             SETTINGS_READ_WINDOW => {  // Read Window
                                                 if control.read_window > 5 {
-                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                    if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.read_window -= 1;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_READ_WINDOW.to_string(), control.read_window.to_string())) {
                                                             println!("Error saving setting: {e}");
@@ -326,7 +326,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_CHIP_TYPE => {  // Chip Type
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     if control.chip_type == types::TYPE_CHIP_HEX {
                                                         control.chip_type = types::TYPE_CHIP_DEC.to_string();
                                                     } else {
@@ -338,7 +338,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_PLAY_SOUND => {  // Play Sound
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.play_sound = !control.play_sound;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
                                                         println!("Error saving setting: {e}");
@@ -354,7 +354,7 @@ impl CharacterDisplay {
                                                 } else {
                                                     self.volume = 0;
                                                 }
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.volume = (self.volume as f32) / 10.0;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                         println!("Error saving setting: {e}");
@@ -362,7 +362,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_VOICE => {  // Voice
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     match control.sound_board.get_voice() {
                                                         Voice::Emily => {
                                                             if let Err(_) = control.sound_board.change_voice(Voice::Custom) {
@@ -419,7 +419,7 @@ impl CharacterDisplay {
                                                         uploader.stop();
                                                     }
                                                 }
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
                                                         println!("Error saving setting: {e}");
                                                     }
@@ -478,7 +478,7 @@ impl CharacterDisplay {
                                             }
                                             SETTINGS_UPLOAD_INTERVAL => {  // Upload Interval
                                                 if control.upload_interval > 0 {
-                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                    if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.upload_interval -= 1;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
                                                             println!("Error saving setting: {e}");
@@ -487,7 +487,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_ENABLE_NTFY => {  // Enable NTFY
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.enable_ntfy = !control.enable_ntfy;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_ENABLE_NTFY.to_string(), control.enable_ntfy.to_string())) {
                                                         println!("Error saving setting: {e}");
@@ -682,7 +682,7 @@ impl CharacterDisplay {
                                                     uploader.stop();
                                                 }
                                             }
-                                            if let Ok(sq) = self.sqlite.lock() {
+                                            if let Ok(mut sq) = self.sqlite.lock() {
                                                 if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
                                                     println!("Error saving setting: {e}");
                                                 }
@@ -696,7 +696,7 @@ impl CharacterDisplay {
                                         match self.current_menu[1] {
                                             SETTINGS_READ_WINDOW => {  // Read Window
                                                 if control.read_window < 50 {
-                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                    if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.read_window += 1;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_READ_WINDOW.to_string(), control.read_window.to_string())) {
                                                             println!("Error saving setting: {e}");
@@ -705,7 +705,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_CHIP_TYPE => {  // Chip Type
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     if control.chip_type == types::TYPE_CHIP_HEX {
                                                         control.chip_type = types::TYPE_CHIP_DEC.to_string();
                                                     } else {
@@ -717,7 +717,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_PLAY_SOUND => {  // Play Sound
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.play_sound = !control.play_sound;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
                                                         println!("Error saving setting: {e}");
@@ -726,14 +726,12 @@ impl CharacterDisplay {
                                             }
                                             SETTINGS_VOLUME => {  // Volume
                                                 // raise volume
-                                                if self.volume < 0 {
-                                                    self.volume = 0;
-                                                } else if self.volume < 10 {
+                                                if self.volume < 10 {
                                                     self.volume += 1;
                                                 } else {
                                                     self.volume = 10;
                                                 }
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.volume = (self.volume as f32) / 10.0;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
                                                         println!("Error saving setting: {e}");
@@ -741,7 +739,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_VOICE => {  // Voice
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     match control.sound_board.get_voice() {
                                                         Voice::Emily => {
                                                             if let Err(_) = control.sound_board.change_voice(Voice::Michael) {
@@ -798,7 +796,7 @@ impl CharacterDisplay {
                                                         uploader.stop();
                                                     }
                                                 }
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
                                                         println!("Error saving setting: {e}");
                                                     }
@@ -857,7 +855,7 @@ impl CharacterDisplay {
                                             }
                                             SETTINGS_UPLOAD_INTERVAL => {  // Upload Interval
                                                 if control.upload_interval < 180 {
-                                                    if let Ok(sq) = self.sqlite.lock() {
+                                                    if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.upload_interval += 1;
                                                         if let Err(e) = sq.set_setting(&Setting::new(SETTING_UPLOAD_INTERVAL.to_string(), control.upload_interval.to_string())) {
                                                             println!("Error saving setting: {e}");
@@ -866,7 +864,7 @@ impl CharacterDisplay {
                                                 }
                                             }
                                             SETTINGS_ENABLE_NTFY => {  // Enable NTFY
-                                                if let Ok(sq) = self.sqlite.lock() {
+                                                if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.enable_ntfy = !control.enable_ntfy;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_ENABLE_NTFY.to_string(), control.enable_ntfy.to_string())) {
                                                         println!("Error saving setting: {e}");
@@ -1251,7 +1249,7 @@ impl CharacterDisplay {
                                 },
                                 DELETE_READS_MENU_TWO => {
                                     if self.current_menu[1] == 1 {
-                                        if let Ok(sq) = self.sqlite.lock() {
+                                        if let Ok(mut sq) = self.sqlite.lock() {
                                             if let Err(e) = sq.delete_all_reads() {
                                                 println!("error deleting reads: {e}")
                                             }
@@ -1345,10 +1343,11 @@ impl CharacterDisplay {
                         info.title_bar.replace_range(17..20, "cri");
                     }
                 }
-                if info.upload_errors > 99 {
+                let up_errors = info.upload_errors;
+                if up_errors > 99 {
                     info.title_bar.replace_range(14..16, "99");
-                } else if err_count > 0 {
-                    info.title_bar.replace_range(14..16, format!("{:>2}", info.upload_errors).as_str());
+                } else if up_errors > 0 {
+                    info.title_bar.replace_range(14..16, format!("{:>2}", up_errors).as_str());
                 } else {
                     let mut upload_status = "  ";
                     if info.upload_status == Status::Running {
