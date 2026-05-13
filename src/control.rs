@@ -1,5 +1,4 @@
 use crate::{database::{self, sqlite, DBError, Database}, defaults, objects::setting, sound_board::{SoundBoard, Voice}};
-use rand::prelude::random;
 
 pub mod socket;
 pub mod zero_conf;
@@ -108,7 +107,7 @@ impl Control {
                 output.name = String::from(s.value());
             },
             Err(DBError::NotFound) => {
-                let rval: u8 = random();
+                let rval: u8 = rand::random::<u8>();
                 let n = format!("Chrono Portal {}", rval);
                 match sqlite.set_setting(&setting::Setting::new(
                     String::from(SETTING_PORTAL_NAME),

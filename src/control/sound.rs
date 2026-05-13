@@ -1,7 +1,5 @@
 use std::{collections::HashMap, sync::{Arc, Condvar, Mutex}, time::{Duration, Instant, SystemTime}};
 
-use rand::Rng;
-
 use crate::{reader::zebra::TagData, sound_board};
 
 pub struct Sounds {
@@ -92,7 +90,7 @@ impl Sounds {
 
     pub fn run(&mut self) {
         let mut last_sound = Instant::now();
-        let mut separation: u64 = sound_board::BEEP_SEPARATION + rand::thread_rng().gen_range(0..sound_board::BEEP_SEP_RAND_MAX);
+        let mut separation: u64 = sound_board::BEEP_SEPARATION + rand::random_range(0..sound_board::BEEP_SEP_RAND_MAX);
         loop {
             if let Ok(ka) = self.keepalive.try_lock() {
                 match *ka {
@@ -112,7 +110,7 @@ impl Sounds {
                             if control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(separation) {
                                 control.sound_board.play_sound(control.volume);
                                 last_sound = Instant::now();
-                                separation = sound_board::BEEP_SEPARATION + rand::thread_rng().gen_range(0..sound_board::BEEP_SEP_RAND_MAX);
+                                separation = sound_board::BEEP_SEPARATION + rand::random_range(0..sound_board::BEEP_SEP_RAND_MAX);
                             }
                             *beep = false;
                         }

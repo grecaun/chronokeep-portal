@@ -1,6 +1,5 @@
 use std::{fs::File, io::{BufReader, Cursor}, ops::Deref, path::Path, sync::{Arc, Mutex}};
 
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 pub const EMILY_START:                  &'static [u8] = include_bytes!("sounds/emily-started.mp3");
@@ -126,163 +125,157 @@ impl SoundBoard {
 
     pub fn play_started(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    match voice.deref() {
-                        Voice::Emily => {
-                            let slice = Cursor::new(EMILY_START);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Michael => {
-                            let slice = Cursor::new(MICHAEL_START);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Custom => {
-                            let slice = BufReader::new(File::open(CUSTOM_START).unwrap());
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                match voice.deref() {
+                    Voice::Emily => {
+                        let slice = Cursor::new(EMILY_START);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
                     }
-                    sink.sleep_until_end();
+                    Voice::Michael => {
+                        let slice = Cursor::new(MICHAEL_START);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
+                    Voice::Custom => {
+                        let slice = BufReader::new(File::open(CUSTOM_START).unwrap());
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
                 }
+                player.sleep_until_end();
             }
         }
     }
 
     pub fn play_startup_finished(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    match voice.deref() {
-                        Voice::Emily => {
-                            let slice = Cursor::new(EMILY_STARTUP_FINISHED);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Michael => {
-                            let slice = Cursor::new(MICHAEL_STARTUP_FINISHED);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Custom => {
-                            let slice = BufReader::new(File::open(CUSTOM_STARTUP_FINISHED).unwrap());
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                match voice.deref() {
+                    Voice::Emily => {
+                        let slice = Cursor::new(EMILY_STARTUP_FINISHED);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
                     }
-                    sink.sleep_until_end();
+                    Voice::Michael => {
+                        let slice = Cursor::new(MICHAEL_STARTUP_FINISHED);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
+                    Voice::Custom => {
+                        let slice = BufReader::new(File::open(CUSTOM_STARTUP_FINISHED).unwrap());
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
                 }
+                player.sleep_until_end();
             }
         }
     }
 
     pub fn play_shutdown(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    match voice.deref() {
-                        Voice::Emily => {
-                            let slice = Cursor::new(EMILY_SHUTDOWN);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Michael => {
-                            let slice = Cursor::new(MICHAEL_SHUTDOWN);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Custom => {
-                            let slice = BufReader::new(File::open(CUSTOM_SHUTDOWN).unwrap());
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                match voice.deref() {
+                    Voice::Emily => {
+                        let slice = Cursor::new(EMILY_SHUTDOWN);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
                     }
-                    sink.sleep_until_end();
+                    Voice::Michael => {
+                        let slice = Cursor::new(MICHAEL_SHUTDOWN);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
+                    Voice::Custom => {
+                        let slice = BufReader::new(File::open(CUSTOM_SHUTDOWN).unwrap());
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
                 }
+                player.sleep_until_end();
             }
         }
     }
 
     pub fn play_introduction(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    match voice.deref() {
-                        Voice::Emily => {
-                            let slice = Cursor::new(EMILY_INTRODUCTION);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Michael => {
-                            let slice = Cursor::new(MICHAEL_INTRODUCTION);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Custom => {
-                            let slice = BufReader::new(File::open(CUSTOM_INTRODUCTION).unwrap());
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                match voice.deref() {
+                    Voice::Emily => {
+                        let slice = Cursor::new(EMILY_INTRODUCTION);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
                     }
-                    sink.sleep_until_end();
+                    Voice::Michael => {
+                        let slice = Cursor::new(MICHAEL_INTRODUCTION);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
+                    Voice::Custom => {
+                        let slice = BufReader::new(File::open(CUSTOM_INTRODUCTION).unwrap());
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
                 }
+                player.sleep_until_end();
             }
         }
     }
 
     pub fn play_custom_not_available(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    match voice.deref() {
-                        Voice::Michael => {
-                            let slice = Cursor::new(MICHAEL_CUSTOM_NOT_AVAILABLE);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        _ => {
-                            let slice = Cursor::new(EMILY_CUSTOM_NOT_AVAILABLE);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                match voice.deref() {
+                    Voice::Michael => {
+                        let slice = Cursor::new(MICHAEL_CUSTOM_NOT_AVAILABLE);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
                     }
-                    sink.sleep_until_end();
+                    _ => {
+                        let slice = Cursor::new(EMILY_CUSTOM_NOT_AVAILABLE);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
                 }
+                player.sleep_until_end();
             }
         }
     }
 
     pub fn play_startup_in_progress(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    match voice.deref() {
-                        Voice::Emily => {
-                            let slice = Cursor::new(EMILY_STARTUP_IN_PROGRESS);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Michael => {
-                            let slice = Cursor::new(MICHAEL_STARTUP_IN_PROGRESS);
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Custom => {
-                            let slice = BufReader::new(File::open(CUSTOM_STARTUP_IN_PROGRESS).unwrap());
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                match voice.deref() {
+                    Voice::Emily => {
+                        let slice = Cursor::new(EMILY_STARTUP_IN_PROGRESS);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
                     }
-                    sink.sleep_until_end();
+                    Voice::Michael => {
+                        let slice = Cursor::new(MICHAEL_STARTUP_IN_PROGRESS);
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
+                    Voice::Custom => {
+                        let slice = BufReader::new(File::open(CUSTOM_STARTUP_IN_PROGRESS).unwrap());
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
                 }
+                player.sleep_until_end();
             }
         }
     }
@@ -290,156 +283,141 @@ impl SoundBoard {
     pub fn play_volume(&self, volume: f32) {
         let number: i32 = (volume * 10.0).trunc() as i32;
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    match voice.deref() {
-                        Voice::Emily => {
-                            let slice: Cursor<&[u8]>;
-                            match number {
-                                1 => slice = Cursor::new(EMILY_VOLUME_01),
-                                2 => slice = Cursor::new(EMILY_VOLUME_02),
-                                3 => slice = Cursor::new(EMILY_VOLUME_03),
-                                4 => slice = Cursor::new(EMILY_VOLUME_04),
-                                5 => slice = Cursor::new(EMILY_VOLUME_05),
-                                6 => slice = Cursor::new(EMILY_VOLUME_06),
-                                7 => slice = Cursor::new(EMILY_VOLUME_07),
-                                8 => slice = Cursor::new(EMILY_VOLUME_08),
-                                9 => slice = Cursor::new(EMILY_VOLUME_09),
-                                10 => slice = Cursor::new(EMILY_VOLUME_10),
-                                _ => return
-                            }
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                match voice.deref() {
+                    Voice::Emily => {
+                        let slice: Cursor<&[u8]>;
+                        match number {
+                            1 => slice = Cursor::new(EMILY_VOLUME_01),
+                            2 => slice = Cursor::new(EMILY_VOLUME_02),
+                            3 => slice = Cursor::new(EMILY_VOLUME_03),
+                            4 => slice = Cursor::new(EMILY_VOLUME_04),
+                            5 => slice = Cursor::new(EMILY_VOLUME_05),
+                            6 => slice = Cursor::new(EMILY_VOLUME_06),
+                            7 => slice = Cursor::new(EMILY_VOLUME_07),
+                            8 => slice = Cursor::new(EMILY_VOLUME_08),
+                            9 => slice = Cursor::new(EMILY_VOLUME_09),
+                            10 => slice = Cursor::new(EMILY_VOLUME_10),
+                            _ => return
                         }
-                        Voice::Michael => {
-                            let slice: Cursor<&[u8]>;
-                            match number {
-                                1 => slice = Cursor::new(MICHAEL_VOLUME_01),
-                                2 => slice = Cursor::new(MICHAEL_VOLUME_02),
-                                3 => slice = Cursor::new(MICHAEL_VOLUME_03),
-                                4 => slice = Cursor::new(MICHAEL_VOLUME_04),
-                                5 => slice = Cursor::new(MICHAEL_VOLUME_05),
-                                6 => slice = Cursor::new(MICHAEL_VOLUME_06),
-                                7 => slice = Cursor::new(MICHAEL_VOLUME_07),
-                                8 => slice = Cursor::new(MICHAEL_VOLUME_08),
-                                9 => slice = Cursor::new(MICHAEL_VOLUME_09),
-                                10 => slice = Cursor::new(MICHAEL_VOLUME_10),
-                                _ => return
-                            }
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
-                        Voice::Custom => {
-                            let slice: BufReader<File>;
-                            match number {
-                                1 => slice = BufReader::new(File::open(CUSTOM_VOLUME_01).unwrap()),
-                                2 => slice = BufReader::new(File::open(CUSTOM_VOLUME_02).unwrap()),
-                                3 => slice = BufReader::new(File::open(CUSTOM_VOLUME_03).unwrap()),
-                                4 => slice = BufReader::new(File::open(CUSTOM_VOLUME_04).unwrap()),
-                                5 => slice = BufReader::new(File::open(CUSTOM_VOLUME_05).unwrap()),
-                                6 => slice = BufReader::new(File::open(CUSTOM_VOLUME_06).unwrap()),
-                                7 => slice = BufReader::new(File::open(CUSTOM_VOLUME_07).unwrap()),
-                                8 => slice = BufReader::new(File::open(CUSTOM_VOLUME_08).unwrap()),
-                                9 => slice = BufReader::new(File::open(CUSTOM_VOLUME_09).unwrap()),
-                                10 => slice = BufReader::new(File::open(CUSTOM_VOLUME_10).unwrap()),
-                                _ => return
-                            }
-                            let source = rodio::Decoder::new(slice).unwrap();
-                            sink.append(source);
-                        }
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
                     }
-                    sink.sleep_until_end();
+                    Voice::Michael => {
+                        let slice: Cursor<&[u8]>;
+                        match number {
+                            1 => slice = Cursor::new(MICHAEL_VOLUME_01),
+                            2 => slice = Cursor::new(MICHAEL_VOLUME_02),
+                            3 => slice = Cursor::new(MICHAEL_VOLUME_03),
+                            4 => slice = Cursor::new(MICHAEL_VOLUME_04),
+                            5 => slice = Cursor::new(MICHAEL_VOLUME_05),
+                            6 => slice = Cursor::new(MICHAEL_VOLUME_06),
+                            7 => slice = Cursor::new(MICHAEL_VOLUME_07),
+                            8 => slice = Cursor::new(MICHAEL_VOLUME_08),
+                            9 => slice = Cursor::new(MICHAEL_VOLUME_09),
+                            10 => slice = Cursor::new(MICHAEL_VOLUME_10),
+                            _ => return
+                        }
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
+                    Voice::Custom => {
+                        let slice: BufReader<File>;
+                        match number {
+                            1 => slice = BufReader::new(File::open(CUSTOM_VOLUME_01).unwrap()),
+                            2 => slice = BufReader::new(File::open(CUSTOM_VOLUME_02).unwrap()),
+                            3 => slice = BufReader::new(File::open(CUSTOM_VOLUME_03).unwrap()),
+                            4 => slice = BufReader::new(File::open(CUSTOM_VOLUME_04).unwrap()),
+                            5 => slice = BufReader::new(File::open(CUSTOM_VOLUME_05).unwrap()),
+                            6 => slice = BufReader::new(File::open(CUSTOM_VOLUME_06).unwrap()),
+                            7 => slice = BufReader::new(File::open(CUSTOM_VOLUME_07).unwrap()),
+                            8 => slice = BufReader::new(File::open(CUSTOM_VOLUME_08).unwrap()),
+                            9 => slice = BufReader::new(File::open(CUSTOM_VOLUME_09).unwrap()),
+                            10 => slice = BufReader::new(File::open(CUSTOM_VOLUME_10).unwrap()),
+                            _ => return
+                        }
+                        let source = rodio::Decoder::new(slice).unwrap();
+                        player.append(source);
+                    }
                 }
+                player.sleep_until_end();
             }
         }
     }
 
     pub fn play_sound(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                
-                    // this should be a beep
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION + rand::thread_rng().gen_range(0..BEEP_RAND_MAX)));
-                }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION + rand::random_range(0..BEEP_RAND_MAX)));
             }
         }
     }
 
     pub fn play_connected(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                
-                    // this should be a beep
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY-200.0);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
-                    sink.stop();
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION/3));
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY+200.0);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
-                }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY-200.0);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
+                player.stop();
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION/3));
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY+200.0);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
             }
         }
     }
 
     pub fn play_success(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                    // this should be a beep
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY+500.0);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
-                }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY+500.0);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
             }
         }
     }
 
     pub fn play_disconnected(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                
-                    // this should be a beep
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY-300.0);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
-                    sink.stop();
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION/3));
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY+500.0);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
-                    sink.stop();
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION/3));
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY-200.0);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
-                }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY-300.0);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
+                player.stop();
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION/3));
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY+500.0);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
+                player.stop();
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION/3));
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY-200.0);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION));
             }
         }
     }
 
     pub fn play_malfunction(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok((_source, source_handle)) = rodio::OutputStream::try_default() {
-                if let Ok(sink) = rodio::Sink::try_new(&source_handle) {
-                    sink.set_volume(volume);
-                
-                    // this should be a beep
-                    let source = rodio::source::SineWave::new(BEEP_FREQUENCY+400.0);
-                    sink.append(source);
-                    std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION*8));
-                }
+            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                let player = rodio::Player::connect_new(&handle.mixer());
+                player.set_volume(volume);
+                let source = rodio::source::SineWave::new(BEEP_FREQUENCY+400.0);
+                player.append(source);
+                std::thread::sleep(std::time::Duration::from_millis(BEEP_DURATION*8));
             }
         }
     }

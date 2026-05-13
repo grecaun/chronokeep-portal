@@ -546,7 +546,7 @@ impl super::Database for SQLite {
                     Ok(val) => {
                         if val > 0 {
                             let mut tmp = r.clone();
-                            tmp.set_id(tx.last_insert_rowid() as u64);
+                            tmp.set_id(tx.last_insert_rowid());
                             output.insert(0, tmp);
                         }
                     },

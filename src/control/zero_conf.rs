@@ -1,6 +1,6 @@
 use std::{net::{UdpSocket, Ipv4Addr, SocketAddr}, sync::{Arc, Mutex}, time::Duration, io::ErrorKind, str::FromStr};
 
-use rand::{thread_rng, Rng};
+use rand::RngExt;
 use socket2::{Socket, Domain, Type, Protocol};
 
 use crate::database::{Database, sqlite};
@@ -23,9 +23,9 @@ impl ZeroConf {
     pub fn new(sqlite: Arc<Mutex<sqlite::SQLite>>, control_port: &u16, keepalive: Arc<Mutex<bool>>) -> Result<ZeroConf, &'static str> {
         let chars: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
         let mut server_id = String::from("");
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..10 {
-            server_id.push(chars[rng.gen_range(0..chars.len())])
+            server_id.push(chars[rng.random_range(0..chars.len())])
         }
         println!("Zero Conf Server id is {}, port is {}", server_id, ZERO_CONF_PORT);
         let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {

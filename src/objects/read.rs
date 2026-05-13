@@ -13,12 +13,12 @@ pub const READ_IDENT_TYPE_BIB: &str = "bib";
 pub struct Read {
     // ID should be implemented database side.
     #[serde(skip)]
-    id: u64,
+    id: i64,
     // These fields should be received from the reader.
     identifier: String,
-    seconds: u64,
+    seconds: i64,
     milliseconds: u32,
-    reader_seconds: u64,
+    reader_seconds: i64,
     reader_milliseconds: u32,
     antenna: u32,
     reader: String,
@@ -34,11 +34,11 @@ pub struct Read {
 
 impl Read {
     pub fn new(
-        id: u64,
+        id: i64,
         chip: String,
-        seconds: u64,
+        seconds: i64,
         milliseconds: u32,
-        reader_seconds: u64,
+        reader_seconds: i64,
         reader_milliseconds: u32,
         antenna: u32,
         reader: String,
@@ -72,11 +72,11 @@ impl Read {
         self.uploaded == other.uploaded
     }
 
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> i64 {
         self.id
     }
 
-    pub fn set_id(&mut self, id: u64) {
+    pub fn set_id(&mut self, id: i64) {
         self.id = id;
     }
 
@@ -84,7 +84,7 @@ impl Read {
         &self.identifier
     }
 
-    pub fn seconds(&self) -> u64 {
+    pub fn seconds(&self) -> i64 {
         self.seconds
     }
 
@@ -92,7 +92,7 @@ impl Read {
         self.milliseconds
     }
 
-    pub fn reader_seconds(&self) -> u64 {
+    pub fn reader_seconds(&self) -> i64 {
         self.reader_seconds
     }
 
