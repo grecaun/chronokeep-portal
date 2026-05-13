@@ -23,7 +23,7 @@ pub enum Notification {
 pub struct Notifier {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
-    notifications: Arc<Mutex<Vec<(Notification, String)>>>,
+    notifications: Arc<Mutex<Vec<(Notification, String, i8)>>>,
     api_notifications: Arc<Mutex<Vec<(Api, APINotification)>>>,
     waiter: Arc<(Mutex<bool>, Condvar)>,
 }
@@ -44,7 +44,7 @@ impl Notifier {
 
     pub fn send_notification(&self, note: Notification, time: String) {
         if let Ok(mut notifications) = self.notifications.lock() {
-            notifications.push((note, time));
+            notifications.push((note, time, 0));
         }
         let (lock, cvar) = &*self.waiter;
         let mut waiting = lock.lock().unwrap();
@@ -95,11 +95,11 @@ impl Notifier {
             *waiting = true;
             drop(waiting);
             // Send NTFY notification.
-            let mut work_list: Vec<(Notification, String)> = vec!();
+            let mut work_list: Vec<(Notification, String, i8)> = vec!();
             if let Ok(mut notifications) = self.notifications.lock() {
                 work_list.append(&mut *notifications);
             }
-            for (note, time) in work_list.iter() {
+            for (note, time, retry) in work_list.iter() {
                 let mut name = String::from("Chronokeep Portal");
                 let mut url = String::from("");
                 let mut topic = String::from("");
@@ -178,8 +178,10 @@ impl Notifier {
                             },
                             Err(e) => {
                                 println!("Error sending notification: {e}");
-                                if let Ok(mut notifications) = self.notifications.lock() {
-                                    notifications.push((note.clone(), time.clone()));
+                                if *retry < 5 {
+                                    if let Ok(mut notifications) = self.notifications.lock() {
+                                        notifications.push((note.clone(), time.clone(), *retry + 1));
+                                    }
                                 }
                             }
                         };
