@@ -76,10 +76,6 @@ impl Read {
         self.id
     }
 
-    pub fn set_id(&mut self, id: i64) {
-        self.id = id;
-    }
-
     pub fn chip(&self) -> &str {
         &self.identifier
     }

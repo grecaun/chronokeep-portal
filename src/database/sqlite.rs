@@ -525,9 +525,9 @@ impl super::Database for SQLite {
     }
 
     // Reads
-    fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<Vec<read::Read>, DBError> {
+    fn save_reads(&mut self, reads: &Vec<read::Read>) -> Result<usize, DBError> {
         if let Ok(tx) = self.conn.transaction() {
-            let mut output: Vec<read::Read> = Vec::new();
+            let mut count = 0;
             for r in reads {
                 match tx.execute(
                     "INSERT INTO chip_reads (
@@ -543,20 +543,14 @@ impl super::Database for SQLite {
                         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9);",
                     (r.chip(), r.seconds(), r.milliseconds(), r.reader_seconds(), r.reader_milliseconds(), r.antenna(), r.reader(), r.rssi(), r.uploaded())
                 ) {
-                    Ok(val) => {
-                        if val > 0 {
-                            let mut tmp = r.clone();
-                            tmp.set_id(tx.last_insert_rowid());
-                            output.insert(0, tmp);
-                        }
-                    },
+                    Ok(val) => count = count + val,
                     Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
                 }
             }
             if let Err(e) = tx.commit() {
                 return Err(DBError::DataInsertionError(e.to_string()));
             }
-            return Ok(output);
+            return Ok(count);
         }
         return Err(DBError::ConnectionError(String::from("error starting transaction")));
     }
