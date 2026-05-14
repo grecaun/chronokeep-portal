@@ -697,7 +697,7 @@ fn test_save_reads() {
     let result = sqlite.save_reads(&vec![updated_read]);
     assert!(result.is_ok());
     assert_eq!(0, result.unwrap());
-    // test if we can add a status that we don't know about
+    // test if we can add a status that we don't know about -- there is no status field anymore
     let updated_read = read::Read::new(
         0,
         String::from(temp_read.chip()),
@@ -711,7 +711,7 @@ fn test_save_reads() {
         read::READ_UPLOADED_FALSE
     );
     let result = sqlite.save_reads(&vec![updated_read]);
-    assert!(result.is_err());
+    assert!(result.is_ok());
     drop(sqlite);
     finalize_tests(unique_path);
 }
