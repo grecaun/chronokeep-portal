@@ -1343,20 +1343,15 @@ impl CharacterDisplay {
                         info.title_bar.replace_range(17..20, "cri");
                     }
                 }
-                let up_errors = info.upload_errors;
-                if up_errors > 99 {
-                    info.title_bar.replace_range(14..16, "99");
-                } else if up_errors > 0 {
-                    info.title_bar.replace_range(14..16, format!("{:>2}", up_errors).as_str());
-                } else {
-                    let mut upload_status = "  ";
-                    if info.upload_status == Status::Running {
-                        upload_status = " +";
-                    } else if info.upload_status == Status::Stopped || info.upload_status == Status::Stopping {
-                        upload_status = " -";
-                    }
-                    info.title_bar.replace_range(14..16, upload_status);
+                let mut upload_status = " ";
+                if info.upload_errors > 9 {
+                    upload_status = "X";
+                } else if info.upload_status == Status::Running {
+                    upload_status = "+";
+                } else if info.upload_status == Status::Stopped || info.upload_status == Status::Stopping {
+                    upload_status = "-";
                 }
+                info.title_bar.replace_range(15..16, upload_status);
                 messages.push(info.title_bar.clone());
                 let _ = lcd.home();
                 match self.current_menu[0] {
