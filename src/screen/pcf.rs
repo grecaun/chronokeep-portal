@@ -396,28 +396,25 @@ impl CharacterDisplay {
                                                 control.auto_remote = !control.auto_remote;
                                                 // start uploader if true, otherwise stop it
                                                 if control.auto_remote {
-                                                    if let Some(uploader) = &self.uploader {
-                                                        if !uploader.running() {
-                                                            println!("Starting auto upload thread.");
-                                                            let _ = lcd.clear();
-                                                            let _ = lcd.home();
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:^20}", "Working . . .");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let t_uploader = uploader.clone();
-                                                            let t_joiner = thread::spawn(move|| {
-                                                                t_uploader.run();
-                                                            });
-                                                            if let Ok(mut j) = self.joiners.lock() {
-                                                                j.push(t_joiner);
-                                                            }
+                                                    if !self.uploader.running() {
+                                                        println!("Starting auto upload thread.");
+                                                        let _ = lcd.clear();
+                                                        let _ = lcd.home();
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        let _ = write!(lcd, "{:^20}", "Working . . .");
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        let t_uploader = self.uploader.clone();
+                                                        let t_joiner = thread::spawn(move|| {
+                                                            t_uploader.run();
+                                                        });
+                                                        if let Ok(mut j) = self.joiners.lock() {
+                                                            j.push(t_joiner);
                                                         }
                                                     }
                                                 } else {
-                                                    if let Some(uploader) = &self.uploader {
-                                                        uploader.stop();
-                                                    }
+                                                    println!("Stopping auto upload thread.");
+                                                    self.uploader.stop();
                                                 }
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
@@ -663,24 +660,22 @@ impl CharacterDisplay {
                                     } else if self.current_menu[2] == READING_MENU_UPLOAD {
                                         if let Ok(mut control) = self.control.lock() {
                                             control.auto_remote = !control.auto_remote;
+                                            println!("Setting auto upload to {}", control.auto_remote);
                                             // start uploader if true, otherwise stop it
                                             if control.auto_remote {
-                                                if let Some(uploader) = &self.uploader {
-                                                    if !uploader.running() {
-                                                        println!("Starting auto upload thread.");
-                                                        let t_uploader = uploader.clone();
-                                                        let t_joiner = thread::spawn(move|| {
-                                                            t_uploader.run();
-                                                        });
-                                                        if let Ok(mut j) = self.joiners.lock() {
-                                                            j.push(t_joiner);
-                                                        }
+                                                if !self.uploader.running() {
+                                                    println!("Starting auto upload thread.");
+                                                    let t_uploader = self.uploader.clone();
+                                                    let t_joiner = thread::spawn(move|| {
+                                                        t_uploader.run();
+                                                    });
+                                                    if let Ok(mut j) = self.joiners.lock() {
+                                                        j.push(t_joiner);
                                                     }
                                                 }
                                             } else {
-                                                if let Some(uploader) = &self.uploader {
-                                                    uploader.stop();
-                                                }
+                                                println!("Stopping auto upload thread.");
+                                                self.uploader.stop();
                                             }
                                             if let Ok(mut sq) = self.sqlite.lock() {
                                                 if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
@@ -773,28 +768,25 @@ impl CharacterDisplay {
                                                 control.auto_remote = !control.auto_remote;
                                                 // start uploader if true, otherwise stop it
                                                 if control.auto_remote {
-                                                    if let Some(uploader) = &self.uploader {
-                                                        if !uploader.running() {
-                                                            let _ = lcd.clear();
-                                                            let _ = lcd.home();
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            let _ = write!(lcd, "{:^20}", "Working . . .");
-                                                            let _ = write!(lcd, "{:<20}", "");
-                                                            println!("Starting auto upload thread.");
-                                                            let t_uploader = uploader.clone();
-                                                            let t_joiner = thread::spawn(move|| {
-                                                                t_uploader.run();
-                                                            });
-                                                            if let Ok(mut j) = self.joiners.lock() {
-                                                                j.push(t_joiner);
-                                                            }
+                                                    if !self.uploader.running() {
+                                                        let _ = lcd.clear();
+                                                        let _ = lcd.home();
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        let _ = write!(lcd, "{:^20}", "Working . . .");
+                                                        let _ = write!(lcd, "{:<20}", "");
+                                                        println!("Starting auto upload thread.");
+                                                        let t_uploader = self.uploader.clone();
+                                                        let t_joiner = thread::spawn(move|| {
+                                                            t_uploader.run();
+                                                        });
+                                                        if let Ok(mut j) = self.joiners.lock() {
+                                                            j.push(t_joiner);
                                                         }
                                                     }
                                                 } else {
-                                                    if let Some(uploader) = &self.uploader {
-                                                        uploader.stop();
-                                                    }
+                                                    println!("Stopping auto upload thread.");
+                                                    self.uploader.stop();
                                                 }
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_AUTO_REMOTE.to_string(), control.auto_remote.to_string())) {
@@ -1344,12 +1336,14 @@ impl CharacterDisplay {
                     }
                 }
                 let mut upload_status = " ";
-                if info.upload_errors > 9 {
-                    upload_status = "X";
-                } else if info.upload_status == Status::Running {
-                    upload_status = "+";
-                } else if info.upload_status == Status::Stopped || info.upload_status == Status::Stopping {
-                    upload_status = "-";
+                if let Ok(up_info) = self.upload_info.lock() {
+                    if up_info.errors > 9 {
+                        upload_status = "X";
+                    } else if up_info.status == Status::Running {
+                        upload_status = "+";
+                    } else if up_info.status == Status::Stopped || up_info.status == Status::Stopping {
+                        upload_status = "-";
+                    }
                 }
                 info.title_bar.replace_range(15..16, upload_status);
                 messages.push(info.title_bar.clone());

@@ -3,12 +3,14 @@ use std::{env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpList
 use crate::buttons::Buttons;
 #[cfg(target_os = "linux")]
 use crate::battery;
+#[cfg(target_os = "linux")]
+use crate::{screen::CharacterDisplay};
 
 use chrono::{DateTime, Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{socket::requests::AutoUploadQuery, sound::{self, SoundType}, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME}, database::{sqlite, Database}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, auto_connect, reconnector::Reconnector, zebra, MAX_ANTENNAS}, remote::{self, remote_util, uploader::{self, Uploader}}, screen::CharacterDisplay, sound_board::Voice};
+use crate::{control::{SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound::{self, SoundType}}, database::{Database, sqlite}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, MAX_ANTENNAS, auto_connect, reconnector::Reconnector, zebra}, remote::{self, remote_util, uploader::{self, Uploader, info::UploadInfo}}, sound_board::Voice};
 
 use self::notifications::APINotification;
 
@@ -197,11 +199,34 @@ pub fn control_loop(
         auto_connector.run(quick);
     });
     
+    // Create an object for tracking upload status/errors.
+    let upload_info = Arc::new(Mutex::new(UploadInfo::new(uploader::Status::Unknown, 0)));
+
+    // create our reads uploader struct for auto uploading if the user wants to
+    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone(), control.clone(), upload_info.clone()));
+    let mut auto_upload = false;
+    if let Ok(control) = control.lock() {
+        auto_upload = control.auto_remote;
+    };
+    if auto_upload == true {
+        println!("Starting auto upload thread.");
+        let t_uploader = uploader.clone();
+        let t_joiner = thread::spawn(move|| {
+            t_uploader.run();
+        });
+        if let Ok(mut j) = joiners.lock() {
+            j.push(t_joiner);
+        }
+    } else {
+        if let Ok(mut info) = upload_info.lock() {
+            info.update_status(uploader::Status::Stopped, 0);
+        }
+    }
+
     // Check if we can start a screen
-    let screen: Arc<Mutex<Option<CharacterDisplay>>> = Arc::new(Mutex::new(None));
-    // Check for screen information
     #[cfg(target_os = "linux")]
     {
+        let screen: Arc<Mutex<Option<CharacterDisplay>>> = Arc::new(Mutex::new(None));
         println!("Checking if there's a screen to display information on.");
         if let Ok(screen_bus) = std::env::var("PORTAL_SCREEN_BUS") {
             let bus: u8 = screen_bus.parse().unwrap_or(255);
@@ -221,6 +246,8 @@ pub fn control_loop(
                         joiners.clone(),
                         control_port,
                         notifier.clone(),
+                        uploader.clone(),
+                        upload_info.clone(),
                     );
                     *screen = Some(new_screen.clone());
                     thread::spawn(move|| {
@@ -240,35 +267,6 @@ pub fn control_loop(
         }
     }
 
-    // create our reads uploader struct for auto uploading if the user wants to
-    let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone(), control.clone(), screen.clone()));
-    let mut auto_upload = false;
-    if let Ok(control) = control.lock() {
-        auto_upload = control.auto_remote;
-    };
-    if auto_upload == true {
-        println!("Starting auto upload thread.");
-        let t_uploader = uploader.clone();
-        let t_joiner = thread::spawn(move|| {
-            t_uploader.run();
-        });
-        if let Ok(mut j) = joiners.lock() {
-            j.push(t_joiner);
-        }
-    } else {
-        if let Ok(mut screen) = screen.lock() {
-            if let Some(screen) = &mut *screen {
-                screen.update_upload_status(uploader::Status::Stopped, 0);
-            }
-        }
-    }
-    
-    if let Ok(mut screen) = screen.lock() {
-        if let Some(scr) = &mut *screen {
-            scr.set_uploader(uploader.clone());
-        }
-    }
-
     // Start our code to check the battery level.
     #[cfg(target_os = "linux")]
     let mut bat_check = battery::Checker::new(keepalive.clone(), control.clone(), notifier.clone(), control_sockets.clone(), sqlite.clone());
@@ -282,7 +280,7 @@ pub fn control_loop(
         j.push(b_joiner);
     }
 
-    // Set screen on all the readers.
+    // Set control sockets & readers on all the readers.
     if let Ok(mut u_readers) = readers.lock() {
         for reader in u_readers.iter_mut() {
             reader.set_control_sockets(control_sockets.clone());

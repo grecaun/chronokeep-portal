@@ -1,5 +1,5 @@
 use std::{net::TcpStream, sync::{Arc, Mutex}, thread::JoinHandle};
-use crate::{control::{Control, socket::MAX_CONNECTED, sound::SoundNotifier}, database::sqlite, notifier, processor, reader::{self, auto_connect}, remote::uploader::{self, Status, Uploader}};
+use crate::{control::{Control, socket::MAX_CONNECTED, sound::SoundNotifier}, database::sqlite, notifier, processor, reader::{self, auto_connect}, remote::uploader::{Uploader, info::UploadInfo}};
 #[cfg(target_os = "linux")]
 use crate::{types};
 
@@ -65,12 +65,13 @@ pub struct CharacterDisplay {
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
-    uploader: Option<Arc<Uploader>>,
+    uploader: Arc<Uploader>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     info: Arc<Mutex<DisplayInfo>>,
+    upload_info: Arc<Mutex<UploadInfo>>,
+    notifier: notifier::Notifier,
     control_port: u16,
     current_menu: [u8; 3],
-    notifier: notifier::Notifier,
     year: u16,
     month: u8,
     day: u8,
@@ -86,8 +87,6 @@ pub struct DisplayInfo {
     reader_info: Vec<String>,
     main_menu: Vec<String>,
     settings_menu: Vec<String>,
-    upload_status: Status,
-    upload_errors: usize,
 }
 
 pub enum ButtonPress {
@@ -112,6 +111,8 @@ impl CharacterDisplay {
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
         control_port: u16,
         notifier: notifier::Notifier,
+        upload: Arc<Uploader>,
+        up_info: Arc<Mutex<UploadInfo>>,
     ) -> Self {
         Self {
             keepalive,
@@ -133,14 +134,12 @@ impl CharacterDisplay {
                     "   Shutdown         ".to_string(),
                 ],
                 settings_menu: Vec::new(),
-                upload_status: Status::Unknown,
-                upload_errors: 0,
             })),
             current_menu: [0, 0, 0],
             ac_state,
             read_saver,
             sound,
-            uploader: None,
+            uploader: upload,
             joiners,
             control_port,
             notifier,
@@ -151,17 +150,7 @@ impl CharacterDisplay {
             minute: 0,
             seconds: 0,
             volume: 10,
-        }
-    }
-
-    pub fn set_uploader(&mut self, upload: Arc<Uploader>) {
-        self.uploader = Some(upload);
-    }
-
-    pub fn update_upload_status(&mut self, status: uploader::Status, err_count: usize) {
-        if let Ok(mut info) = self.info.lock() {
-            info.upload_errors = err_count;
-            info.upload_status = status;
+            upload_info: up_info,
         }
     }
 

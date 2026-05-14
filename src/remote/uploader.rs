@@ -3,8 +3,10 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
 use reqwest::StatusCode;
 use serde::Serialize;
 
-use crate::{control::{socket::{write_uploader_status, MAX_CONNECTED}, Control}, database::{sqlite, Database}, defaults, network::api, objects::read, screen::CharacterDisplay};
+use crate::{control::{Control, socket::{MAX_CONNECTED, write_uploader_status}}, database::{Database, sqlite}, defaults, network::api, objects::read, remote::uploader::info::UploadInfo};
 use crate::remote::remote_util;
+
+pub mod info;
 
 #[derive(Clone, PartialEq, Serialize, Debug)]
 pub enum Status {
@@ -21,7 +23,7 @@ pub struct Uploader {
     status: Arc<Mutex<Status>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     control: Arc<Mutex<Control>>,
-    screen: Arc<Mutex<Option<CharacterDisplay>>>,
+    info: Arc<Mutex<UploadInfo>>,
 }
 
 impl Uploader {
@@ -30,7 +32,7 @@ impl Uploader {
         sqlite: Arc<Mutex<sqlite::SQLite>>,
         control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
         control: Arc<Mutex<Control>>,
-        screen: Arc<Mutex<Option<CharacterDisplay>>>,
+        info: Arc<Mutex<UploadInfo>>,
     ) -> Uploader {
         Uploader {
             server_keepalive: keepalive,
@@ -39,7 +41,7 @@ impl Uploader {
             status: Arc::new(Mutex::new(Status::Stopped)),
             control_sockets,
             control,
-            screen,
+            info,
         }
     }
 
@@ -232,10 +234,8 @@ impl Uploader {
                 }
             }
         }
-        if let Ok(mut screen_opt) = self.screen.lock() {
-            if let Some(screen) = &mut *screen_opt {
-                screen.update_upload_status(stat, err_count);
-            }
+        if let Ok(mut inf) = self.info.lock() {
+            inf.update_status(stat, err_count);
         }
     }
 }
