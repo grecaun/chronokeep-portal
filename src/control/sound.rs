@@ -43,7 +43,7 @@ impl SoundNotifier {
             if let Ok(mut t_list) = self.tag_list.lock() {
                 for tag in tags {
                     // Play a sound if we haven't seen the tag ever, or if we've not seen it in the past 60 seconds.
-                    if !t_list.contains_key(&tag.tag()) || (t_list.get(&tag.tag()).unwrap() + 60) > cur_time {
+                    if !t_list.contains_key(&tag.tag()) || (t_list.get(&tag.tag()).unwrap() + 60) < cur_time {
                         if let Ok(mut val) = self.beep.lock() {
                             *val = true;
                         }
