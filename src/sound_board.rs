@@ -125,7 +125,8 @@ impl SoundBoard {
 
     pub fn play_started(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 match voice.deref() {
@@ -152,7 +153,8 @@ impl SoundBoard {
 
     pub fn play_startup_finished(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 match voice.deref() {
@@ -179,7 +181,8 @@ impl SoundBoard {
 
     pub fn play_shutdown(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 match voice.deref() {
@@ -206,7 +209,8 @@ impl SoundBoard {
 
     pub fn play_introduction(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 match voice.deref() {
@@ -233,7 +237,8 @@ impl SoundBoard {
 
     pub fn play_custom_not_available(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 match voice.deref() {
@@ -255,7 +260,8 @@ impl SoundBoard {
 
     pub fn play_startup_in_progress(&self, volume: f32) {
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 match voice.deref() {
@@ -283,7 +289,8 @@ impl SoundBoard {
     pub fn play_volume(&self, volume: f32) {
         let number: i32 = (volume * 10.0).trunc() as i32;
         if let Ok(voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 match voice.deref() {
@@ -349,7 +356,8 @@ impl SoundBoard {
 
     pub fn play_sound(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 let source = rodio::source::SineWave::new(BEEP_FREQUENCY);
@@ -361,7 +369,8 @@ impl SoundBoard {
 
     pub fn play_connected(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 let source = rodio::source::SineWave::new(BEEP_FREQUENCY-200.0);
@@ -378,7 +387,8 @@ impl SoundBoard {
 
     pub fn play_success(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 let source = rodio::source::SineWave::new(BEEP_FREQUENCY+500.0);
@@ -390,7 +400,8 @@ impl SoundBoard {
 
     pub fn play_disconnected(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 let source = rodio::source::SineWave::new(BEEP_FREQUENCY-300.0);
@@ -412,7 +423,8 @@ impl SoundBoard {
 
     pub fn play_malfunction(&self, volume: f32) {
         if let Ok(_voice) = self.current_voice.lock() {
-            if let Ok(handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+            if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
+                handle.log_on_drop(false);
                 let player = rodio::Player::connect_new(&handle.mixer());
                 player.set_volume(volume);
                 let source = rodio::source::SineWave::new(BEEP_FREQUENCY+400.0);
