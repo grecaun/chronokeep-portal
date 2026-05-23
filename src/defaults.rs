@@ -9,3 +9,4 @@ pub const DEFAULT_AUTO_REMOTE: bool = false;
 pub const DEFAULT_UPLOAD_INTERVAL: u64 = 5;
 pub const DEFAULT_ENABLE_NTFY: bool = false;
 pub const DEFAULT_SCREEN_TYPE: &str = types::TYPE_SCREEN_ADAFRUIT;
+pub const DEFAULT_BEEP_IGNORE: u8 = 60;

@@ -18,6 +18,7 @@ pub const SETTING_NTFY_PASS: &str = "SETTING_NTFY_PASS";
 pub const SETTING_NTFY_TOPIC: &str = "SETTING_NTFY_TOPIC";
 pub const SETTING_ENABLE_NTFY: &str = "SETTING_ENABLE_NTFY";
 pub const SETTING_SCREEN_TYPE: &str = "SETTING_SCREEN_TYPE";
+pub const SETTING_BEEP_IGNORE: &str = "SETTING_BEEP_IGNORE";
 
 pub struct Control {
     pub name: String,
@@ -35,6 +36,7 @@ pub struct Control {
     pub enable_ntfy: bool,
     pub battery: u8,
     pub screen_type: String,
+    pub beep_ignore: u8,
 }
 
 impl Control {
@@ -81,6 +83,9 @@ impl Control {
         if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
             return self.sound_board.change_voice(new_control.sound_board.get_voice())
         }
+        if self.beep_ignore != new_control.beep_ignore {
+            self.screen_type = new_control.beep_ignore;
+        }
         Ok(())
     }
 
@@ -101,6 +106,7 @@ impl Control {
             enable_ntfy: defaults::DEFAULT_ENABLE_NTFY,
             battery: 0,
             screen_type: String::from(defaults::DEFAULT_SCREEN_TYPE),
+            beep_ignore: defaults::DEFAULT_BEEP_IGNORE,
         };
         match sqlite.get_setting(SETTING_PORTAL_NAME) {
             Ok(s) => {
@@ -388,6 +394,27 @@ impl Control {
                     Ok(s) => {
                         output.screen_type = String::from(s.value());
                         println!("Chip type successfully set to '{}'.", s.value());
+                    },
+                    Err(e) => return Err(e)
+                }
+            }
+            Err(e) => {
+                return Err(e)
+            }
+        }
+        match sqlite.get_setting(SETTING_BEEP_IGNORE) {
+            Ok(s) => {
+                let ign: u8 = s.value().parse().unwrap();
+                output.beep_ignore = ign;
+            },
+            Err(DBError::NotFound) => {
+                match sqlite.set_setting(&setting::Setting::new(
+                    String::from(SETTING_BEEP_IGNORE),
+                    format!("{}", defaults::DEFAULT_BEEP_IGNORE),
+                )) {
+                    Ok(s) => {
+                        output.screen_type = String::from(s.value());
+                        println!("Beep ignore successfully set to '{}'.", s.value());
                     },
                     Err(e) => return Err(e)
                 }

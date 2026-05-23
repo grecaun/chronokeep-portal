@@ -361,6 +361,22 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
+                                            SETTINGS_BEEP_IGNORE => {
+                                                // decrease ignore period
+                                                if self.beep_ignore > 120 {
+                                                    self.beep_ignore = 120;
+                                                } else if self.beep_ignore > 4 {
+                                                    self.beep_ignore -= 5;
+                                                } else {
+                                                    self.beep_ignore = 0;
+                                                }
+                                                if let Ok(mut sq) = self.sqlite.lock() {
+                                                    control.beep_ignore = self.beep_ignore;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_BEEP_IGNORE.to_string(), control.beep_ignore.to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
                                             SETTINGS_VOICE => {  // Voice
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     match control.sound_board.get_voice() {
@@ -729,6 +745,22 @@ impl CharacterDisplay {
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.volume = (self.volume as f32) / 10.0;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_VOLUME.to_string(), control.volume.to_string())) {
+                                                        println!("Error saving setting: {e}");
+                                                    }
+                                                }
+                                            }
+                                            SETTINGS_BEEP_IGNORE => {
+                                                // increase ignore period
+                                                if self.beep_ignore < 0 {
+                                                    self.beep_ignore = 0;
+                                                } else if self.beep_ignore < 116 {
+                                                    self.beep_ignore += 5;
+                                                } else {
+                                                    self.beep_ignore = 120;
+                                                }
+                                                if let Ok(mut sq) = self.sqlite.lock() {
+                                                    control.beep_ignore = self.beep_ignore;
+                                                    if let Err(e) = sq.set_setting(&Setting::new(SETTING_BEEP_IGNORE.to_string(), control.beep_ignore.to_string())) {
                                                         println!("Error saving setting: {e}");
                                                     }
                                                 }

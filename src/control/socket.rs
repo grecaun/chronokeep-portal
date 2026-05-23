@@ -2028,6 +2028,7 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
         super::SETTING_NTFY_TOPIC,
         super::SETTING_ENABLE_NTFY,
         super::SETTING_SCREEN_TYPE,
+        super::SETTING_BEEP_IGNORE,
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

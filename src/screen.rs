@@ -32,14 +32,15 @@ pub const SETTINGS_READ_WINDOW: u8 = 0;
 pub const SETTINGS_CHIP_TYPE: u8 = 1;
 pub const SETTINGS_PLAY_SOUND: u8 = 2;
 pub const SETTINGS_VOLUME: u8 = 3;
-pub const SETTINGS_VOICE: u8 = 4;
-pub const SETTINGS_AUTO_UPLOAD: u8 = 5;
-pub const SETTINGS_MANUAL_UPLOAD: u8 = 6;
-pub const SETTINGS_UPLOAD_INTERVAL: u8 = 7;
-pub const SETTINGS_ENABLE_NTFY: u8 = 8;
-pub const SETTINGS_DELETE_CHIP_READS: u8 = 9;
-pub const SETTINGS_SET_TIME_WEB: u8 = 10;
-pub const SETTINGS_SET_TIME_MANUAL: u8 = 11;
+pub const SETTINGS_BEEP_IGNORE: u8 = 4;
+pub const SETTINGS_VOICE: u8 = 5;
+pub const SETTINGS_AUTO_UPLOAD: u8 = 6;
+pub const SETTINGS_MANUAL_UPLOAD: u8 = 7;
+pub const SETTINGS_UPLOAD_INTERVAL: u8 = 8;
+pub const SETTINGS_ENABLE_NTFY: u8 = 9;
+pub const SETTINGS_DELETE_CHIP_READS: u8 = 10;
+pub const SETTINGS_SET_TIME_WEB: u8 = 11;
+pub const SETTINGS_SET_TIME_MANUAL: u8 = 12;
 
 pub const TIME_MENU_YEAR: u8 = 0;
 pub const TIME_MENU_MONTH: u8 = 1;
@@ -79,6 +80,7 @@ pub struct CharacterDisplay {
     minute: u8,
     seconds: u8,
     volume: u8,
+    beep_ignore: u8,
 }
 
 #[allow(unused)]
@@ -150,6 +152,7 @@ impl CharacterDisplay {
             minute: 0,
             seconds: 0,
             volume: 10,
+            beep_ignore: 60,
             upload_info: up_info,
         }
     }
@@ -193,10 +196,12 @@ impl CharacterDisplay {
                     enable_ntfy = "yes";
                 }
                 self.volume = (control.volume * 10.0) as u8;
+                self.beep_ignore = control.beep_ignore;
                 info.settings_menu.push(format!("   Read Window {:>4} ", control.read_window));
                 info.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
                 info.settings_menu.push(format!("   Play Sounds {:>4} ", play_sound));
                 info.settings_menu.push(format!("   Volume      {:>4} ", self.volume));
+                ingo.settings_menu.push(format!("   Beep Ignore {:>4} ", control.beep_ignore))
                 info.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
                 info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
                 info.settings_menu.push(format!("   Manual Upload    "));
