@@ -622,7 +622,7 @@ pub fn connect(
                             if data.tags.len() > 0 {
                                 count += data.tags.len();
                                 let mut ignore: u8 = defaults::DEFAULT_BEEP_IGNORE;
-                                if let Ok(control) = self.control.lock() {
+                                if let Ok(control) = t_control.lock() {
                                     ignore = control.beep_ignore;
                                 }
                                 let mut tags = data.tags;

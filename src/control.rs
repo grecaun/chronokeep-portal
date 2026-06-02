@@ -80,11 +80,11 @@ impl Control {
         if self.screen_type != new_control.screen_type {
             self.screen_type = new_control.screen_type;
         }
+        if self.beep_ignore != new_control.beep_ignore {
+            self.beep_ignore = new_control.beep_ignore;
+        }
         if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
             return self.sound_board.change_voice(new_control.sound_board.get_voice())
-        }
-        if self.beep_ignore != new_control.beep_ignore {
-            self.screen_type = new_control.beep_ignore;
         }
         Ok(())
     }

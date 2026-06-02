@@ -201,7 +201,7 @@ impl CharacterDisplay {
                 info.settings_menu.push(format!("   Chip Type   {:>4} ", control.chip_type));
                 info.settings_menu.push(format!("   Play Sounds {:>4} ", play_sound));
                 info.settings_menu.push(format!("   Volume      {:>4} ", self.volume));
-                ingo.settings_menu.push(format!("   Beep Ignore {:>4} ", control.beep_ignore))
+                ingo.settings_menu.push(format!("   Beep Ignore {:>4} ", control.beep_ignore));
                 info.settings_menu.push(format!("   Voice    {:>7} ", control.sound_board.get_voice().as_str()));
                 info.settings_menu.push(format!("   Auto Upload {:>4} ", auto_upload));
                 info.settings_menu.push(format!("   Manual Upload    "));
