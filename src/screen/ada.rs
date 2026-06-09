@@ -15,9 +15,9 @@ use rppal::{hal, i2c::I2c};
 #[cfg(target_os = "linux")]
 use crate::{reader::{self, auto_connect}, remote::uploader::Status};
 #[cfg(target_os = "linux")]
-use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME, socket::{self, CONNECTION_CHANGE_PAUSE, UPDATE_SCRIPT_ENV}, sound::SoundType}, database::Database, network::api, objects::{read, setting::Setting}, reader::reconnector::Reconnector, remote::remote_util, sound_board::Voice, types};
+use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME, SETTING_BEEP_IGNORE, socket::{self, CONNECTION_CHANGE_PAUSE, UPDATE_SCRIPT_ENV}, sound::SoundType}, database::Database, network::api, objects::{read, setting::Setting}, reader::reconnector::Reconnector, remote::remote_util, sound_board::Voice, types};
 #[cfg(target_os = "linux")]
-use crate::screen::{ButtonPress, ABOUT_MENU, DELETE_READS_MENU, DELETE_READS_MENU_TWO, MAIN_ABOUT, MAIN_MENU, MAIN_RESTART, MAIN_SETTINGS, MAIN_SHUTDOWN, MAIN_START_READING, MAIN_UPDATE, MANUAL_TIME_MENU, READING_MENU, RESTART_MENU, SCREEN_OFF, SETTINGS_AUTO_UPLOAD, SETTINGS_CHIP_TYPE, SETTINGS_DELETE_CHIP_READS, SETTINGS_ENABLE_NTFY, SETTINGS_MANUAL_UPLOAD, SETTINGS_MENU, SETTINGS_PLAY_SOUND, SETTINGS_READ_WINDOW, SETTINGS_SET_TIME_MANUAL, SETTINGS_SET_TIME_WEB, SETTINGS_UPLOAD_INTERVAL, SETTINGS_VOICE, SETTINGS_VOLUME, SHUTDOWN_MENU, STARTUP_MENU, TIME_MENU_DAY, TIME_MENU_HOUR, TIME_MENU_MINUTE, TIME_MENU_MONTH, TIME_MENU_SECOND, TIME_MENU_YEAR, UPDATE_MENU, READING_MENU_STOP, READING_MENU_NIL, READING_MENU_UPLOAD};
+use crate::screen::{ButtonPress, ABOUT_MENU, DELETE_READS_MENU, DELETE_READS_MENU_TWO, MAIN_ABOUT, MAIN_MENU, MAIN_RESTART, MAIN_SETTINGS, MAIN_SHUTDOWN, MAIN_START_READING, MAIN_UPDATE, MANUAL_TIME_MENU, READING_MENU, RESTART_MENU, SCREEN_OFF, SETTINGS_MENU_AUTO_UPLOAD, SETTINGS_MENU_CHIP_TYPE, SETTINGS_MENU_DELETE_CHIP_READS, SETTINGS_MENU_ENABLE_NTFY, SETTINGS_MENU_MANUAL_UPLOAD, SETTINGS_MENU, SETTINGS_MENU_PLAY_SOUND, SETTINGS_MENU_READ_WINDOW, SETTINGS_MENU_SET_TIME_MANUAL, SETTINGS_MENU_SET_TIME_WEB, SETTINGS_MENU_UPLOAD_INTERVAL, SETTINGS_MENU_VOICE, SETTINGS_MENU_VOLUME, SETTINGS_MENU_BEEP_IGNORE, SHUTDOWN_MENU, STARTUP_MENU, TIME_MENU_DAY, TIME_MENU_HOUR, TIME_MENU_MINUTE, TIME_MENU_MONTH, TIME_MENU_SECOND, TIME_MENU_YEAR, UPDATE_MENU, READING_MENU_STOP, READING_MENU_NIL, READING_MENU_UPLOAD};
 
 use super::CharacterDisplay;
 
@@ -103,10 +103,10 @@ impl CharacterDisplay {
                                     }
                                 }
                                 SETTINGS_MENU => {
-                                    if self.current_menu[1] > SETTINGS_READ_WINDOW {
+                                    if self.current_menu[1] > SETTINGS_MENU_READ_WINDOW {
                                         self.current_menu[1] -= 1;
                                     } else {
-                                        self.current_menu[1] = SETTINGS_SET_TIME_MANUAL;
+                                        self.current_menu[1] = SETTINGS_MENU_SET_TIME_MANUAL;
                                     }
                                 }
                                 ABOUT_MENU | STARTUP_MENU => {
@@ -222,10 +222,10 @@ impl CharacterDisplay {
                                     }
                                 }
                                 SETTINGS_MENU => { // settings menu, max ix SETTINGS_SET_TIME_MANUAL
-                                    if self.current_menu[1] < SETTINGS_SET_TIME_MANUAL {
+                                    if self.current_menu[1] < SETTINGS_MENU_SET_TIME_MANUAL {
                                         self.current_menu[1] += 1;
                                     } else { // wrap around to 0
-                                        self.current_menu[1] = SETTINGS_READ_WINDOW;
+                                        self.current_menu[1] = SETTINGS_MENU_READ_WINDOW;
                                     }
                                 }
                                 ABOUT_MENU | STARTUP_MENU => { // 3 == about
@@ -315,7 +315,7 @@ impl CharacterDisplay {
                                 SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
                                         match self.current_menu[1] {
-                                            SETTINGS_READ_WINDOW => {  // Read Window
+                                            SETTINGS_MENU_READ_WINDOW => {  // Read Window
                                                 if control.read_window > 5 {
                                                     if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.read_window -= 1;
@@ -325,7 +325,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_CHIP_TYPE => {  // Chip Type
+                                            SETTINGS_MENU_CHIP_TYPE => {  // Chip Type
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     if control.chip_type == types::TYPE_CHIP_HEX {
                                                         control.chip_type = types::TYPE_CHIP_DEC.to_string();
@@ -337,7 +337,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_PLAY_SOUND => {  // Play Sound
+                                            SETTINGS_MENU_PLAY_SOUND => {  // Play Sound
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.play_sound = !control.play_sound;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
@@ -345,7 +345,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_VOLUME => {  // Volume
+                                            SETTINGS_MENU_VOLUME => {  // Volume
                                                 // lower volume
                                                 if self.volume > 10 {
                                                     self.volume = 10;
@@ -361,7 +361,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_BEEP_IGNORE => {
+                                            SETTINGS_MENU_BEEP_IGNORE => {
                                                 // decrease ignore period
                                                 if self.beep_ignore > 120 {
                                                     self.beep_ignore = 120;
@@ -377,7 +377,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_VOICE => {  // Voice
+                                            SETTINGS_MENU_VOICE => {  // Voice
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     match control.sound_board.get_voice() {
                                                         Voice::Emily => {
@@ -408,7 +408,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_AUTO_UPLOAD => {  // Auto Upload
+                                            SETTINGS_MENU_AUTO_UPLOAD => {  // Auto Upload
                                                 control.auto_remote = !control.auto_remote;
                                                 // start uploader if true, otherwise stop it
                                                 if control.auto_remote {
@@ -438,7 +438,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_MANUAL_UPLOAD => {
+                                            SETTINGS_MENU_MANUAL_UPLOAD => {
                                                 let _ = lcd.clear();
                                                 let _ = lcd.home();
                                                 let _ = write!(lcd, "{:<20}", "");
@@ -489,7 +489,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_UPLOAD_INTERVAL => {  // Upload Interval
+                                            SETTINGS_MENU_UPLOAD_INTERVAL => {  // Upload Interval
                                                 if control.upload_interval > 0 {
                                                     if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.upload_interval -= 1;
@@ -499,7 +499,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_ENABLE_NTFY => {  // Enable NTFY
+                                            SETTINGS_MENU_ENABLE_NTFY => {  // Enable NTFY
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.enable_ntfy = !control.enable_ntfy;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_ENABLE_NTFY.to_string(), control.enable_ntfy.to_string())) {
@@ -609,7 +609,7 @@ impl CharacterDisplay {
                                         },
                                         MAIN_SETTINGS => { // Settings
                                             self.current_menu[0] = SETTINGS_MENU;
-                                            self.current_menu[1] = SETTINGS_READ_WINDOW;
+                                            self.current_menu[1] = SETTINGS_MENU_READ_WINDOW;
                                             self.update_settings();
                                             self.update_menu();
                                         }
@@ -705,7 +705,7 @@ impl CharacterDisplay {
                                 SETTINGS_MENU => {
                                     if let Ok(mut control) = self.control.lock() {
                                         match self.current_menu[1] {
-                                            SETTINGS_READ_WINDOW => {  // Read Window
+                                            SETTINGS_MENU_READ_WINDOW => {  // Read Window
                                                 if control.read_window < 50 {
                                                     if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.read_window += 1;
@@ -715,7 +715,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_CHIP_TYPE => {  // Chip Type
+                                            SETTINGS_MENU_CHIP_TYPE => {  // Chip Type
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     if control.chip_type == types::TYPE_CHIP_HEX {
                                                         control.chip_type = types::TYPE_CHIP_DEC.to_string();
@@ -727,7 +727,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_PLAY_SOUND => {  // Play Sound
+                                            SETTINGS_MENU_PLAY_SOUND => {  // Play Sound
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.play_sound = !control.play_sound;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_PLAY_SOUND.to_string(), control.play_sound.to_string())) {
@@ -735,7 +735,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_VOLUME => {  // Volume
+                                            SETTINGS_MENU_VOLUME => {  // Volume
                                                 // raise volume
                                                 if self.volume < 10 {
                                                     self.volume += 1;
@@ -749,11 +749,9 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_BEEP_IGNORE => {
+                                            SETTINGS_MENU_BEEP_IGNORE => {
                                                 // increase ignore period
-                                                if self.beep_ignore < 0 {
-                                                    self.beep_ignore = 0;
-                                                } else if self.beep_ignore < 116 {
+                                                if self.beep_ignore < 116 {
                                                     self.beep_ignore += 5;
                                                 } else {
                                                     self.beep_ignore = 120;
@@ -765,7 +763,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_VOICE => {  // Voice
+                                            SETTINGS_MENU_VOICE => {  // Voice
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     match control.sound_board.get_voice() {
                                                         Voice::Emily => {
@@ -796,7 +794,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_AUTO_UPLOAD => {  // Auto Upload
+                                            SETTINGS_MENU_AUTO_UPLOAD => {  // Auto Upload
                                                 control.auto_remote = !control.auto_remote;
                                                 // start uploader if true, otherwise stop it
                                                 if control.auto_remote {
@@ -826,7 +824,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_MANUAL_UPLOAD => {
+                                            SETTINGS_MENU_MANUAL_UPLOAD => {
                                                 let _ = lcd.clear();
                                                 let _ = lcd.home();
                                                 let _ = write!(lcd, "{:<20}", "");
@@ -877,7 +875,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_UPLOAD_INTERVAL => {  // Upload Interval
+                                            SETTINGS_MENU_UPLOAD_INTERVAL => {  // Upload Interval
                                                 if control.upload_interval < 180 {
                                                     if let Ok(mut sq) = self.sqlite.lock() {
                                                         control.upload_interval += 1;
@@ -887,7 +885,7 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                             }
-                                            SETTINGS_ENABLE_NTFY => {  // Enable NTFY
+                                            SETTINGS_MENU_ENABLE_NTFY => {  // Enable NTFY
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.enable_ntfy = !control.enable_ntfy;
                                                     if let Err(e) = sq.set_setting(&Setting::new(SETTING_ENABLE_NTFY.to_string(), control.enable_ntfy.to_string())) {
@@ -1027,7 +1025,7 @@ impl CharacterDisplay {
                                 },
                                 SETTINGS_MENU => { // settings -> saves settings and goes back (only if not on set time)
                                     match self.current_menu[1] {
-                                        SETTINGS_SET_TIME_WEB => {
+                                        SETTINGS_MENU_SET_TIME_WEB => {
                                             let _ = lcd.clear();
                                             let _ = lcd.home();
                                             let _ = write!(lcd, "{:<20}", "");
@@ -1076,15 +1074,15 @@ impl CharacterDisplay {
                                                 }
                                             }
                                         },
-                                        SETTINGS_SET_TIME_MANUAL => {
+                                        SETTINGS_MENU_SET_TIME_MANUAL => {
                                             self.current_menu[0] = MANUAL_TIME_MENU;
                                             self.current_menu[1] = TIME_MENU_YEAR;
                                         },
-                                        SETTINGS_DELETE_CHIP_READS => {
+                                        SETTINGS_MENU_DELETE_CHIP_READS => {
                                             self.current_menu[0] = DELETE_READS_MENU;
                                             self.current_menu[1] = 0;
                                         }
-                                        SETTINGS_MANUAL_UPLOAD => {
+                                        SETTINGS_MENU_MANUAL_UPLOAD => {
                                             let _ = lcd.clear();
                                             let _ = lcd.home();
                                             let _ = write!(lcd, "{:<20}", "");
@@ -1267,7 +1265,7 @@ impl CharacterDisplay {
                                         self.current_menu[1] = 0;
                                     } else {
                                         self.current_menu[0] = SETTINGS_MENU;
-                                        self.current_menu[1] = SETTINGS_DELETE_CHIP_READS;
+                                        self.current_menu[1] = SETTINGS_MENU_DELETE_CHIP_READS;
                                         self.update_menu();
                                     }
                                 },
@@ -1280,13 +1278,13 @@ impl CharacterDisplay {
                                         }
                                     }
                                     self.current_menu[0] = SETTINGS_MENU;
-                                    self.current_menu[1] = SETTINGS_DELETE_CHIP_READS;
+                                    self.current_menu[1] = SETTINGS_MENU_DELETE_CHIP_READS;
                                     self.update_menu();
                                 },
                                 MANUAL_TIME_MENU => {
                                     if self.current_menu[1] == TIME_MENU_SECOND + 1 {
                                         self.current_menu[0] = SETTINGS_MENU;
-                                        self.current_menu[1] = SETTINGS_SET_TIME_MANUAL;
+                                        self.current_menu[1] = SETTINGS_MENU_SET_TIME_MANUAL;
                                     } else {
                                         let _ = lcd.clear();
                                         let _ = lcd.home();
@@ -1304,7 +1302,7 @@ impl CharacterDisplay {
                                                         match std::process::Command::new("sudo").arg("hwclock").arg("-w").status() {
                                                             Ok(_) => {
                                                                 self.current_menu[0] = SETTINGS_MENU;
-                                                                self.current_menu[1] = SETTINGS_SET_TIME_MANUAL;
+                                                                self.current_menu[1] = SETTINGS_MENU_SET_TIME_MANUAL;
                                                                 self.update_menu();
                                                             },
                                                             Err(e) => {
