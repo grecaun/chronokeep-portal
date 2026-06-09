@@ -915,7 +915,7 @@ impl CharacterDisplay {
                                 },
                                 _ => {},
                             }
-                            self.current_menu[2] = 0;
+                            self.current_menu[2] = READING_MENU_NIL;
                         },
                         ButtonPress::Enter => {
                             let mut third_menu: u8 = READING_MENU_NIL;

@@ -189,7 +189,7 @@ impl CharacterDisplay {
                                         _ => {}
                                     }
                                 },
-                                _ => {}, // unknown
+                                _ => { }, // unknown
                             }
                             self.current_menu[2] = READING_MENU_NIL; // current_menu[2] is only used for proper stop reading command
                             self.update_menu();
@@ -304,7 +304,7 @@ impl CharacterDisplay {
                                         _ => {}
                                     }
                                 },
-                                _ => {}, // unknown
+                                _ => { }, // unknown
                             }
                             self.current_menu[2] = READING_MENU_NIL;
                             self.update_menu();
