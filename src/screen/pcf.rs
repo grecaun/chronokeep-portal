@@ -1367,7 +1367,7 @@ impl CharacterDisplay {
                 }
                 let mut upload_status = " ";
                 if let Ok(up_info) = self.upload_info.lock() {
-                    if up_info.errors > 9 {
+                    if up_info.errors > 0 {
                         upload_status = "X";
                     } else if up_info.status == Status::Running {
                         upload_status = "+";

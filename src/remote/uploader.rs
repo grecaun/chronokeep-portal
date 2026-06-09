@@ -154,6 +154,7 @@ impl Uploader {
                         err_count += 1;
                     }
                 }
+                self.update_control_socks(err_count);
             }
             if attempt_upload {
                 if let Ok(sq) = self.sqlite.lock() {
@@ -187,25 +188,25 @@ impl Uploader {
                         }
                     }
                 }
-            }
-            // upload any reads we found in the database if we found our remote API
-            if let Some(api) = upload_api {
-                if to_upload.len() > 0 {
-                    let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload);
-                    if let Ok(mut sq) = self.sqlite.lock() {
-                        match sq.update_reads_status(&modified_reads) {
-                            Ok(_) => {},
-                            Err(e) => {
-                                println!("Error updating uploaded reads: {e}");
+                // upload any reads we found in the database if we found our remote API
+                if let Some(api) = upload_api {
+                    if to_upload.len() > 0 {
+                        let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                        if let Ok(mut sq) = self.sqlite.lock() {
+                            match sq.update_reads_status(&modified_reads) {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    println!("Error updating uploaded reads: {e}");
+                                }
                             }
                         }
+                        if e_count > 0 {
+                            err_count += e_count;
+                        } else if err_count != 0 {
+                            err_count = 0;
+                        }
+                        self.update_control_socks(err_count);
                     }
-                    if e_count > 0 {
-                        err_count += e_count;
-                    } else if err_count != 0 {
-                        err_count = 0;
-                    }
-                    self.update_control_socks(err_count);
                 }
             }
 
