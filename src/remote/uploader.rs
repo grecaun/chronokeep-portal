@@ -16,7 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{collections::HashMap, net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
+use std::{collections::HashMap, net::TcpStream, sync::{Arc, Mutex, WaitTimeoutResult}, time::Duration};
 
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -257,7 +257,17 @@ impl Uploader {
                 upload_pause = control.upload_interval;
             }
             // sleep for AUTO_UPLOAD_PAUSE seconds
-            thread::sleep(Duration::from_secs(upload_pause));
+            let (lock, cvar) = &*self.waiter.clone();
+            let mut waiting = lock.lock().unwrap();
+            let mut result: WaitTimeoutResult;
+            while *waiting {
+                (waiting, result) = cvar.wait_timeout(waiting, Duration::from_secs(upload_pause)).unwrap();
+                if result.timed_out() {
+                    break;
+                }
+            }
+            *waiting = true;
+            drop(waiting);
         } // end auto upload loop
         if let Ok(mut r) = self.status.lock() {
             *r = Status::Stopped;
