@@ -16,7 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
+use std::{collections::HashMap, net::TcpStream, sync::{Arc, Mutex}, thread, time::Duration};
 
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -41,6 +41,7 @@ pub struct Uploader {
     status: Arc<Mutex<Status>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     control: Arc<Mutex<Control>>,
+    waiter: Arc<(Mutex<bool>, std::sync::Condvar)>,
     info: Arc<Mutex<UploadInfo>>,
 }
 
@@ -59,6 +60,7 @@ impl Uploader {
             status: Arc::new(Mutex::new(Status::Stopped)),
             control_sockets,
             control,
+            waiter: Arc::new((Mutex::new(false), std::sync::Condvar::new())),
             info,
         }
     }
@@ -88,6 +90,14 @@ impl Uploader {
         }
         // let everyone know we're stopping
         self.update_control_socks(0);
+    }
+
+    pub fn notify(&self) {
+        let (lock, cvar) = &*self.waiter;
+        let mut waiting = lock.lock().unwrap();
+        *waiting = false;
+        cvar.notify_one();
+        drop(waiting);
     }
 
     pub fn run(&self) {
@@ -146,7 +156,7 @@ impl Uploader {
                 break;
             }
             let mut to_upload: Vec<read::Read> = Vec::new();
-            let mut upload_api: Option<api::Api> = None;
+            let mut upload_apis: Vec<api::Api> = Vec::new();
             // get our reads and then upload them
             // check error count
             // if there are 2 or more errors then don't try to grab the database mutex, instead check net first
@@ -182,23 +192,20 @@ impl Uploader {
                             for api in apis {
                                 if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
                                     found = true;
-                                    upload_api = Some(api.clone());
-                                    match sq.get_not_uploaded_reads() {
-                                        Ok(mut reads) => {
-                                            to_upload.append(&mut reads);
-                                        },
-                                        Err(e) => {
-                                            println!("Error getting reads to upload: {e}");
-                                        }
-                                    }
-                                    // should only be one REMOTE or REMOTE_SELF type of API in the database
-                                    // so we can break
-                                    break;
+                                    upload_apis.push(api.clone());
                                 }
                             }
                             if found == false {
                                 println!("No remote API set up.");
                                 break;
+                            }
+                            match sq.get_not_uploaded_reads() {
+                                Ok(mut reads) => {
+                                    to_upload.append(&mut reads);
+                                },
+                                Err(e) => {
+                                    println!("Error getting reads to upload: {e}");
+                                }
                             }
                         }
                         Err(e) => {
@@ -206,17 +213,20 @@ impl Uploader {
                         }
                     }
                 }
-                // upload any reads we found in the database if we found our remote API
-                if let Some(api) = upload_api {
+                // upload any reads we found in the database if we found our remote API(s)
+                let mut mod_reads: HashMap<i64, read::Read> = HashMap::new();
+                let mut mod_read_count: HashMap<i64, usize> = HashMap::new();
+                for api in &upload_apis {
                     if to_upload.len() > 0 {
-                        let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload);
-                        if let Ok(mut sq) = self.sqlite.lock() {
-                            match sq.update_reads_status(&modified_reads) {
-                                Ok(_) => {},
-                                Err(e) => {
-                                    println!("Error updating uploaded reads: {e}");
-                                }
+                        let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload.clone());
+                        for read in modified_reads.iter() {
+                            if mod_read_count.contains_key(&read.id()) {
+                                let count = mod_read_count.get(&read.id()).unwrap();
+                                mod_read_count.insert(read.id(), count + 1);
+                            } else {
+                                mod_read_count.insert(read.id(), 1);
                             }
+                            mod_reads.insert(read.id(), read.clone());
                         }
                         if e_count > 0 {
                             err_count += e_count;
@@ -224,6 +234,20 @@ impl Uploader {
                             err_count = 0;
                         }
                         self.update_control_socks(err_count);
+                    }
+                }
+                let mut updatable_reads: Vec<read::Read> = Vec::new();
+                for (read_id, read) in mod_reads.iter() {
+                    if mod_read_count.get(read_id) == Some(&upload_apis.len()) {
+                        updatable_reads.push(read.clone());
+                    }
+                }
+                if let Ok(mut sq) = self.sqlite.lock() {
+                    match sq.update_reads_status(&updatable_reads) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("Error updating uploaded reads: {e}");
+                        }
                     }
                 }
             }

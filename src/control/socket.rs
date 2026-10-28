@@ -1251,7 +1251,7 @@ fn handle_stream(
                         api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
                             if let Ok(mut sq) = sqlite.lock() {
                                 let mut t_uri = match kind.as_str() {
-                                    api::API_TYPE_CHRONOKEEP_REMOTE => {
+                                        api::API_TYPE_CHRONOKEEP_REMOTE => {
                                         String::from(api::API_URI_CHRONOKEEP_REMOTE)
                                     },
                                     _ => {
@@ -1261,63 +1261,41 @@ fn handle_stream(
                                 if !t_uri.ends_with("/") {
                                     t_uri = format!("{t_uri}/")
                                 }
-                                match sq.get_apis() {
-                                    Ok(apis) => {
-                                        let mut remote_exists = false;
-                                        for api in apis {
-                                            if (api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF) && api.id() != id  {
-                                                remote_exists = true;
-                                                break;
-                                            }
-                                        }
-                                        if remote_exists {
-                                            println!("Remote api already exists.");
-                                            no_error = write_error(&stream, errors::Errors::TooManyRemoteApi)
-                                        } else {
-                                            match sq.save_api(&api::Api::new(
-                                                id,
-                                                name,
-                                                kind,
-                                                token,
-                                                t_uri
-                                            )) {
-                                                Ok(_) => {
-                                                    match sq.get_apis() {
-                                                        Ok(apis) => {
-                                                            if let Ok(c_socks) = control_sockets.lock() {
-                                                                for sock in c_socks.iter() {
-                                                                    if let Some(sock) = sock {
-                                                                        // we might be writing to other sockets
-                                                                        // so errors here shouldn't close our connection
-                                                                        _ = write_api_list(&sock, &apis);
-                                                                    }
-                                                                }
-                                                            } else {
-                                                                no_error = write_api_list(&stream, &apis);
-                                                            }
-                                                        },
-                                                        Err(e) => {
-                                                            println!("error getting api list. {e}");
-                                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                                message: format!("error getting api list: {e}")
-                                                            });
+                                match sq.save_api(&api::Api::new(
+                                    id,
+                                    name,
+                                    kind,
+                                    token,
+                                    t_uri
+                                )) {
+                                    Ok(_) => {
+                                        match sq.get_apis() {
+                                            Ok(apis) => {
+                                                if let Ok(c_socks) = control_sockets.lock() {
+                                                    for sock in c_socks.iter() {
+                                                        if let Some(sock) = sock {
+                                                            // we might be writing to other sockets
+                                                            // so errors here shouldn't close our connection
+                                                            _ = write_api_list(&sock, &apis);
                                                         }
                                                     }
-                                                },
-                                                Err(e) => {
-                                                    println!("Error saving api {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                        message: format!("error saving api: {e}")
-                                                    });
+                                                } else {
+                                                    no_error = write_api_list(&stream, &apis);
                                                 }
+                                            },
+                                            Err(e) => {
+                                                println!("error getting api list. {e}");
+                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    message: format!("error getting api list: {e}")
+                                                });
                                             }
                                         }
-                                    }
+                                    },
                                     Err(e) => {
-                                        println!("error getting api list. {e}");
+                                        println!("Error saving api {e}");
                                         no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                            message: format!("error getting apis: {e}")
-                                        })
+                                            message: format!("error saving api: {e}")
+                                        });
                                     }
                                 }
                             }
