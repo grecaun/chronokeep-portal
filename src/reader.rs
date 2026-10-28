@@ -21,7 +21,7 @@ use std::{io::Write, net::TcpStream, sync::{self, Arc, Mutex}, thread::JoinHandl
 use reconnector::Reconnector;
 use serde::{Deserialize, Serialize};
 
-use crate::{control::{self, socket::MAX_CONNECTED, sound::{SoundNotifier, SoundType}}, database::{sqlite, DBError}, notifier, processor};
+use crate::{control::{self, socket::MAX_CONNECTED, sound::{SoundNotifier, SoundType}}, database::{DBError, sqlite}, notifier, processor, remote::uploader};
 
 pub mod zebra;
 pub mod auto_connect;
@@ -95,6 +95,8 @@ pub struct Reader {
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     #[serde(skip)]
     readers: Arc<Mutex<Vec<Reader>>>,
+    #[serde(skip)]
+    uploader: Option<Arc<uploader::Uploader>>,
 }
 
 impl Clone for Reader {
@@ -114,7 +116,8 @@ impl Clone for Reader {
             status_retries: self.status_retries.clone(),
             control_sockets: self.control_sockets.clone(),
             read_repeaters: self.read_repeaters.clone(),
-            readers: self.readers.clone()
+            readers: self.readers.clone(),
+            uploader: self.uploader.clone()
         }
     }
 }
@@ -143,7 +146,8 @@ impl Reader {
             control_sockets: Arc::new(Mutex::new(Default::default())),
             read_repeaters: Arc::new(Mutex::new(Default::default())),
             antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
-            readers: Arc::new(Mutex::new(Vec::new()))
+            readers: Arc::new(Mutex::new(Vec::new())),
+            uploader: None
         }
     }
 
@@ -193,7 +197,8 @@ impl Reader {
                     control_sockets,
                     read_repeaters,
                     antennas: Arc::new(Mutex::new([0;MAX_ANTENNAS])),
-                    readers
+                    readers,
+                    uploader: None
                 })
             },
             READER_KIND_IMPINJ => return Err(DBError::DataRetrievalError(String::from("not yet implemented"))),
@@ -260,6 +265,10 @@ impl Reader {
 
     pub fn set_readers(&mut self, readers: Arc<Mutex<Vec<Reader>>>) {
         self.readers = readers
+    }
+
+    pub fn set_uploader(&mut self, uploader: Arc<uploader::Uploader>) {
+        self.uploader = Some(uploader)
     }
 
     pub fn equal(&self, other: &Reader) -> bool {

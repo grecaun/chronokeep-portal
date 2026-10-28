@@ -575,6 +575,7 @@ impl CharacterDisplay {
                                                                     reader.set_control_sockets(self.control_sockets.clone());
                                                                     reader.set_readers(self.readers.clone());
                                                                     reader.set_read_repeaters(self.read_repeaters.clone());
+                                                                    reader.set_uploader(self.uploader.clone());
                                                                     let reconnector = Reconnector::new(
                                                                         self.readers.clone(),
                                                                         self.joiners.clone(),
@@ -961,6 +962,7 @@ impl CharacterDisplay {
                                                                     reader.set_control_sockets(self.control_sockets.clone());
                                                                     reader.set_readers(self.readers.clone());
                                                                     reader.set_read_repeaters(self.read_repeaters.clone());
+                                                                    reader.set_uploader(self.uploader.clone());
                                                                     let reconnector = Reconnector::new(
                                                                         self.readers.clone(),
                                                                         self.joiners.clone(),

@@ -197,25 +197,6 @@ pub fn control_loop(
     if let Ok(mut j) = joiners.lock() {
         j.push(n_joiner);
     }
-
-    // create the auto connector for automatically connecting to readers
-    let ac_state = Arc::new(Mutex::new(auto_connect::State::Unknown));
-    let mut auto_connector = auto_connect::AutoConnector::new(
-        ac_state.clone(),
-        readers.clone(),
-        joiners.clone(),
-        control_sockets.clone(),
-        read_repeaters.clone(),
-        control.clone(),
-        sqlite.clone(),
-        read_saver.clone(),
-        sound_notifier.clone(),
-        notifier.clone(),
-    );
-    // start a thread to automatically connect to readers
-    thread::spawn(move|| {
-        auto_connector.run(quick);
-    });
     
     // Create an object for tracking upload status/errors.
     let upload_info = Arc::new(Mutex::new(UploadInfo::new(uploader::Status::Unknown, 0)));
@@ -240,6 +221,26 @@ pub fn control_loop(
             info.update_status(uploader::Status::Stopped, 0);
         }
     }
+
+    // create the auto connector for automatically connecting to readers
+    let ac_state = Arc::new(Mutex::new(auto_connect::State::Unknown));
+    let mut auto_connector = auto_connect::AutoConnector::new(
+        ac_state.clone(),
+        readers.clone(),
+        joiners.clone(),
+        control_sockets.clone(),
+        read_repeaters.clone(),
+        control.clone(),
+        sqlite.clone(),
+        read_saver.clone(),
+        sound_notifier.clone(),
+        notifier.clone(),
+        uploader.clone(),
+    );
+    // start a thread to automatically connect to readers
+    thread::spawn(move|| {
+        auto_connector.run(quick);
+    });
 
     // Check if we can start a screen
     #[cfg(target_os = "linux")]
@@ -303,6 +304,7 @@ pub fn control_loop(
         for reader in u_readers.iter_mut() {
             reader.set_control_sockets(control_sockets.clone());
             reader.set_readers(readers.clone());
+            reader.set_uploader(uploader.clone());
         }
     }
 
@@ -792,6 +794,7 @@ fn handle_stream(
                                                             reader.id(),
                                                             1,
                                                             notifier.clone(),
+                                                            uploader.clone(),
                                                         );
                                                         match reader.connect(
                                                                 &sqlite.clone(),
@@ -915,6 +918,7 @@ fn handle_stream(
                                             reader.set_control_sockets(control_sockets.clone());
                                             reader.set_readers(readers.clone());
                                             reader.set_read_repeaters(read_repeaters.clone());
+                                            reader.set_uploader(uploader.clone());
                                             let reconnector = Reconnector::new(
                                                 readers.clone(),
                                                 joiners.clone(),
@@ -927,6 +931,7 @@ fn handle_stream(
                                                 reader.id(),
                                                 1,
                                                 notifier.clone(),
+                                                uploader.clone(),
                                             );
                                             match reader.connect(
                                                     &sqlite.clone(), 

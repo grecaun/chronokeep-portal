@@ -112,6 +112,7 @@ pub fn connect(
             let t_readers = reader.readers.clone();
             let t_read_repeaters = reader.read_repeaters.clone();
             let t_reconnector = reconnector.clone();
+            let t_uploader = reader.uploader.clone();
 
             let output = thread::spawn(move|| {
                 let buf: &mut [u8; BUFFER_SIZE] = &mut [0; BUFFER_SIZE];
@@ -654,6 +655,9 @@ pub fn connect(
                                                     println!("error sending new reads to repeaters: {e}")
                                                 }
                                             }
+                                            if let Some(uploader) = &t_uploader {
+                                                uploader.notify();
+                                            }
                                         }
                                     },
                                     Err(e) => println!("Error processing tags. {e}"),
@@ -732,6 +736,9 @@ pub fn connect(
                                                     Err(e) => {
                                                         println!("error sending new reads to repeaters: {e}")
                                                     }
+                                                }
+                                                if let Some(uploader) = &t_uploader {
+                                                    uploader.notify();
                                                 }
                                             }
                                         },

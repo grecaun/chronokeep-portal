@@ -21,7 +21,7 @@ use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::
 use chrono::{DateTime, Local};
 use serde::{Serialize, Deserialize};
 
-use crate::{control::{self, socket::MAX_CONNECTED, sound::{SoundNotifier, SoundType}}, database::sqlite, notifier, processor, reader::{reconnector::Reconnector, AUTO_CONNECT_TRUE}};
+use crate::{control::{self, socket::MAX_CONNECTED, sound::{SoundNotifier, SoundType}}, database::sqlite, notifier, processor, reader::{AUTO_CONNECT_TRUE, reconnector::Reconnector}, remote::uploader};
 
 pub const START_UP_WAITING_PERIOD_SECONDS: u64 = 60;
 
@@ -41,6 +41,7 @@ pub struct AutoConnector {
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     control: Arc<Mutex<control::Control>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
+    uploader: Arc<uploader::Uploader>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
     notifier: notifier::Notifier,
@@ -58,6 +59,7 @@ impl AutoConnector {
         read_saver: Arc<processor::ReadSaver>,
         sound: Arc<SoundNotifier>,
         notifier: notifier::Notifier,
+        uploader: Arc<uploader::Uploader>,
     ) -> AutoConnector {
         AutoConnector {
             state,
@@ -70,6 +72,7 @@ impl AutoConnector {
             read_saver,
             sound,
             notifier,
+            uploader,
         }
     }
 
@@ -109,6 +112,7 @@ impl AutoConnector {
                     println!("Connecting to reader {}.", reader.nickname());
                     reader.set_control_sockets(self.control_sockets.clone());
                     reader.set_readers(self.readers.clone());
+                    reader.set_uploader(self.uploader.clone());
                     reader.set_read_repeaters(self.read_repeaters.clone());
                     let reconnector = Reconnector::new(
                         self.readers.clone(),
@@ -122,6 +126,7 @@ impl AutoConnector {
                         reader.id(),
                         1,
                         self.notifier.clone(),
+                        self.uploader.clone(),
                     );
                     match reader.connect(
                         &self.sqlite.clone(),

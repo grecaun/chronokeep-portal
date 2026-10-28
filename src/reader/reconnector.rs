@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::Duration};
 
-use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, notifier, processor::{self}};
+use crate::{control::{self, socket::{self, MAX_CONNECTED}, sound::SoundNotifier}, database::sqlite, notifier, processor::{self}, remote::uploader};
 
 // Total potential time before reconnect attempts are stopped
 // is WAITING_PERIOD_SECONDS * RECONNECT_ATTEMPTS
@@ -38,6 +38,7 @@ pub struct Reconnector {
     id: i64,
     count: i32,
     notifier: notifier::Notifier,
+    uploader: Arc<uploader::Uploader>
 }
 
 
@@ -54,6 +55,7 @@ impl Reconnector {
         id: i64,
         count: i32,
         notifier: notifier::Notifier,
+        uploader: Arc<uploader::Uploader>
     ) -> Reconnector {
         Reconnector {
             readers,
@@ -66,7 +68,8 @@ impl Reconnector {
             sound,
             id,
             count,
-            notifier
+            notifier,
+            uploader,
         }
     }
 
@@ -84,6 +87,7 @@ impl Reconnector {
                     old_reader.set_control_sockets(self.control_sockets.clone());
                     old_reader.set_readers(self.readers.clone());
                     old_reader.set_read_repeaters(self.read_repeaters.clone());
+                    old_reader.set_uploader(self.uploader.clone());
                     let reconnector = Reconnector::new(
                         self.readers.clone(),
                         self.joiners.clone(),
@@ -96,6 +100,7 @@ impl Reconnector {
                         self.id,
                         1,
                         self.notifier.clone(),
+                        self.uploader.clone(),
                     );
                     println!("Initializing reader.");
                     match old_reader.connect(
@@ -128,6 +133,7 @@ impl Reconnector {
                                 self.id,
                                 self.count + 1,
                                 self.notifier.clone(),
+                                self.uploader.clone(),
                             );
                             drop(readers);
                             new_reconnector.run();
@@ -158,6 +164,7 @@ impl Reconnector {
                             self.id,
                             self.count + 1,
                             self.notifier.clone(),
+                            self.uploader.clone(),
                         );
                         drop(readers);
                         new_reconnector.run();
