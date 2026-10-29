@@ -1,5 +1,5 @@
 /*
-Chronokeep Desktop - Race Scoring Software
+Chronokeep Portal - RFID Tag Reading Software
 Copyright (C) 2026 James Sentinella
 
 This program is free software: you can redistribute it and/or modify
