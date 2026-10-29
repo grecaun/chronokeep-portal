@@ -28,7 +28,7 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound::{self, SoundType}}, database::{Database, sqlite}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, MAX_ANTENNAS, auto_connect, reconnector::Reconnector, zebra}, remote::{self, remote_util, uploader::{self, Uploader, info::UploadInfo}}, sound_board::Voice};
+use crate::{control::{SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound::{self, SoundType}}, database::{Database, sqlite}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, MAX_ANTENNAS, auto_connect, reconnector::Reconnector, zebra}, remote::{self, heartbeat::Heartbeat, remote_util, uploader::{self, Uploader, info::UploadInfo}}, sound_board::Voice};
 
 use self::notifications::APINotification;
 
@@ -318,6 +318,23 @@ pub fn control_loop(
     let date_time: DateTime<Local> = SystemTime::now().into();
     notifier.send_notification(notifier::Notification::Start, format!("{}", date_time.format("%Y/%m/%d %T")));
 
+    let heartbeat: Arc<Heartbeat> = Arc::new(Heartbeat::new(control.clone()));
+    let mut start_heartbeat: bool = false;
+    if let Ok(control) = control.lock() {
+        if control.enable_heartbeat {
+            start_heartbeat = true;
+        }
+    }
+    if start_heartbeat {
+        let t_heartbeat = heartbeat.clone();
+        let t_joiner = thread::spawn(move|| {
+            t_heartbeat.run();
+        });
+        if let Ok(mut j) = joiners.lock() {
+            j.push(t_joiner);
+        }
+    }
+
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
@@ -356,6 +373,7 @@ pub fn control_loop(
                 let t_sound_notifier = sound_notifier.clone();
                 let t_read_saver = read_saver.clone();
                 let t_notifier = notifier.clone();
+                let t_heartbeat = heartbeat.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -392,6 +410,7 @@ pub fn control_loop(
                                 t_read_saver,
                                 t_sound_notifier,
                                 t_notifier,
+                                t_heartbeat,
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
@@ -503,6 +522,7 @@ fn handle_stream(
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
     notifier: notifier::Notifier,
+    heartbeat: Arc<Heartbeat>,
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -1114,12 +1134,13 @@ fn handle_stream(
                                     super::SETTING_NTFY_PASS |
                                     super::SETTING_NTFY_TOPIC | 
                                     super::SETTING_ENABLE_NTFY |
-                                    super::SETTING_SCREEN_TYPE => {
+                                    super::SETTING_SCREEN_TYPE |
+                                    super::SETTING_BEEP_IGNORE |
+                                    super::SETTING_HEARTBEAT_URL => {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
                                                 if let Ok(new_control) = super::Control::new(&mut sq) {
                                                     _ = control.update(new_control);
-                                                    
                                                 } else {
                                                     let settings = get_settings(&sq);
                                                     no_error = write_settings(&stream, &settings);
@@ -1133,6 +1154,37 @@ fn handle_stream(
                                             }
                                         }
                                     },
+                                    super::SETTING_ENABLE_HEARTBEAT => {
+                                        match sq.set_setting(&setting) {
+                                            Ok(_) => {
+                                                if let Ok(new_control) = super::Control::new(&mut sq) {
+                                                    _ = control.update(new_control);
+                                                } else {
+                                                    let settings = get_settings(&sq);
+                                                    no_error = write_settings(&stream, &settings);
+                                                }
+                                            },
+                                            Err(e) => {
+                                                println!("Error saving setting. {e}");
+                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    message: format!("error saving setting: {e}")
+                                                });
+                                            }
+                                        }
+                                        if control.enable_heartbeat {
+                                            if heartbeat.running() == false {
+                                                let t_heartbeat = heartbeat.clone();
+                                                let t_joiner = thread::spawn(move|| {
+                                                    t_heartbeat.run();
+                                                });
+                                                if let Ok(mut j) = joiners.lock() {
+                                                    j.push(t_joiner);
+                                                }
+                                            }
+                                        } else {
+                                            heartbeat.stop();
+                                        }
+                                    }
                                     other => {
                                         println!("'{other}' is not a valid setting");
                                         no_error = write_error(&stream, errors::Errors::DatabaseError {
@@ -2030,6 +2082,8 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
         super::SETTING_ENABLE_NTFY,
         super::SETTING_SCREEN_TYPE,
         super::SETTING_BEEP_IGNORE,
+        super::SETTING_ENABLE_HEARTBEAT,
+        super::SETTING_HEARTBEAT_URL
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {
