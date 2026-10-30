@@ -22,16 +22,19 @@ use crate::remote::uploader::Status;
 pub struct UploadInfo {
     pub status: Status,
     pub errors: usize,
+    pub total_errors: usize,
 }
 
 impl UploadInfo {
     pub fn new(
         status: Status,
         errors: usize,
+        total_errors: usize,
     ) -> Self {
         Self {
             status,
             errors,
+            total_errors
         }
     }
 
@@ -42,5 +45,6 @@ impl UploadInfo {
     ) {
         self.status = status;
         self.errors = errors;
+        self.total_errors += errors;
     }
 }

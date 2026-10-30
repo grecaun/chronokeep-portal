@@ -28,7 +28,7 @@ pub struct HeartbeatState {
     pub battery_pct: String,
     pub charging: bool,
     pub hash: String,
-    pub upload_errors: u32,
+    pub upload_errors: usize,
     pub readers_connected: u32,
     pub readers_total: u32,
     pub reading: bool,

@@ -199,7 +199,7 @@ pub fn control_loop(
     }
     
     // Create an object for tracking upload status/errors.
-    let upload_info = Arc::new(Mutex::new(UploadInfo::new(uploader::Status::Unknown, 0)));
+    let upload_info = Arc::new(Mutex::new(UploadInfo::new(uploader::Status::Unknown, 0, 0)));
 
     // create our reads uploader struct for auto uploading if the user wants to
     let uploader = Arc::new(uploader::Uploader::new(keepalive.clone(), sqlite.clone(), control_sockets.clone(), control.clone(), upload_info.clone()));
@@ -318,7 +318,7 @@ pub fn control_loop(
     let date_time: DateTime<Local> = SystemTime::now().into();
     notifier.send_notification(notifier::Notification::Start, format!("{}", date_time.format("%Y/%m/%d %T")));
 
-    let heartbeat: Arc<Heartbeat> = Arc::new(Heartbeat::new(control.clone()));
+    let heartbeat: Arc<Heartbeat> = Arc::new(Heartbeat::new(control.clone(), sqlite.clone(), readers.clone(), upload_info.clone()));
     let t_heartbeat = heartbeat.clone();
     let t_joiner = thread::spawn(move|| {
         t_heartbeat.run();
