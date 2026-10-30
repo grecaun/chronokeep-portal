@@ -217,8 +217,10 @@ impl Uploader {
                 let mut mod_reads: HashMap<i64, read::Read> = HashMap::new();
                 let mut mod_read_count: HashMap<i64, usize> = HashMap::new();
                 for api in &upload_apis {
-                    if to_upload.len() > 0 {
+                    if to_upload.len() > 0 && api.enabled() {
+                        println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
                         let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload.clone());
+                        println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
                         for read in modified_reads.iter() {
                             if mod_read_count.contains_key(&read.id()) {
                                 let count = mod_read_count.get(&read.id()).unwrap();

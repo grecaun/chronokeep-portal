@@ -1549,22 +1549,21 @@ fn handle_stream(
                                     if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
                                         found = true;
                                         upload_apis.push(api.clone());
-                                        //println!("Uploading reads to {}", api.nickname());
-                                        // this request will upload all reads regardless of whether or not they've been uploaded previously
-                                        match sq.get_all_reads() {
-                                            Ok(mut reads) => {
-                                                to_upload.append(&mut reads);
-                                            },
-                                            Err(e) => {
-                                                println!("Error geting reads to upload. {e}");
-                                                no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
-                                                break;
-                                            }
-                                        };
                                     }
                                 }
                                 if found == false {
                                     no_error = write_error(&stream, errors::Errors::NoRemoteApi);
+                                } else {
+                                    match sq.get_all_reads() {
+                                        Ok(mut reads) => {
+                                            to_upload.append(&mut reads);
+                                        },
+                                        Err(e) => {
+                                            println!("Error geting reads to upload. {e}");
+                                            no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
+                                            break;
+                                        }
+                                    };
                                 }
                             },
                             Err(e) => {
@@ -1577,7 +1576,7 @@ fn handle_stream(
                     }
                     // upload any reads we found in the database if we found our remote API
                     for api in &upload_apis {
-                        if to_upload.len() > 0 {
+                        if to_upload.len() > 0 && api.enabled() {
                             println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
                             let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload.clone());
                             println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);

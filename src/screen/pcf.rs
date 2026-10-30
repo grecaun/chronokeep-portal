@@ -464,27 +464,26 @@ impl CharacterDisplay {
                                                 let _ = write!(lcd, "{:^20}", "Uploading . . .");
                                                 let _ = write!(lcd, "{:<20}", "");
                                                 let mut to_upload: Vec<read::Read> = Vec::new();
-                                                let mut upload_api: Option<api::Api> = None;
+                                                let mut upload_apis: Vec<api::Api> = Vec::new();
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     match sq.get_apis() {
                                                         Ok(apis) => {
+                                                            let mut found = false;
                                                             for api in apis {
                                                                 if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                                                    upload_api = Some(api.clone());
-                                                                    //println!("Uploading reads to {}", api.nickname());
-                                                                    // this request will upload all reads regardless of whether or not they've been uploaded previously
-                                                                    match sq.get_all_reads() {
-                                                                        Ok(mut reads) => {
-                                                                            to_upload.append(&mut reads);
-                                                                        },
-                                                                        Err(e) => {
-                                                                            println!("Error geting reads to upload. {e}");
-                                                                            break;
-                                                                        }
-                                                                    };
-                                                                    // remote api found, so break the loop looking for it
-                                                                    break;
+                                                                    found = true;
+                                                                    pload_apis.push(api.clone());
                                                                 }
+                                                            }
+                                                            if found == true {
+                                                                match sq.get_all_reads() {
+                                                                    Ok(mut reads) => {
+                                                                        to_upload.append(&mut reads);
+                                                                    },
+                                                                    Err(e) => {
+                                                                        println!("Error geting reads to upload. {e}");
+                                                                    }
+                                                                };
                                                             }
                                                         },
                                                         Err(e) => {
@@ -493,9 +492,11 @@ impl CharacterDisplay {
                                                     }
                                                 }
                                                 // upload any reads we found in the database if we found our remote API
-                                                if let Some(api) = upload_api {
-                                                    if to_upload.len() > 0 {
-                                                        let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                for api in &upload_apis {
+                                                    if to_upload.len() > 0 && api.enabled() {
+                                                        println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
+                                                        let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                        println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
                                                         if let Ok(mut sq) = self.sqlite.lock() {
                                                             match sq.update_reads_status(&modified_reads) {
                                                                 Ok(_) => {},
@@ -851,27 +852,27 @@ impl CharacterDisplay {
                                                 let _ = write!(lcd, "{:^20}", "Uploading . . .");
                                                 let _ = write!(lcd, "{:<20}", "");
                                                 let mut to_upload: Vec<read::Read> = Vec::new();
-                                                let mut upload_api: Option<api::Api> = None;
+                                                let mut upload_apis: Vec<api::Api> = Vec::new();
                                                 if let Ok(sq) = self.sqlite.lock() {
                                                     match sq.get_apis() {
                                                         Ok(apis) => {
+                                                            let mut found = false;
                                                             for api in apis {
                                                                 if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                                                    upload_api = Some(api.clone());
-                                                                    //println!("Uploading reads to {}", api.nickname());
-                                                                    // this request will upload all reads regardless of whether or not they've been uploaded previously
-                                                                    match sq.get_all_reads() {
-                                                                        Ok(mut reads) => {
-                                                                            to_upload.append(&mut reads);
-                                                                        },
-                                                                        Err(e) => {
-                                                                            println!("Error geting reads to upload. {e}");
-                                                                            break;
-                                                                        }
-                                                                    };
-                                                                    // remote api found, so break the loop looking for it
-                                                                    break;
+                                                                    found = true;
+                                                                    upload_apis.push(api.clone());
                                                                 }
+                                                            }
+                                                            if found == true {
+                                                                match sq.get_all_reads() {
+                                                                    Ok(mut reads) => {
+                                                                        to_upload.append(&mut reads);
+                                                                    },
+                                                                    Err(e) => {
+                                                                        println!("Error geting reads to upload. {e}");
+                                                                        break;
+                                                                    }
+                                                                };
                                                             }
                                                         },
                                                         Err(e) => {
@@ -881,8 +882,10 @@ impl CharacterDisplay {
                                                 }
                                                 // upload any reads we found in the database if we found our remote API
                                                 if let Some(api) = upload_api {
-                                                    if to_upload.len() > 0 {
-                                                        let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                    if to_upload.len() > 0 && api.enabled() {
+                                                        println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
+                                                        let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                        println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
                                                         if let Ok(mut sq) = self.sqlite.lock() {
                                                             match sq.update_reads_status(&modified_reads) {
                                                                 Ok(_) => {},
@@ -1110,27 +1113,26 @@ impl CharacterDisplay {
                                             let _ = write!(lcd, "{:^20}", "Uploading . . .");
                                             let _ = write!(lcd, "{:<20}", "");
                                             let mut to_upload: Vec<read::Read> = Vec::new();
-                                            let mut upload_api: Option<api::Api> = None;
+                                            let mut upload_apis: Vec<api::Api> = Vec::new();
                                             if let Ok(sq) = self.sqlite.lock() {
                                                 match sq.get_apis() {
                                                     Ok(apis) => {
+                                                        let mut found = false;
                                                         for api in apis {
                                                             if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
+                                                                found = true;
                                                                 upload_api = Some(api.clone());
-                                                                //println!("Uploading reads to {}", api.nickname());
-                                                                // this request will upload all reads regardless of whether or not they've been uploaded previously
-                                                                match sq.get_all_reads() {
-                                                                    Ok(mut reads) => {
-                                                                        to_upload.append(&mut reads);
-                                                                    },
-                                                                    Err(e) => {
-                                                                        println!("Error geting reads to upload. {e}");
-                                                                        break;
-                                                                    }
-                                                                };
-                                                                // remote api found, so break the loop looking for it
-                                                                break;
                                                             }
+                                                        }
+                                                        if found == true {
+                                                            match sq.get_all_reads() {
+                                                                Ok(mut reads) => {
+                                                                    to_upload.append(&mut reads);
+                                                                },
+                                                                Err(e) => {
+                                                                    println!("Error geting reads to upload. {e}");
+                                                                }
+                                                            };
                                                         }
                                                     },
                                                     Err(e) => {
@@ -1140,8 +1142,10 @@ impl CharacterDisplay {
                                             }
                                             // upload any reads we found in the database if we found our remote API
                                             if let Some(api) = upload_api {
-                                                if to_upload.len() > 0 {
-                                                    let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                if to_upload.len() > 0 && api.enabled() {
+                                                    println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
+                                                    let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                                                    println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
                                                     if let Ok(mut sq) = self.sqlite.lock() {
                                                         match sq.update_reads_status(&modified_reads) {
                                                             Ok(_) => {},

@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{control::socket, network::api, objects::read};
 
-pub(crate) const NUMBER_READS_PER_UPLOAD: usize = 25;
+pub(crate) const NUMBER_READS_PER_UPLOAD: usize = 100;
 
 pub fn upload_all_reads(
     http_client: &reqwest::blocking::Client,
