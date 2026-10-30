@@ -20,12 +20,17 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HeartbeatState {
-    pub epoch: String,
-    pub now: i64,
-    pub uptime: String,
     pub dev: String,
-    pub evid: String,
-    pub total_count: u64,
-    pub unique_count: u64,
-    pub battery: u8,
+    pub location: String,
+    pub now: i64,
+    pub uptime: i64,
+    pub battery: String,
+    pub battery_pct: String,
+    pub charging: bool,
+    pub hash: String,
+    pub upload_errors: u32,
+    pub readers_connected: u32,
+    pub readers_total: u32,
+    pub reading: bool,
+    pub chip_type: String,
 }

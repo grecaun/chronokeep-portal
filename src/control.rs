@@ -37,8 +37,6 @@ pub const SETTING_NTFY_TOPIC: &str = "SETTING_NTFY_TOPIC";
 pub const SETTING_ENABLE_NTFY: &str = "SETTING_ENABLE_NTFY";
 pub const SETTING_SCREEN_TYPE: &str = "SETTING_SCREEN_TYPE";
 pub const SETTING_BEEP_IGNORE: &str = "SETTING_BEEP_IGNORE";
-pub const SETTING_ENABLE_HEARTBEAT: &str = "SETTING_ENABLE_HEARTBEAT";
-pub const SETTING_HEARTBEAT_URL: &str = "SETTING_HEARTBEAT_URL";
 
 pub struct Control {
     pub name: String,
@@ -55,10 +53,9 @@ pub struct Control {
     pub ntfy_topic: String,
     pub enable_ntfy: bool,
     pub battery: u8,
+    pub battery_voltage: String,
     pub screen_type: String,
     pub beep_ignore: u8,
-    pub enable_heartbeat: bool,
-    pub heartbeat_url: String,
 }
 
 impl Control {
@@ -108,12 +105,6 @@ impl Control {
         if self.sound_board.get_voice() != new_control.sound_board.get_voice() {
             return self.sound_board.change_voice(new_control.sound_board.get_voice())
         }
-        if self.enable_heartbeat != new_control.enable_heartbeat {
-            self.enable_heartbeat = new_control.enable_heartbeat;
-        }
-        if self.heartbeat_url != new_control.heartbeat_url {
-            self.heartbeat_url = new_control.heartbeat_url;
-        }
         Ok(())
     }
 
@@ -133,10 +124,9 @@ impl Control {
             ntfy_topic: String::from(""),
             enable_ntfy: defaults::DEFAULT_ENABLE_NTFY,
             battery: 0,
+            battery_voltage: String::from("0"),
             screen_type: String::from(defaults::DEFAULT_SCREEN_TYPE),
             beep_ignore: defaults::DEFAULT_BEEP_IGNORE,
-            enable_heartbeat: defaults::DEFAULT_ENABLE_HEARTBEAT,
-            heartbeat_url: String::from(defaults::DEFAULT_HEARTBEAT_URL),
         };
         match sqlite.get_setting(SETTING_PORTAL_NAME) {
             Ok(s) => {
@@ -449,48 +439,6 @@ impl Control {
                     Err(e) => return Err(e)
                 }
             }
-            Err(e) => {
-                return Err(e)
-            }
-        }
-        match sqlite.get_setting(SETTING_ENABLE_HEARTBEAT) {
-            Ok(s) => {
-                let e_heartbeat: bool = s.value().eq_ignore_ascii_case("true");
-                output.enable_heartbeat = e_heartbeat;
-            },
-            Err(DBError::NotFound) => {
-                match sqlite.set_setting(&setting::Setting::new(
-                    String::from(SETTING_ENABLE_HEARTBEAT),
-                    format!("{}", defaults::DEFAULT_ENABLE_HEARTBEAT),
-                )) {
-                    Ok(s) => {
-                        let e_heartbeat: bool = s.value().eq_ignore_ascii_case("true");
-                        output.enable_heartbeat = e_heartbeat;
-                        println!("Enable heartbeat successfully set to '{}'.", s.value());
-                    },
-                    Err(e) => return Err(e)
-                }
-            },
-            Err(e) => {
-                return Err(e)
-            }
-        }
-        match sqlite.get_setting(SETTING_HEARTBEAT_URL) {
-            Ok(s) => {
-                output.heartbeat_url = s.value().into();
-            },
-            Err(DBError::NotFound) => {
-                match sqlite.set_setting(&setting::Setting::new(
-                    String::from(SETTING_HEARTBEAT_URL),
-                    format!("{}", defaults::DEFAULT_HEARTBEAT_URL),
-                )) {
-                    Ok(s) => {
-                        output.heartbeat_url = s.value().into();
-                        println!("Heartbeat URL successfully set to '{}'.", s.value());
-                    },
-                    Err(e) => return Err(e)
-                }
-            },
             Err(e) => {
                 return Err(e)
             }

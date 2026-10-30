@@ -159,6 +159,7 @@ impl Checker {
         if let Ok(mut control) = self.control.lock() {
             batt = control.battery;
             control.battery = percentage;
+            control.battery_voltage = format!("{}.{}", average_voltage / 1000, average_voltage % 1000);
         }
         if batt > 30 && percentage <= 30 && now > self.last_low + 60 {
             let date_time: DateTime<Local> = SystemTime::now().into();

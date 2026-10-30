@@ -481,7 +481,11 @@ fn test_save_api() {
         String::from("results-api"),
         String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
         String::from("random-token-value"),
-        String::from("https:://example.com/"));
+        String::from("https:://example.com/"),
+        false,
+        false,
+        String::from("ck01")
+    );
     let mut sqlite = setup_tests(unique_path);
     let results = sqlite.save_api(&original);
     assert!(results.is_ok());
@@ -497,7 +501,10 @@ fn test_save_api() {
             String::from(original.nickname()),
             String::from(api::API_TYPE_CHRONOKEEP_REMOTE_SELF),
             String::from("a-different-random-token"),
-            String::from("https:://random.com/")
+            String::from("https:://random.com/"),
+            true,
+            false,
+            String::from("ck01")
         ));
     assert!(results.is_ok());
     assert_ne!(0, results.unwrap());
@@ -521,7 +528,10 @@ fn test_save_api() {
         String::from("new-nickname"),
         String::from(api::API_TYPE_CHRONOKEEP_REMOTE_SELF),
         String::from(original.token()),
-        String::from(original.uri())
+        String::from(original.uri()),
+        false,
+        false,
+        String::from("ck01")
     ));
     assert!(results.is_ok());
     assert_ne!(0, results.unwrap());
@@ -538,7 +548,10 @@ fn test_save_api() {
         String::from("invalid_type_name"),
         String::from("invalid-type"),
         String::from("random-token"),
-        String::from("https:://invalid-type.com/")
+        String::from("https:://invalid-type.com/"),
+        true,
+        false,
+        String::from("ck01")
     ));
     assert!(result.is_err());
     match result {
@@ -564,7 +577,11 @@ fn test_get_apis() {
         String::from("results-api"),
         String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
         String::from("random-token-value"),
-        String::from("https:://example.com/"));
+        String::from("https:://example.com/"),
+        false,
+        false,
+        String::from("ck01")
+    );
     let mut sqlite = setup_tests(unique_path);
     _ = sqlite.save_api(&original);
     let result = sqlite.get_apis();
@@ -579,7 +596,10 @@ fn test_get_apis() {
             format!("api-{i}"),
             String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
             format!("token-number-10302031{i}"),
-            String::from("https::api.chronokeep.com/")
+            String::from("https::api.chronokeep.com/"),
+            true,
+            false,
+            String::from("ck01")
         ))
     }
     let apis = sqlite.get_apis().unwrap();
@@ -596,7 +616,11 @@ fn test_delete_api() {
         String::from("results-api"),
         String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
         String::from("random-token-value"),
-        String::from("https:://example.com/"));
+        String::from("https:://example.com/"),
+        true,
+        false,
+        String::from("ck01")
+    );
     let mut sqlite = setup_tests(unique_path);
     let orig_id = sqlite.save_api(&original).unwrap_or(0);
     let apis = sqlite.get_apis().unwrap();
@@ -617,7 +641,10 @@ fn test_delete_api() {
             format!("results-api-{i}"),
             String::from(api::API_TYPE_CHRONOKEEP_REMOTE),
             format!("random-token-value-{i}"),
-            String::from("https:://example.com/")
+            String::from("https:://example.com/"),
+            true,
+            false,
+            String::from("ck01")
         ));
         if i == 5 {
             five_id = tmp.unwrap_or(-1);

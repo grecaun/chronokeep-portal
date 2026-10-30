@@ -31,7 +31,7 @@ pub(super) mod tests;
 const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 
 const DATABASE_VERSION_SETTING: &str = "PORTAL_DATABASE_VERSION";
-const DATABASE_VERSION: u16 = 5;
+const DATABASE_VERSION: u16 = 6;
 
 const DATABASE_PATH_ENV: &str = "PORTAL_DATABASE_PATH";
 
@@ -100,10 +100,41 @@ impl SQLite {
                     return Err(e)
                 }
             }
+            if old_version < 6 {
+                if let Err(e) = self.update_to_v6() {
+                    return Err(e)
+                }
+            }
         } else if new_version < old_version {
             return Err(DBError::DatabaseTooNew(String::from("database version is newer than our known version")))
         }
         return Ok(())
+    }
+
+    fn update_to_v6(&mut self) -> Result<(), DBError> {
+        if let Ok(tx) = self.conn.transaction() {
+            let updates = [
+                "ALTER TABLE results_api ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;",
+                "ALTER TABLE results_api ADD COLUMN heartbeat INTEGER NOT NULL DEFAULT 0;",
+                "ALTER TABLE results_api ADD COLUMN device_name VARCHAR(10) NOT NULL DEFAULT '';",
+            ];
+            for table in updates {
+                if let Err(e) = tx.execute(table, ()) {
+                    return Err(DBError::DataInsertionError(e.to_string()))
+                }
+            }
+            if let Err(e) = tx.execute(
+                "INSERT INTO settings (setting, value) VALUES (?1, ?2);",
+                (DATABASE_VERSION_SETTING, "6")
+            ) {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            if let Err(e) = tx.commit() {
+                return Err(DBError::DataInsertionError(e.to_string()))
+            }
+            return Ok(())
+        }
+        Err(DBError::ConnectionError(String::from("unable to start transaction")))
     }
 
     fn update_to_v5(&mut self) -> Result<(), DBError> {
@@ -242,6 +273,9 @@ impl SQLite {
                     kind VARCHAR(50),
                     token VARCHAR(100),
                     uri VARCHAR(150),
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    heartbeat INTEGER NOT NULL DEFAULT 0,
+                    device_name VARCHAR(10) NOT NULL DEFAULT '',
                     UNIQUE (nickname) ON CONFLICT REPLACE,
                     UNIQUE (uri, token) ON CONFLICT REPLACE
                 );",
@@ -475,9 +509,12 @@ impl super::Database for SQLite {
                         nickname=?1, 
                         kind=?2, 
                         token=?3, 
-                        uri=?4 
-                    WHERE api_id=?5",
-                (api.nickname(), api.kind(), api.token(), api.uri(), api.id()))
+                        uri=?4, 
+                        enabled=?5,
+                        heartbeat=?7,
+                        device_name=?8
+                    WHERE api_id=?6",
+                (api.nickname(), api.kind(), api.token(), api.uri(), api.enabled(), api.id(), api.heartbeat(), api.device_name()))
             {
                 Ok(_) => return Ok(api.id()),
                 Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
@@ -488,9 +525,12 @@ impl super::Database for SQLite {
                     nickname,
                     kind,
                     token,
-                    uri
-                ) VALUES (?1,?2,?3,?4);",
-            (api.nickname(), api.kind(), api.token(), api.uri())
+                    uri,
+                    enabled,
+                    heartbeat,
+                    device_name
+                ) VALUES (?1,?2,?3,?4,?5,?6,?7);",
+            (api.nickname(), api.kind(), api.token(), api.uri(), api.enabled(), api.heartbeat(), api.device_name())
         ) {
             Ok(_) => return Ok(self.conn.last_insert_rowid()),
             Err(e) => return Err(DBError::DataInsertionError(e.to_string()))
@@ -498,7 +538,7 @@ impl super::Database for SQLite {
     }
 
     fn get_apis(&self) -> Result<Vec<api::Api>, DBError> {
-        let mut stmt = match self.conn.prepare("SELECT api_id, nickname, kind, token, uri FROM results_api;") {
+        let mut stmt = match self.conn.prepare("SELECT api_id, nickname, kind, token, uri, enabled, heartbeat, device_name FROM results_api;") {
             Ok(stmt) => stmt,
             Err(e) => return Err(DBError::ConnectionError(e.to_string()))
         };
@@ -510,7 +550,10 @@ impl super::Database for SQLite {
                     row.get(1)?,
                     row.get(2)?,
                     row.get(3)?,
-                    row.get(4)?
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?
                 ))
             }) {
                 Ok(r) => r,

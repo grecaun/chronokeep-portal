@@ -33,6 +33,9 @@ pub enum Request {
         kind: String,
         uri: String,
         token: String,
+        enabled: Option<bool>,
+        heartbeat: Option<bool>,
+        device_name: Option<String>,
     },
     ApiSaveAll{
         list: Vec<api::Api>,

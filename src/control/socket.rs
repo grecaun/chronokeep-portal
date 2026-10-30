@@ -319,20 +319,12 @@ pub fn control_loop(
     notifier.send_notification(notifier::Notification::Start, format!("{}", date_time.format("%Y/%m/%d %T")));
 
     let heartbeat: Arc<Heartbeat> = Arc::new(Heartbeat::new(control.clone()));
-    let mut start_heartbeat: bool = false;
-    if let Ok(control) = control.lock() {
-        if control.enable_heartbeat {
-            start_heartbeat = true;
-        }
-    }
-    if start_heartbeat {
-        let t_heartbeat = heartbeat.clone();
-        let t_joiner = thread::spawn(move|| {
-            t_heartbeat.run();
-        });
-        if let Ok(mut j) = joiners.lock() {
-            j.push(t_joiner);
-        }
+    let t_heartbeat = heartbeat.clone();
+    let t_joiner = thread::spawn(move|| {
+        t_heartbeat.run();
+    });
+    if let Ok(mut j) = joiners.lock() {
+        j.push(t_joiner);
     }
 
     loop {
@@ -373,7 +365,6 @@ pub fn control_loop(
                 let t_sound_notifier = sound_notifier.clone();
                 let t_read_saver = read_saver.clone();
                 let t_notifier = notifier.clone();
-                let t_heartbeat = heartbeat.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
                 if let Ok(c_sock) = stream.try_clone() {
@@ -410,7 +401,6 @@ pub fn control_loop(
                                 t_read_saver,
                                 t_sound_notifier,
                                 t_notifier,
-                                t_heartbeat,
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
@@ -521,8 +511,7 @@ fn handle_stream(
     ac_state: Arc<Mutex<auto_connect::State>>,
     read_saver: Arc<processor::ReadSaver>,
     sound: Arc<SoundNotifier>,
-    notifier: notifier::Notifier,
-    heartbeat: Arc<Heartbeat>,
+    notifier: notifier::Notifier
 ) {
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
@@ -1135,8 +1124,7 @@ fn handle_stream(
                                     super::SETTING_NTFY_TOPIC | 
                                     super::SETTING_ENABLE_NTFY |
                                     super::SETTING_SCREEN_TYPE |
-                                    super::SETTING_BEEP_IGNORE |
-                                    super::SETTING_HEARTBEAT_URL => {
+                                    super::SETTING_BEEP_IGNORE => {
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
                                                 if let Ok(new_control) = super::Control::new(&mut sq) {
@@ -1154,37 +1142,6 @@ fn handle_stream(
                                             }
                                         }
                                     },
-                                    super::SETTING_ENABLE_HEARTBEAT => {
-                                        match sq.set_setting(&setting) {
-                                            Ok(_) => {
-                                                if let Ok(new_control) = super::Control::new(&mut sq) {
-                                                    _ = control.update(new_control);
-                                                } else {
-                                                    let settings = get_settings(&sq);
-                                                    no_error = write_settings(&stream, &settings);
-                                                }
-                                            },
-                                            Err(e) => {
-                                                println!("Error saving setting. {e}");
-                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
-                                                    message: format!("error saving setting: {e}")
-                                                });
-                                            }
-                                        }
-                                        if control.enable_heartbeat {
-                                            if heartbeat.running() == false {
-                                                let t_heartbeat = heartbeat.clone();
-                                                let t_joiner = thread::spawn(move|| {
-                                                    t_heartbeat.run();
-                                                });
-                                                if let Ok(mut j) = joiners.lock() {
-                                                    j.push(t_joiner);
-                                                }
-                                            }
-                                        } else {
-                                            heartbeat.stop();
-                                        }
-                                    }
                                     other => {
                                         println!("'{other}' is not a valid setting");
                                         no_error = write_error(&stream, errors::Errors::DatabaseError {
@@ -1302,7 +1259,7 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiSave { id, name, kind, uri, token } => {
+                requests::Request::ApiSave { id, name, kind, uri, token, enabled, heartbeat, device_name } => {
                     match kind.as_str() {
                         api::API_TYPE_CHRONOKEEP_REMOTE |
                         api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
@@ -1318,12 +1275,18 @@ fn handle_stream(
                                 if !t_uri.ends_with("/") {
                                     t_uri = format!("{t_uri}/")
                                 }
+                                let enable = enabled.unwrap_or(true);
+                                let heart = heartbeat.unwrap_or(false);
+                                let dev = device_name.unwrap_or("".into());
                                 match sq.save_api(&api::Api::new(
                                     id,
                                     name,
                                     kind,
                                     token,
-                                    t_uri
+                                    t_uri,
+                                    enable,
+                                    heart,
+                                    dev
                                 )) {
                                     Ok(_) => {
                                         match sq.get_apis() {
@@ -1429,7 +1392,10 @@ fn handle_stream(
                                         String::from(api.nickname()),
                                         String::from(api.kind()),
                                         String::from(api.token()),
-                                        t_uri
+                                        t_uri,
+                                        api.enabled(),
+                                        api.heartbeat(),
+                                        String::from(api.device_name())
                                     )) {
                                         Ok(_) => { },
                                         Err(_) => {
@@ -1574,7 +1540,7 @@ fn handle_stream(
                 },
                 requests::Request::ApiRemoteManualUpload => {
                     let mut to_upload: Vec<read::Read> = Vec::new();
-                    let mut upload_api: Option<api::Api> = None;
+                    let mut upload_apis: Vec<api::Api> = Vec::new();
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
@@ -1582,7 +1548,7 @@ fn handle_stream(
                                 for api in apis {
                                     if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
                                         found = true;
-                                        upload_api = Some(api.clone());
+                                        upload_apis.push(api.clone());
                                         //println!("Uploading reads to {}", api.nickname());
                                         // this request will upload all reads regardless of whether or not they've been uploaded previously
                                         match sq.get_all_reads() {
@@ -1595,8 +1561,6 @@ fn handle_stream(
                                                 break;
                                             }
                                         };
-                                        // remote api found, so break the loop looking for it
-                                        break;
                                     }
                                 }
                                 if found == false {
@@ -1612,9 +1576,11 @@ fn handle_stream(
                         }
                     }
                     // upload any reads we found in the database if we found our remote API
-                    if let Some(api) = upload_api {
+                    for api in &upload_apis {
                         if to_upload.len() > 0 {
-                            let (modified_reads, _) = remote_util::upload_all_reads(&http_client, &api, to_upload);
+                            println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
+                            let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload.clone());
+                            println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
                             if let Ok(mut sq) = sqlite.lock() {
                                 match sq.update_reads_status(&modified_reads) {
                                     Ok(_) => {},
@@ -2082,8 +2048,6 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
         super::SETTING_ENABLE_NTFY,
         super::SETTING_SCREEN_TYPE,
         super::SETTING_BEEP_IGNORE,
-        super::SETTING_ENABLE_HEARTBEAT,
-        super::SETTING_HEARTBEAT_URL
     ];
     let mut settings: Vec<setting::Setting> = Vec::new();
     for name in setting_names {

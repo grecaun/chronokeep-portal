@@ -24,13 +24,16 @@ pub const API_TYPE_CHRONOKEEP_REMOTE_SELF: &str = "CHRONOKEEP_REMOTE_SELF";
 pub const API_URI_CHRONOKEEP_REMOTE: &str = "https://remote.chronokeep.com/";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all="snake_case")]
 pub struct Api {
     id: i64,
     nickname: String,
     kind: String,
     token: String,
     uri: String,
+    enabled: Option<bool>,
+    heartbeat: Option<bool>,
+    device_name: Option<String>,
 }
 
 impl Api {
@@ -39,13 +42,19 @@ impl Api {
         nickname: String,
         kind: String,
         token: String,
-        uri: String) -> Api {
+        uri: String,
+        enabled: bool,
+        heartbeat: bool,
+        device_name: String) -> Api {
         Api {
             id,
             nickname,
             kind,
             token,
             uri,
+            enabled: Some(enabled),
+            heartbeat: Some(heartbeat),
+            device_name: Some(device_name),
         }
     }
 
@@ -67,6 +76,30 @@ impl Api {
 
     pub fn uri(&self) -> &str {
         &self.uri
+    }
+
+    pub fn enabled(&self) -> bool {
+        if let Some(enabled) = self.enabled {
+            enabled
+        } else {
+            true // Default behavior is to treat an API as enabled if the value is not set
+        }
+    }
+
+    pub fn heartbeat(&self) -> bool {
+        if let Some(heartbeat) = self.heartbeat {
+            heartbeat
+        } else {
+            false // Default behavior is to treat an API as not having heartbeat enabled if the value is not set
+        }
+    }
+
+    pub fn device_name(&self) -> &str {
+        self.device_name.as_deref().unwrap_or("")
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = Some(enabled);
     }
 
     pub fn equal(&self, other: &Api) -> bool {
