@@ -120,13 +120,12 @@ impl Heartbeat {
                 now,
                 uptime,
                 battery: voltage,
-                battery_pct: bat.to_string(),
                 charging: bat >= 110,
                 hash: format!("Chronokeep Portal v{}", env!("CARGO_PKG_VERSION")),
                 upload_errors: up_err,
                 readers_connected: connected,
                 readers_total: total,
-                reading: reading,
+                reading,
                 chip_type,
             };
 

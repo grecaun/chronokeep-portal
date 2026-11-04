@@ -25,7 +25,6 @@ pub struct HeartbeatState {
     pub now: i64,
     pub uptime: i64,
     pub battery: String,
-    pub battery_pct: String,
     pub charging: bool,
     pub hash: String,
     pub upload_errors: usize,
