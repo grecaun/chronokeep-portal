@@ -1112,13 +1112,34 @@ fn handle_stream(
                                             }
                                         }
                                     },
+                                    super::SETTING_NTFY_URL => {
+                                        let mut t_uri = String::from(setting.value());
+                                        if !t_uri.ends_with("/") {
+                                            t_uri = format!("{t_uri}/")
+                                        }
+                                        match sq.set_setting(&Setting::new(String::from(setting.name()), t_uri)) {
+                                            Ok(_) => {
+                                                if let Ok(new_control) = super::Control::new(&mut sq) {
+                                                    _ = control.update(new_control);
+                                                } else {
+                                                    let settings = get_settings(&sq);
+                                                    no_error = write_settings(&stream, &settings);
+                                                }
+                                            },
+                                            Err(e) => {
+                                                println!("Error saving setting. {e}");
+                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    message: format!("error saving setting: {e}")
+                                                });
+                                            }
+                                        }
+                                    },
                                     super::SETTING_CHIP_TYPE |
                                     super::SETTING_PORTAL_NAME |
                                     super::SETTING_READ_WINDOW |
                                     super::SETTING_PLAY_SOUND |
                                     super::SETTING_UPLOAD_INTERVAL |
                                     super::SETTING_VOLUME |
-                                    super::SETTING_NTFY_URL |
                                     super::SETTING_NTFY_USER |
                                     super::SETTING_NTFY_PASS |
                                     super::SETTING_NTFY_TOPIC | 
