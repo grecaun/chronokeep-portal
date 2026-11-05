@@ -225,16 +225,7 @@ fn run_bridge(hub: &Hub, mut stream: TcpStream) {
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => continue,
             Err(_) => break,
         }
-        while let Some(pos) = buffer.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = buffer.drain(..=pos).collect();
-            let text = String::from_utf8_lossy(&line);
-            let text = text.trim();
-            if text.is_empty() {
-                continue;
-            }
-            let Ok(value) = serde_json::from_str::<Value>(text) else {
-                continue;
-            };
+        for (text, value) in take_messages(&mut buffer) {
             match value.get("command").and_then(Value::as_str) {
                 Some("keepalive") => {
                     if stream.write_all(b"{\"command\":\"keepalive_ack\"}\n").is_err() {
@@ -244,7 +235,7 @@ fn run_bridge(hub: &Hub, mut stream: TcpStream) {
                 Some("disconnect") => return,
                 Some(_) => {
                     hub.set_bridge(true);
-                    hub.broadcast(text);
+                    hub.broadcast(&text);
                 }
                 None => {}
             }
@@ -311,21 +302,10 @@ fn expected_reply(command: &str) -> &'static [&'static str] {
 /// closing the connection is about this request (plus any updates it sends to
 /// every client, which are passed over).
 fn web_command(hub: &Hub, body: &[u8]) -> String {
-    let cmd: Value = match serde_json::from_slice(body) {
-        Ok(v) => v,
-        Err(e) => return error_reply("INVALID_REQUEST", &format!("not valid JSON: {e}")),
+    let (command, cmd) = match check_command(body) {
+        Ok(c) => c,
+        Err(reply) => return reply,
     };
-    let Some(command) = cmd.get("command").and_then(Value::as_str).map(String::from) else {
-        return error_reply("INVALID_REQUEST", "command missing");
-    };
-    if !ALLOWED_COMMANDS.contains(&command.as_str()) {
-        return error_reply("UNKNOWN_COMMAND", &format!("'{command}' can't be sent from the web page"));
-    }
-    if command == "settings_set" {
-        if let Err(e) = validate_settings(&cmd) {
-            return error_reply("INVALID_SETTING", &e);
-        }
-    }
     // Limit how many control connections the page uses at once.
     let (lock, cvar) = &hub.running_commands;
     {
@@ -345,7 +325,7 @@ fn web_command(hub: &Hub, body: &[u8]) -> String {
         }
         *count += 1;
     }
-    let reply = run_command(hub, &command, &cmd);
+    let reply = run_command(hub.control_address(), &command, &cmd, COMMAND_DEADLINE);
     if let Ok(mut count) = lock.lock() {
         *count -= 1;
     }
@@ -353,8 +333,54 @@ fn web_command(hub: &Hub, body: &[u8]) -> String {
     reply
 }
 
-fn run_command(hub: &Hub, command: &str, cmd: &Value) -> String {
-    let mut stream = match TcpStream::connect_timeout(&hub.control_address(), Duration::from_secs(3)) {
+/// Checks a request from the page. Returns the command name and request, or the
+/// error reply to send back.
+fn check_command(body: &[u8]) -> Result<(String, Value), String> {
+    let cmd: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => return Err(error_reply("INVALID_REQUEST", &format!("not valid JSON: {e}"))),
+    };
+    if !cmd.is_object() {
+        return Err(error_reply("INVALID_REQUEST", "expected a JSON object"));
+    }
+    let Some(command) = cmd.get("command").and_then(Value::as_str).map(String::from) else {
+        return Err(error_reply("INVALID_REQUEST", "command missing"));
+    };
+    if !ALLOWED_COMMANDS.contains(&command.as_str()) {
+        return Err(error_reply("UNKNOWN_COMMAND", &format!("'{command}' can't be sent from the web page")));
+    }
+    if command == "settings_set" {
+        if let Err(e) = validate_settings(&cmd) {
+            return Err(error_reply("INVALID_SETTING", &e));
+        }
+    }
+    Ok((command, cmd))
+}
+
+/// Takes every complete line out of `buffer` and parses it as JSON. Blank and
+/// unreadable lines are skipped; a partial last line stays in the buffer.
+fn take_messages(buffer: &mut Vec<u8>) -> Vec<(String, Value)> {
+    let mut out = Vec::new();
+    while let Some(pos) = buffer.iter().position(|b| *b == b'\n') {
+        let line: Vec<u8> = buffer.drain(..=pos).collect();
+        if let Some(m) = parse_line(&line) {
+            out.push(m);
+        }
+    }
+    out
+}
+
+fn parse_line(line: &[u8]) -> Option<(String, Value)> {
+    let text = String::from_utf8_lossy(line).trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(&text).ok()?;
+    Some((text, value))
+}
+
+fn run_command(address: SocketAddr, command: &str, cmd: &Value, deadline: Duration) -> String {
+    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_secs(3)) {
         Ok(s) => s,
         Err(e) => return error_reply("SERVER_ERROR", &format!("unable to reach the control socket: {e}")),
     };
@@ -364,7 +390,7 @@ fn run_command(hub: &Hub, command: &str, cmd: &Value) -> String {
     if let Err(e) = stream.write_all(out.as_bytes()) {
         return error_reply("SERVER_ERROR", &format!("unable to send request: {e}"));
     }
-    let deadline = Instant::now() + COMMAND_DEADLINE;
+    let deadline = Instant::now() + deadline;
     let expected = expected_reply(command);
     let mut answer: Option<String> = None;
     let mut error: Option<String> = None;
@@ -372,18 +398,19 @@ fn run_command(hub: &Hub, command: &str, cmd: &Value) -> String {
     let mut buffer: Vec<u8> = Vec::new();
     let mut chunk = [0u8; 16384];
     while !finished && Instant::now() < deadline {
+        let mut messages = Vec::new();
         match stream.read(&mut chunk) {
             Ok(0) => finished = true,
             Ok(n) => buffer.extend_from_slice(&chunk[..n]),
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => continue,
             Err(_) => finished = true,
         }
-        while let Some(pos) = buffer.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = buffer.drain(..=pos).collect();
-            let text = String::from_utf8_lossy(&line).trim().to_string();
-            let Ok(value) = serde_json::from_str::<Value>(&text) else {
-                continue;
-            };
+        messages.extend(take_messages(&mut buffer));
+        // The connection closed; a last message without a newline still counts.
+        if finished {
+            messages.extend(parse_line(&std::mem::take(&mut buffer)));
+        }
+        for (text, value) in messages {
             match value.get("command").and_then(Value::as_str) {
                 Some("disconnect") => finished = true,
                 Some("error") => {
@@ -536,3 +563,6 @@ fn event_stream(req: Request, hub: &Hub) {
     }
     hub.unsubscribe(id);
 }
+
+#[cfg(test)]
+mod tests;

@@ -71,64 +71,7 @@ fn wait_for_next_upload(waiter: &Waiter, interval: Duration) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::thread;
-
-    fn waiter() -> Arc<Waiter> {
-        Arc::new((Mutex::new(WaitState::default()), std::sync::Condvar::new()))
-    }
-
-    #[test]
-    fn waits_for_the_interval_without_reads() {
-        let w = waiter();
-        let start = Instant::now();
-        wait_for_next_upload(&w, Duration::from_millis(300));
-        assert!(start.elapsed() >= Duration::from_millis(300));
-    }
-
-    #[test]
-    fn uploads_early_after_threshold_reads() {
-        let w = waiter();
-        let t = w.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(100));
-            add_new_reads(&t, 10);
-            add_new_reads(&t, UPLOAD_READ_THRESHOLD - 10);
-        });
-        let start = Instant::now();
-        wait_for_next_upload(&w, Duration::from_secs(10));
-        assert!(start.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
-    fn fewer_reads_wait_for_the_interval() {
-        let w = waiter();
-        let t = w.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
-            add_new_reads(&t, UPLOAD_READ_THRESHOLD - 1);
-        });
-        let start = Instant::now();
-        wait_for_next_upload(&w, Duration::from_millis(400));
-        assert!(start.elapsed() >= Duration::from_millis(400));
-    }
-
-    #[test]
-    fn wake_stops_waiting() {
-        let w = waiter();
-        let t = w.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(100));
-            let (lock, cvar) = &*t;
-            lock.lock().unwrap().wake = true;
-            cvar.notify_one();
-        });
-        let start = Instant::now();
-        wait_for_next_upload(&w, Duration::from_secs(10));
-        assert!(start.elapsed() < Duration::from_secs(2));
-    }
-}
+mod tests;
 
 #[derive(Clone, PartialEq, Serialize, Debug)]
 pub enum Status {

@@ -41,9 +41,34 @@ pub const SETTING_BEEP_IGNORE: &str = "SETTING_BEEP_IGNORE";
 /// Reads a beep interval (seconds). Values outside 0 to MAX_BEEP_IGNORE snap to
 /// the nearest end of the range; anything that isn't a number uses the default.
 pub fn clamp_beep_ignore(value: &str) -> u16 {
+    clamp_number(value, 0.0, defaults::MAX_BEEP_IGNORE as f64).map(|v| v as u16).unwrap_or(defaults::DEFAULT_BEEP_IGNORE)
+}
+
+/// Rounds a stored number and snaps it into `min..=max`. None if it isn't a number.
+/// Settings come from the database, which any control program can write to, so
+/// reading them back must never fail.
+fn clamp_number(value: &str, min: f64, max: f64) -> Option<f64> {
     match value.trim().parse::<f64>() {
-        Ok(v) if v.is_finite() => v.round().clamp(0.0, defaults::MAX_BEEP_IGNORE as f64) as u16,
-        _ => defaults::DEFAULT_BEEP_IGNORE,
+        Ok(v) if v.is_finite() => Some(v.round().clamp(min, max)),
+        _ => None,
+    }
+}
+
+/// Read window in tenths of a second.
+fn parse_read_window(value: &str) -> u8 {
+    clamp_number(value, 0.0, u8::MAX as f64).map(|v| v as u8).unwrap_or(defaults::DEFAULT_READ_WINDOW)
+}
+
+/// Upload interval in seconds.
+fn parse_upload_interval(value: &str) -> u64 {
+    clamp_number(value, 0.0, u32::MAX as f64).map(|v| v as u64).unwrap_or(defaults::DEFAULT_UPLOAD_INTERVAL)
+}
+
+/// Volume from 0.0 to 1.0 (not rounded).
+fn parse_volume(value: &str) -> f32 {
+    match value.trim().parse::<f32>() {
+        Ok(v) if v.is_finite() => v.clamp(0.0, 1.0),
+        _ => defaults::DEFAULT_VOLUME,
     }
 }
 
@@ -181,7 +206,7 @@ impl Control {
         }
         match sqlite.get_setting(SETTING_READ_WINDOW) {
             Ok(s) => {
-                let rw: u8 = s.value().parse().unwrap();
+                let rw: u8 = parse_read_window(s.value());
                 output.read_window = rw;
             },
             Err(DBError::NotFound) => {
@@ -190,7 +215,7 @@ impl Control {
                     format!("{}", defaults::DEFAULT_READ_WINDOW),
                 )) {
                     Ok(s) => {
-                        let rw: u8 = s.value().parse().unwrap();
+                        let rw: u8 = parse_read_window(s.value());
                         output.read_window = rw;
                         println!("Read window successfully set to '{}'.", s.value());
                     },
@@ -225,7 +250,7 @@ impl Control {
         }
         match sqlite.get_setting(SETTING_VOLUME) {
             Ok(s) => {
-                let vol: f32 = s.value().parse().unwrap();
+                let vol: f32 = parse_volume(s.value());
                 output.volume = vol;
             },
             Err(DBError::NotFound) => {
@@ -234,7 +259,7 @@ impl Control {
                     format!("{}", defaults::DEFAULT_VOLUME)
                 )) {
                     Ok(s) => {
-                        let vol: f32 = s.value().parse().unwrap();
+                        let vol: f32 = parse_volume(s.value());
                         output.volume = vol;
                         println!("Volume successfully set to '{}'.", s.value());
                     },
@@ -290,7 +315,7 @@ impl Control {
         }
         match sqlite.get_setting(SETTING_UPLOAD_INTERVAL) {
             Ok(s) => {
-                let up: u64 = s.value().parse().unwrap();
+                let up: u64 = parse_upload_interval(s.value());
                 output.upload_interval = up;
             },
             Err(DBError::NotFound) => {
@@ -298,7 +323,7 @@ impl Control {
                     String::from(SETTING_UPLOAD_INTERVAL),
                     format!("{}", defaults::DEFAULT_UPLOAD_INTERVAL))) {
                         Ok(s) => {
-                            let up: u64 = s.value().parse().unwrap();
+                            let up: u64 = parse_upload_interval(s.value());
                             output.upload_interval = up;
                             println!("Upload interval successfully set to '{}'.", s.value());
                         },
@@ -454,3 +479,6 @@ impl Control {
         Ok(output)
     }
 }
+
+#[cfg(test)]
+mod tests;

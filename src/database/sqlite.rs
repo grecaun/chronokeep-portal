@@ -26,7 +26,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 #[cfg(test)]
-pub(super) mod tests;
+pub(crate) mod tests;
 
 const DATABASE_URI: &str = "./chronokeep-portal.sqlite";
 

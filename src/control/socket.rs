@@ -468,37 +468,110 @@ pub fn control_loop(
     }
 }
 
+/// Parses one message from a control connection. Anything before the opening
+/// brace (stray bytes, leftovers from a garbled message) is ignored so it
+/// doesn't take the request with it.
+fn parse_request(message: &str) -> Result<requests::Request, serde_json::Error> {
+    let start = message.find(JSON_START_CHAR).unwrap_or(0);
+    serde_json::from_str(&message[start..])
+}
+
+/// Adds bytes read from a control connection to the text buffer. A character
+/// split across two reads (e.g. the "é" in "Café") is held in `pending` until
+/// the rest arrives; bytes that can never be valid UTF-8 become U+FFFD.
+fn push_received(pending: &mut Vec<u8>, buffer: &mut String, data: &[u8]) {
+    pending.extend_from_slice(data);
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(s) => {
+                buffer.push_str(s);
+                pending.clear();
+                return;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                // Safe: everything before valid_up_to is valid UTF-8.
+                buffer.push_str(std::str::from_utf8(&pending[..valid]).unwrap_or_default());
+                match e.error_len() {
+                    // Invalid bytes: replace them and keep going.
+                    Some(bad) => {
+                        println!("Invalid text received on a control connection.");
+                        buffer.push(char::REPLACEMENT_CHARACTER);
+                        pending.drain(..valid + bad);
+                    }
+                    // The end is a partial character: wait for the rest.
+                    None => {
+                        pending.drain(..valid);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Reads to send for a manual upload: those with a read time (Unix seconds)
+/// between `start` and `end` inclusive, either of which may be left open, and
+/// from `reader_name` only (ignoring case) if one is given.
+pub(crate) fn reads_for_manual_upload(
+    sq: &sqlite::SQLite,
+    start: Option<i64>,
+    end: Option<i64>,
+    reader_name: Option<&str>,
+) -> Result<Vec<read::Read>, crate::database::DBError> {
+    let mut reads = match (start, end) {
+        (None, None) => sq.get_all_reads()?,
+        (start, end) => sq.get_reads(start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX))?,
+    };
+    if let Some(name) = reader_name.map(str::trim).filter(|n| !n.is_empty()) {
+        reads.retain(|r| r.reader().eq_ignore_ascii_case(name));
+    }
+    Ok(reads)
+}
+
+/// Finds the index of the last byte of the first JSON object in `buffer` (or of
+/// the newline right after it). Returns the last index if the object isn't complete.
+/// Braces inside strings (names, API keys, passwords) don't count.
 fn find_json_end(buffer: &String) -> usize {
     let chars = buffer.as_bytes();
-    let mut start_count = 0;
-    let mut ix = 0;
-    // get to the first start char
-    while ix < chars.len() {
-        if chars[ix] == JSON_START_CHAR as u8 {
-            start_count += 1;
-            ix += 1;
-            break;
+    let mut depth: usize = 0;
+    let mut started = false;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (ix, &c) in chars.iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            continue;
         }
-        ix += 1;
-    }
-    if ix >= chars.len() - 1 {
-        return chars.len() - 1;
-    }
-    while ix < chars.len() {
-        if chars[ix] == JSON_START_CHAR as u8 {
-            start_count += 1;
-        } else if chars[ix] == JSON_END_CHAR as u8 {
-            start_count -= 1;
-            if start_count < 1 {
+        if !started {
+            // get to the first start char
+            if c == JSON_START_CHAR as u8 {
+                started = true;
+                depth = 1;
+            }
+            continue;
+        }
+        if c == b'"' {
+            in_string = true;
+        } else if c == JSON_START_CHAR as u8 {
+            depth += 1;
+        } else if c == JSON_END_CHAR as u8 {
+            depth -= 1;
+            if depth == 0 {
                 if ix + 1 < chars.len() && chars[ix + 1] == '\n' as u8 {
                     return ix + 1;
                 }
                 return ix;
             }
         }
-        ix += 1;
     }
-    return chars.len() - 1;
+    chars.len().saturating_sub(1)
 }
 
 fn handle_stream(
@@ -521,6 +594,8 @@ fn handle_stream(
     println!("Starting control loop for index {index}");
     let mut data = [0 as u8; 51200];
     let mut buffer = String::new();
+    // Bytes of a character split across two reads, waiting for the rest.
+    let mut pending_bytes: Vec<u8> = Vec::new();
     let mut no_error = true;
     let mut client_disconnected = false;
     let mut last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -563,14 +638,7 @@ fn handle_stream(
                     0
                 }
             };
-            let s = match std::str::from_utf8(&data[0..size]) {
-                Ok(buf) => buf,
-                Err(e) => {
-                    println!("Error parsing data received: {e}");
-                    ""
-                },
-            };
-            buffer.push_str(&s);
+            push_received(&mut pending_bytes, &mut buffer, &data[0..size]);
         }
         while buffer.len() > 0
         {
@@ -580,7 +648,7 @@ fn handle_stream(
                 newline += 1;
             }
             let single_line: String = buffer.drain(..newline).collect();
-            let cmd: requests::Request = match serde_json::from_str(&single_line) {
+            let cmd: requests::Request = match parse_request(&single_line) {
                 Ok(data) => {
                     match data {
                         requests::Request::KeepaliveAck => {},
@@ -1593,18 +1661,8 @@ fn handle_stream(
                                 if found == false {
                                     no_error = write_error(&stream, errors::Errors::NoRemoteApi);
                                 } else {
-                                    // Only reads within the time frame (read time), if one was given.
-                                    let reads = match (start_seconds, end_seconds) {
-                                        (Some(start), Some(end)) => sq.get_reads(start, end),
-                                        (Some(start), None) => sq.get_reads(start, i64::MAX),
-                                        (None, Some(end)) => sq.get_reads(i64::MIN, end),
-                                        (None, None) => sq.get_all_reads(),
-                                    };
-                                    match reads {
+                                    match reads_for_manual_upload(&sq, start_seconds, end_seconds, reader_name.as_deref()) {
                                         Ok(mut reads) => {
-                                            if let Some(name) = reader_name.as_deref().filter(|n| !n.is_empty()) {
-                                                reads.retain(|r| r.reader().eq_ignore_ascii_case(name));
-                                            }
                                             to_upload.append(&mut reads);
                                         },
                                         Err(e) => {
@@ -2713,3 +2771,6 @@ pub fn upload_reads(
     };
     Ok(output)
 }
+
+#[cfg(test)]
+mod tests;

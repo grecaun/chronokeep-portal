@@ -134,3 +134,6 @@ pub enum AutoUploadQuery {
     Start,
     Status,
 }
+
+#[cfg(test)]
+mod tests;

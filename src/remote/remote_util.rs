@@ -71,7 +71,9 @@ pub fn upload_all_reads(
         }
         let start_ix = loop_counter * NUMBER_READS_PER_UPLOAD;
         let slice = &reads[start_ix..reads.len()];
-        match socket::upload_reads(http_client, api, &slice) {
+        // When the reads fill whole batches there's nothing left; don't send an empty request.
+        let leftover = if slice.is_empty() { Ok(0) } else { socket::upload_reads(http_client, api, &slice) };
+        match leftover {
             Ok(count) => {
                 // Need to calculate the count... for 75 items (0-74)
                 // only 1 loop, start_ix should be (1 * NUMBER_READS_PER_UPLOAD)
@@ -136,3 +138,6 @@ pub fn upload_all_reads(
     }
     return (modified_reads, err_count);
 }
+
+#[cfg(test)]
+mod tests;
