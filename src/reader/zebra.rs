@@ -649,6 +649,7 @@ pub fn connect(
                                 match process_tags(&mut read_map, &mut tags, &mut unsaved_reads, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                     Ok(new_reads) => {
                                         if new_reads.len() > 0 {
+                                            let new_count = new_reads.len();
                                             match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
                                                 Ok(_) => {},
                                                 Err(e) => {
@@ -656,7 +657,7 @@ pub fn connect(
                                                 }
                                             }
                                             if let Some(uploader) = &t_uploader {
-                                                uploader.notify();
+                                                uploader.notify_reads(new_count);
                                             }
                                         }
                                     },
@@ -731,6 +732,7 @@ pub fn connect(
                                     match process_tags(&mut read_map, &mut Vec::new(), &mut unsaved_reads, &t_control, &t_read_saver, t_reader_name.as_str()) {
                                         Ok(new_reads) => {
                                             if new_reads.len() > 0 {
+                                                let new_count = new_reads.len();
                                                 match send_new(new_reads, &t_control_sockets, &t_read_repeaters) {
                                                     Ok(_) => {},
                                                     Err(e) => {
@@ -738,7 +740,7 @@ pub fn connect(
                                                     }
                                                 }
                                                 if let Some(uploader) = &t_uploader {
-                                                    uploader.notify();
+                                                    uploader.notify_reads(new_count);
                                                 }
                                             }
                                         },

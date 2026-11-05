@@ -16,7 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{collections::HashMap, net::TcpStream, sync::{Arc, Mutex, WaitTimeoutResult}, time::Duration};
+use std::{collections::HashMap, net::TcpStream, sync::{Arc, Mutex}, time::{Duration, Instant}};
 
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -25,6 +25,110 @@ use crate::{control::{Control, socket::{MAX_CONNECTED, write_uploader_status}}, 
 use crate::remote::remote_util;
 
 pub mod info;
+
+/// Upload as soon as this many new reads have come in, without waiting for the
+/// upload interval.
+pub const UPLOAD_READ_THRESHOLD: usize = 25;
+
+/// What the upload loop is waiting on between uploads.
+#[derive(Default)]
+struct WaitState {
+    /// New reads since the last upload started.
+    new_reads: usize,
+    /// Set to stop waiting right away (e.g. when stopping).
+    wake: bool,
+}
+
+type Waiter = (Mutex<WaitState>, std::sync::Condvar);
+
+fn add_new_reads(waiter: &Waiter, count: usize) {
+    let (lock, cvar) = waiter;
+    if let Ok(mut state) = lock.lock() {
+        state.new_reads += count;
+        if state.new_reads >= UPLOAD_READ_THRESHOLD {
+            cvar.notify_one();
+        }
+    }
+}
+
+/// Waits until `interval` is up, UPLOAD_READ_THRESHOLD new reads have come in,
+/// or the uploader is woken (e.g. to stop), whichever comes first.
+fn wait_for_next_upload(waiter: &Waiter, interval: Duration) {
+    let deadline = Instant::now() + interval;
+    let (lock, cvar) = waiter;
+    if let Ok(mut state) = lock.lock() {
+        while !state.wake && state.new_reads < UPLOAD_READ_THRESHOLD {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            state = match cvar.wait_timeout(state, left) {
+                Ok((s, _)) => s,
+                Err(_) => break,
+            };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    fn waiter() -> Arc<Waiter> {
+        Arc::new((Mutex::new(WaitState::default()), std::sync::Condvar::new()))
+    }
+
+    #[test]
+    fn waits_for_the_interval_without_reads() {
+        let w = waiter();
+        let start = Instant::now();
+        wait_for_next_upload(&w, Duration::from_millis(300));
+        assert!(start.elapsed() >= Duration::from_millis(300));
+    }
+
+    #[test]
+    fn uploads_early_after_threshold_reads() {
+        let w = waiter();
+        let t = w.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            add_new_reads(&t, 10);
+            add_new_reads(&t, UPLOAD_READ_THRESHOLD - 10);
+        });
+        let start = Instant::now();
+        wait_for_next_upload(&w, Duration::from_secs(10));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn fewer_reads_wait_for_the_interval() {
+        let w = waiter();
+        let t = w.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            add_new_reads(&t, UPLOAD_READ_THRESHOLD - 1);
+        });
+        let start = Instant::now();
+        wait_for_next_upload(&w, Duration::from_millis(400));
+        assert!(start.elapsed() >= Duration::from_millis(400));
+    }
+
+    #[test]
+    fn wake_stops_waiting() {
+        let w = waiter();
+        let t = w.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            let (lock, cvar) = &*t;
+            lock.lock().unwrap().wake = true;
+            cvar.notify_one();
+        });
+        let start = Instant::now();
+        wait_for_next_upload(&w, Duration::from_secs(10));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+}
 
 #[derive(Clone, PartialEq, Serialize, Debug)]
 pub enum Status {
@@ -41,7 +145,7 @@ pub struct Uploader {
     status: Arc<Mutex<Status>>,
     control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
     control: Arc<Mutex<Control>>,
-    waiter: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    waiter: Arc<Waiter>,
     info: Arc<Mutex<UploadInfo>>,
 }
 
@@ -60,7 +164,7 @@ impl Uploader {
             status: Arc::new(Mutex::new(Status::Stopped)),
             control_sockets,
             control,
-            waiter: Arc::new((Mutex::new(false), std::sync::Condvar::new())),
+            waiter: Arc::new((Mutex::new(WaitState::default()), std::sync::Condvar::new())),
             info,
         }
     }
@@ -90,14 +194,23 @@ impl Uploader {
         }
         // let everyone know we're stopping
         self.update_control_socks(0);
+        // stop waiting for the upload interval so the loop can exit
+        self.wake();
     }
 
-    pub fn notify(&self) {
+    /// Wakes the upload loop now instead of at the end of the upload interval.
+    pub fn wake(&self) {
         let (lock, cvar) = &*self.waiter;
-        let mut waiting = lock.lock().unwrap();
-        *waiting = false;
-        cvar.notify_one();
-        drop(waiting);
+        if let Ok(mut state) = lock.lock() {
+            state.wake = true;
+            cvar.notify_one();
+        }
+    }
+
+    /// Tells the uploader new reads came in. It uploads once UPLOAD_READ_THRESHOLD
+    /// have arrived, or when the upload interval is up, whichever comes first.
+    pub fn notify_reads(&self, count: usize) {
+        add_new_reads(&self.waiter, count);
     }
 
     pub fn run(&self) {
@@ -154,6 +267,11 @@ impl Uploader {
             } else {
                 println!("Unable to grab server keep alive mutex. Exiting.");
                 break;
+            }
+            // Reads that arrive from here on count toward the next upload.
+            if let Ok(mut state) = self.waiter.0.lock() {
+                state.new_reads = 0;
+                state.wake = false;
             }
             let mut to_upload: Vec<read::Read> = Vec::new();
             let mut upload_apis: Vec<api::Api> = Vec::new();
@@ -258,18 +376,7 @@ impl Uploader {
             if let Ok(control) = self.control.lock() {
                 upload_pause = control.upload_interval;
             }
-            // sleep for AUTO_UPLOAD_PAUSE seconds
-            let (lock, cvar) = &*self.waiter.clone();
-            let mut waiting = lock.lock().unwrap();
-            let mut result: WaitTimeoutResult;
-            while *waiting {
-                (waiting, result) = cvar.wait_timeout(waiting, Duration::from_secs(upload_pause)).unwrap();
-                if result.timed_out() {
-                    break;
-                }
-            }
-            *waiting = true;
-            drop(waiting);
+            wait_for_next_upload(&self.waiter, Duration::from_secs(upload_pause.max(1)));
         } // end auto upload loop
         if let Ok(mut r) = self.status.lock() {
             *r = Status::Stopped;

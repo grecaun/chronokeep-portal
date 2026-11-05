@@ -37,6 +37,7 @@
   }
   :root[data-theme="light"] { color-scheme: light; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   /* The bar spans the window; its content lines up with the body (same max width and side padding as main). */
@@ -173,10 +174,15 @@
   input, select { font: inherit; font-size: 15px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
                   background: var(--bg); color: var(--text); width: 100%; }
   input[type=checkbox], input[type=radio] { width: auto; }
+  /* Browsers give radios an uneven margin (3px on top, none below), which sits
+     them below the middle of their text. */
+  input[type=radio] { margin: 0; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--accent); }
   .hint { font-size: 12px; color: var(--muted); margin: 0; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row > *, input, select { min-width: 0; }
   .row.stack { grid-template-columns: 1fr; }
+  .ntfy-fields { display: grid; gap: 10px; }
+  .ntfy-fields[hidden] { display: none; }
   .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
   .dialog-actions .spacer { flex: 1; }
   /* Time dialog */
@@ -211,7 +217,6 @@
 <header>
  <div class="header-inner">
   <h1>Chronokeep Portal</h1>
-  <span class="name" id="portal-name"></span>
   <span class="live" id="live"><span class="dot"></span><span id="live-text">Connecting…</span></span>
   <span class="uptime" id="uptime"></span>
   <span class="spacer"></span>
@@ -233,6 +238,7 @@
   <div class="header-actions">
     <button id="start-all">Start all</button>
     <button id="stop-all">Stop all</button>
+    <button class="primary" id="add-reader">Add reader</button>
   </div>
  </div>
 </header>
@@ -241,8 +247,6 @@
   <section>
     <div class="section-head">
       <h2>Readers</h2>
-      <span class="spacer"></span>
-      <button class="primary" id="add-reader">Add reader</button>
     </div>
     <div class="cards" id="readers"></div>
   </section>
@@ -284,14 +288,13 @@
           </label>
           <label>Read window (seconds)<input name="read_window" type="number" min="0.1" max="25.5" step="0.1" required></label>
         </div>
-        <p class="hint">Reads of the same chip within the read window are combined into one.</p>
-        <label>Screen type
+        <p class="hint">When a chip is read more than once within the read window, the portal keeps only the strongest read.</p>
+        <label id="screen-type-field" hidden>Screen type
           <select name="screen_type">
             <option value="ADAFRUIT">Adafruit</option>
             <option value="PCF8574T">PCF8574T</option>
           </select>
         </label>
-        <p class="hint">Only used when a character screen is attached to the portal.</p>
       </div>
 
       <div class="card">
@@ -316,26 +319,29 @@
       <div class="card">
         <h4>Uploads</h4>
         <div class="switch-row">
-          <span>Automatically upload reads to remote APIs</span>
+          <span>Automatically upload reads</span>
           <button type="button" class="switch" role="switch" id="auto-upload" aria-checked="false">Off</button>
         </div>
         <p class="hint" id="auto-upload-hint">Takes effect right away.</p>
         <label>Upload interval
           <span class="range-row"><input name="upload_interval" type="range" min="1" max="120" step="1"><output data-for="upload_interval" data-unit="time">0</output></span>
         </label>
+        <p class="hint">Reads upload at this interval, or as soon as 25 new reads come in.</p>
         <button type="button" id="upload-now">Upload reads…</button>
       </div>
 
       <div class="card">
         <h4>Notifications (ntfy)</h4>
         <label class="toggle"><span>Send notifications with ntfy</span><input type="checkbox" role="switch" name="enable_ntfy"><span class="sw" aria-hidden="true"></span></label>
-        <label>Server URL<input name="ntfy_url" placeholder="https://ntfy.sh/"></label>
-        <label>Topic<input name="ntfy_topic"></label>
-        <div class="row">
-          <label>User<input name="ntfy_user"></label>
-          <label>Password<input name="ntfy_pass" type="password"></label>
+        <div class="ntfy-fields" id="ntfy-fields">
+          <label>Server URL<input name="ntfy_url" placeholder="https://ntfy.sh/"></label>
+          <label>Topic<input name="ntfy_topic"></label>
+          <div class="row">
+            <label>User<input name="ntfy_user"></label>
+            <label>Password<input name="ntfy_pass" type="password"></label>
+          </div>
+          <label class="toggle"><span>Show password</span><input type="checkbox" role="switch" id="show-ntfy-pass"><span class="sw" aria-hidden="true"></span></label>
         </div>
-        <label class="toggle"><span>Show password</span><input type="checkbox" role="switch" id="show-ntfy-pass"><span class="sw" aria-hidden="true"></span></label>
       </div>
     </form>
   </section>
@@ -748,7 +754,7 @@ function applySettings(list) {
   for (const s of list) state.settings[s.name] = s.value;
   if (!state.dirty) fillSettings();
   const name = state.settings[S.name];
-  if (name) { $("portal-name").textContent = name; document.title = `${name} · Chronokeep Portal`; }
+  if (name) document.title = `${name} · Chronokeep Portal`;
 }
 
 function fillSettings() {
@@ -770,6 +776,7 @@ function fillSettings() {
   form.ntfy_topic.value = v[S.ntfy_topic] ?? "";
   form.ntfy_user.value = v[S.ntfy_user] ?? "";
   form.ntfy_pass.value = v[S.ntfy_pass] ?? "";
+  syncNtfyFields();
   setDirty(false);
 }
 
@@ -809,19 +816,26 @@ form.addEventListener("change", (e) => { if (e.target.name) setDirty(true); });
 $("settings-revert").addEventListener("click", fillSettings);
 $("show-ntfy-pass").addEventListener("change", (e) => { form.ntfy_pass.type = e.target.checked ? "text" : "password"; });
 
+// The ntfy server details only matter while ntfy is turned on. They're kept
+// (and still saved) while hidden.
+function syncNtfyFields() { $("ntfy-fields").hidden = !form.enable_ntfy.checked; }
+form.enable_ntfy.addEventListener("change", syncNtfyFields);
+
 $("settings-save").addEventListener("click", async () => {
   if (!form.reportValidity()) return;
   const rw = Math.round(Number(form.read_window.value) * 10);
   if (!(rw >= 1 && rw <= 255)) return toast("Read window must be between 0.1 and 25.5 seconds", "error");
   const values = {
     name: form.name.value.trim(), chip_type: form.chip_type.value, read_window: String(rw),
-    screen_type: form.screen_type.value, play_sound: String(form.play_sound.checked),
+    play_sound: String(form.play_sound.checked),
     volume: String(Number(form.volume.value) / 10), voice: form.voice.value,
     beep_ignore: String(clampNum(form.beep_ignore.value, 0, 600, 60)),
     upload_interval: String(clampNum(form.upload_interval.value, 1, 120, 5)),
     enable_ntfy: String(form.enable_ntfy.checked), ntfy_url: form.ntfy_url.value.trim(),
     ntfy_topic: form.ntfy_topic.value.trim(), ntfy_user: form.ntfy_user.value.trim(), ntfy_pass: form.ntfy_pass.value.trim(),
   };
+  // Character screens only work on Linux, so the screen type is only sent there.
+  if (state.isLinux) values.screen_type = form.screen_type.value;
   const settings = Object.entries(values).map(([k, value]) => ({ name: S[k], value }));
   $("settings-save").disabled = true;
   const reply = await send({ command: "settings_set", settings });
@@ -847,9 +861,8 @@ function renderAutoUpload() {
   b.setAttribute("aria-checked", String(on));
   b.textContent = s === "Stopping" ? "Stopping…" : on ? "On" : "Off";
   b.disabled = s === "Stopping";
-  $("auto-upload-hint").textContent = on
-    ? "Reads are uploaded to every enabled remote API."
-    : "Reads stay on the portal until you upload them.";
+  $("auto-upload-hint").textContent = "Reads are uploaded to every enabled remote API.";
+  $("auto-upload-hint").hidden = !on;
 }
 
 $("auto-upload").addEventListener("click", async () => {
@@ -1211,9 +1224,12 @@ async function init() {
   $("local-head").title = state.localZoneTitle;
   try {
     const info = await (await fetch("/api/info")).json();
-    if (info.name) { $("portal-name").textContent = info.name; document.title = `${info.name} · Chronokeep Portal`; }
+    if (info.name) document.title = `${info.name} · Chronokeep Portal`;
     $("version").textContent = `Version ${info.version}`;
     state.canSetTime = info.can_set_time;
+    // Character screens are only supported when the portal runs on Linux.
+    state.isLinux = info.platform === "linux";
+    $("screen-type-field").hidden = !state.isLinux;
     if (!info.can_set_time) $("clock-btn").title = "The portal can only set its clock when it runs on Linux";
     state.started = Date.now() - info.uptime_seconds * 1000;
     renderUptime();
