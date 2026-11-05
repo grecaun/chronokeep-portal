@@ -98,7 +98,7 @@ pub struct CharacterDisplay {
     minute: u8,
     seconds: u8,
     volume: u8,
-    beep_ignore: u8,
+    beep_ignore: u16,
 }
 
 #[allow(unused)]

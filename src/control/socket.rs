@@ -39,7 +39,8 @@ pub mod responses;
 pub mod errors;
 pub mod notifications;
 
-pub const MAX_CONNECTED: usize = 4;
+// Four for control programs such as Chronokeep desktop, plus two for the built-in web page.
+pub const MAX_CONNECTED: usize = 6;
 pub const CONNECTION_TYPE: &str = "chrono_portal";
 pub const CONNECTION_VERS: usize = 1;
 
@@ -140,6 +141,10 @@ pub fn control_loop(
     } else {
         println!("Unable to get joiners lock.");
     }
+
+    // Serve the web page. It talks to the portal through this control socket,
+    // which is already listening, so it can connect whenever it's ready.
+    crate::web::start(control_port, keepalive.clone(), sqlite.clone());
 
     // Get all known readers so we can work on them later.
     match sqlite.lock() {
@@ -517,6 +522,7 @@ fn handle_stream(
     let mut data = [0 as u8; 51200];
     let mut buffer = String::new();
     let mut no_error = true;
+    let mut client_disconnected = false;
     let mut last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
                                 .connect_timeout(Duration::from_secs(5)).build()
@@ -531,6 +537,8 @@ fn handle_stream(
             break;
         }
         let size = match stream.read(&mut data) {
+            // The client closed the connection.
+            Ok(0) => break,
             Ok(size) => size,
             Err(e) => {
                 match e.kind() {
@@ -597,6 +605,7 @@ fn handle_stream(
                 requests::Request::Disconnect => {
                     // client requested to close the connection
                     // break the loop to exit the thread
+                    client_disconnected = true;
                     break;
                 },
                 requests::Request::Connect { reads } => {
@@ -606,8 +615,11 @@ fn handle_stream(
                             name = String::from(set.value())
                         }
                     }
+                    // The reserved local slot (index MAX_CONNECTED) has no read repeater.
                     if let Ok(mut repeaters) = read_repeaters.lock() {
-                        repeaters[index] = reads;
+                        if index < MAX_CONNECTED {
+                            repeaters[index] = reads;
+                        }
                     }
                     if let Ok(u_readers) = readers.try_lock() {
                         no_error = write_connection_successful(&mut stream, name, reads, &*u_readers, &uploader);
@@ -1113,8 +1125,8 @@ fn handle_stream(
                                         }
                                     },
                                     super::SETTING_NTFY_URL => {
-                                        let mut t_uri = String::from(setting.value());
-                                        if !t_uri.ends_with("/") {
+                                        let mut t_uri = String::from(setting.value().trim());
+                                        if !t_uri.is_empty() && !t_uri.ends_with("/") {
                                             t_uri = format!("{t_uri}/")
                                         }
                                         match sq.set_setting(&Setting::new(String::from(setting.name()), t_uri)) {
@@ -1146,6 +1158,12 @@ fn handle_stream(
                                     super::SETTING_ENABLE_NTFY |
                                     super::SETTING_SCREEN_TYPE |
                                     super::SETTING_BEEP_IGNORE => {
+                                        // Out of range beep intervals snap to the nearest end of the range.
+                                        let setting = if setting.name() == super::SETTING_BEEP_IGNORE {
+                                            Setting::new(String::from(setting.name()), super::clamp_beep_ignore(setting.value()).to_string())
+                                        } else {
+                                            setting
+                                        };
                                         match sq.set_setting(&setting) {
                                             Ok(_) => {
                                                 if let Ok(new_control) = super::Control::new(&mut sq) {
@@ -1559,7 +1577,7 @@ fn handle_stream(
                         }
                     }
                 },
-                requests::Request::ApiRemoteManualUpload => {
+                requests::Request::ApiRemoteManualUpload { start_seconds, end_seconds, reader_name } => {
                     let mut to_upload: Vec<read::Read> = Vec::new();
                     let mut upload_apis: Vec<api::Api> = Vec::new();
                     if let Ok(sq) = sqlite.lock() {
@@ -1575,14 +1593,24 @@ fn handle_stream(
                                 if found == false {
                                     no_error = write_error(&stream, errors::Errors::NoRemoteApi);
                                 } else {
-                                    match sq.get_all_reads() {
+                                    // Only reads within the time frame (read time), if one was given.
+                                    let reads = match (start_seconds, end_seconds) {
+                                        (Some(start), Some(end)) => sq.get_reads(start, end),
+                                        (Some(start), None) => sq.get_reads(start, i64::MAX),
+                                        (None, Some(end)) => sq.get_reads(i64::MIN, end),
+                                        (None, None) => sq.get_all_reads(),
+                                    };
+                                    match reads {
                                         Ok(mut reads) => {
+                                            if let Some(name) = reader_name.as_deref().filter(|n| !n.is_empty()) {
+                                                reads.retain(|r| r.reader().eq_ignore_ascii_case(name));
+                                            }
                                             to_upload.append(&mut reads);
                                         },
                                         Err(e) => {
                                             println!("Error geting reads to upload. {e}");
                                             no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
-                                            break;
+                                            upload_apis.clear();
                                         }
                                     };
                                 }
@@ -1596,11 +1624,17 @@ fn handle_stream(
                         }
                     }
                     // upload any reads we found in the database if we found our remote API
+                    let mut uploaded: usize = 0;
+                    let mut failures: Vec<String> = Vec::new();
                     for api in &upload_apis {
                         if to_upload.len() > 0 && api.enabled() {
                             println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
                             let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload.clone());
                             println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
+                            uploaded = uploaded.max(modified_reads.len());
+                            if e_count > 0 {
+                                failures.push(format!("{} ({} of {} reads sent)", api.nickname(), modified_reads.len(), to_upload.len()));
+                            }
                             if let Ok(mut sq) = sqlite.lock() {
                                 match sq.update_reads_status(&modified_reads) {
                                     Ok(_) => {},
@@ -1609,6 +1643,20 @@ fn handle_stream(
                                     }
                                 }
                             }
+                        }
+                    }
+                    // Tell the requester how it went (an error was already sent if there was no API).
+                    if !upload_apis.is_empty() {
+                        if !upload_apis.iter().any(|a| a.enabled()) {
+                            no_error = write_error(&stream, errors::Errors::NotAllowed {
+                                message: String::from("every remote API is turned off")
+                            });
+                        } else if !failures.is_empty() {
+                            no_error = write_error(&stream, errors::Errors::ServerError {
+                                message: format!("some reads didn't upload to {}", failures.join(", "))
+                            });
+                        } else {
+                            no_error = write_success(&stream, uploaded);
                         }
                     }
                 },
@@ -1794,7 +1842,9 @@ fn handle_stream(
                 requests::Request::Subscribe { reads } => {
                     let mut message:String = String::from("");
                     if let Ok(mut repeaters) = read_repeaters.lock() {
-                        if (repeaters[index] == true && reads == true)
+                        if index >= MAX_CONNECTED {
+                            message = String::from("reads can't be sent to this connection")
+                        } else if (repeaters[index] == true && reads == true)
                         || (repeaters[index] == false && reads == false) {
                             message = format!("reads already set to {reads}")
                         } else {
@@ -1873,6 +1923,9 @@ fn handle_stream(
             if no_error == false {
                 break;
             }
+        }
+        if client_disconnected {
+            break;
         }
         if let Ok(time) = SystemTime::now().duration_since(UNIX_EPOCH) {
             // if we haven't received a message in 2 x the keep alive period then we've

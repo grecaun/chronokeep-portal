@@ -381,8 +381,8 @@ impl CharacterDisplay {
                                             }
                                             SETTINGS_MENU_BEEP_IGNORE => {
                                                 // decrease ignore period
-                                                if self.beep_ignore > 120 {
-                                                    self.beep_ignore = 120;
+                                                if self.beep_ignore > crate::defaults::MAX_BEEP_IGNORE {
+                                                    self.beep_ignore = crate::defaults::MAX_BEEP_IGNORE;
                                                 } else if self.beep_ignore > 4 {
                                                     self.beep_ignore -= 5;
                                                 } else {
@@ -771,10 +771,10 @@ impl CharacterDisplay {
                                             }
                                             SETTINGS_MENU_BEEP_IGNORE => {
                                                 // increase ignore period
-                                                if self.beep_ignore < 116 {
+                                                if self.beep_ignore + 5 < crate::defaults::MAX_BEEP_IGNORE {
                                                     self.beep_ignore += 5;
                                                 } else {
-                                                    self.beep_ignore = 120;
+                                                    self.beep_ignore = crate::defaults::MAX_BEEP_IGNORE;
                                                 }
                                                 if let Ok(mut sq) = self.sqlite.lock() {
                                                     control.beep_ignore = self.beep_ignore;

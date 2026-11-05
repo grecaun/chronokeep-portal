@@ -42,6 +42,7 @@ pub mod sound_board;
 pub mod screen;
 pub mod buttons;
 pub mod notifier;
+pub mod web;
 #[cfg(target_os = "linux")]
 pub mod battery;
 

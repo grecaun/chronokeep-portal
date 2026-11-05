@@ -109,7 +109,6 @@ pub fn upload_all_reads(
             Ok(count) => {
                 // if we uploaded the correct
                 if count == reads.len() {
-                    let mut modified_reads: Vec<read::Read> = Vec::new();
                     for read in reads {
                         modified_reads.push(read::Read::new(
                             read.id(),

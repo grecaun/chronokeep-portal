@@ -44,7 +44,13 @@ pub enum Request {
     ApiRemoteAutoUpload {
         query: AutoUploadQuery,
     },
-    ApiRemoteManualUpload,
+    // Uploads stored reads to every enabled remote API. With no fields it sends
+    // every read; start/end (read time, Unix seconds) and reader limit what's sent.
+    ApiRemoteManualUpload {
+        start_seconds: Option<i64>,
+        end_seconds: Option<i64>,
+        reader_name: Option<String>,
+    },
     ApiRemove {
         id: i64,
     },

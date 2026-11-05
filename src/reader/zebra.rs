@@ -640,7 +640,7 @@ pub fn connect(
                             // process tags if we were told there were some
                             if data.tags.len() > 0 {
                                 count += data.tags.len();
-                                let mut ignore: u8 = defaults::DEFAULT_BEEP_IGNORE;
+                                let mut ignore: u16 = defaults::DEFAULT_BEEP_IGNORE;
                                 if let Ok(control) = t_control.lock() {
                                     ignore = control.beep_ignore;
                                 }

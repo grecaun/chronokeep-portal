@@ -38,6 +38,15 @@ pub const SETTING_ENABLE_NTFY: &str = "SETTING_ENABLE_NTFY";
 pub const SETTING_SCREEN_TYPE: &str = "SETTING_SCREEN_TYPE";
 pub const SETTING_BEEP_IGNORE: &str = "SETTING_BEEP_IGNORE";
 
+/// Reads a beep interval (seconds). Values outside 0 to MAX_BEEP_IGNORE snap to
+/// the nearest end of the range; anything that isn't a number uses the default.
+pub fn clamp_beep_ignore(value: &str) -> u16 {
+    match value.trim().parse::<f64>() {
+        Ok(v) if v.is_finite() => v.round().clamp(0.0, defaults::MAX_BEEP_IGNORE as f64) as u16,
+        _ => defaults::DEFAULT_BEEP_IGNORE,
+    }
+}
+
 pub struct Control {
     pub name: String,
     pub read_window: u8,
@@ -55,7 +64,7 @@ pub struct Control {
     pub battery: u8,
     pub battery_voltage: String,
     pub screen_type: String,
-    pub beep_ignore: u8,
+    pub beep_ignore: u16,
 }
 
 impl Control {
@@ -424,8 +433,7 @@ impl Control {
         }
         match sqlite.get_setting(SETTING_BEEP_IGNORE) {
             Ok(s) => {
-                let ign: u8 = s.value().parse().unwrap();
-                output.beep_ignore = ign;
+                output.beep_ignore = clamp_beep_ignore(s.value());
             },
             Err(DBError::NotFound) => {
                 match sqlite.set_setting(&setting::Setting::new(
@@ -433,7 +441,7 @@ impl Control {
                     format!("{}", defaults::DEFAULT_BEEP_IGNORE),
                 )) {
                     Ok(s) => {
-                        output.beep_ignore = s.value().parse().unwrap();
+                        output.beep_ignore = clamp_beep_ignore(s.value());
                         println!("Beep ignore successfully set to '{}'.", s.value());
                     },
                     Err(e) => return Err(e)

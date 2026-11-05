@@ -71,6 +71,42 @@ impl SQLite {
         }
     }
 
+    /// The most recently saved reads, newest first, with their database id.
+    /// Used by the web page.
+    pub fn get_recent_reads(&self, limit: usize) -> Result<Vec<read::Read>, DBError> {
+        let mut stmt = match self.conn.prepare("SELECT chip_id, chip, seconds, milliseconds, reader_seconds, reader_milliseconds, antenna, reader, rssi, uploaded FROM chip_reads ORDER BY chip_id DESC LIMIT ?1;") {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(DBError::ConnectionError(e.to_string()))
+        };
+        let results = match stmt.query_map(
+            [limit as i64],
+            |row| {
+                Ok(read::Read::new(
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                ))
+            }) {
+                Ok(r) => r,
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            };
+        let mut output: Vec<read::Read> = Vec::new();
+        for row in results {
+            match row {
+                Ok(r) => output.push(r),
+                Err(e) => return Err(DBError::DataRetrievalError(e.to_string()))
+            }
+        }
+        Ok(output)
+    }
+
     pub fn already_exists() -> bool {
         match Path::try_exists(Path::new(DATABASE_URI)) {
             Ok(val) => val,

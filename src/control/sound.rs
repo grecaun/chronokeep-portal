@@ -55,7 +55,7 @@ impl SoundNotifier {
         }
     }
 
-    pub fn notify_tags(&self, tags: &Vec<TagData>, ignore: u8) {
+    pub fn notify_tags(&self, tags: &Vec<TagData>, ignore: u16) {
         if let Ok(cur_dur) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             let cur_time = cur_dur.as_secs(); // current time as unix timestamp
             if let Ok(mut t_list) = self.tag_list.lock() {
