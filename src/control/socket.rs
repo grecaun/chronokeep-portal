@@ -324,13 +324,7 @@ pub fn control_loop(
     notifier.send_notification(notifier::Notification::Start, format!("{}", date_time.format("%Y/%m/%d %T")));
 
     let heartbeat: Arc<Heartbeat> = Arc::new(Heartbeat::new(control.clone(), sqlite.clone(), readers.clone(), upload_info.clone()));
-    let t_heartbeat = heartbeat.clone();
-    let t_joiner = thread::spawn(move|| {
-        t_heartbeat.run();
-    });
-    if let Ok(mut j) = joiners.lock() {
-        j.push(t_joiner);
-    }
+    let heartbeat_thread = remote::heartbeat::spawn(heartbeat.clone());
 
     loop {
         if let Ok(ka) = keepalive.lock() {
@@ -432,6 +426,10 @@ pub fn control_loop(
     let date_time: DateTime<Local> = SystemTime::now().into();
     notifier.send_notification(notifier::Notification::Shutdown, format!("{}", date_time.format("%Y/%m/%d %T")));
     println!("Shutting down control thread.");
+    // Stop heartbeats first so none go out while shutting down. This waits for
+    // at most one request already in progress.
+    heartbeat.stop();
+    _ = heartbeat_thread.join();
     println!("Stopping readers.");
     if let Ok(mut r) = readers.lock() {
         for reader in r.iter_mut() {
