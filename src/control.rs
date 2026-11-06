@@ -21,6 +21,7 @@ use crate::{database::{self, sqlite, DBError, Database}, defaults, objects::sett
 pub mod socket;
 pub mod zero_conf;
 pub mod sound;
+pub mod exit;
 
 pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";
 pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
@@ -90,9 +91,19 @@ pub struct Control {
     pub battery_voltage: String,
     pub screen_type: String,
     pub beep_ignore: u16,
+    /// What to do once the program has stopped (not saved to the database).
+    pub exit_action: exit::ExitAction,
 }
 
 impl Control {
+    /// Records what to do after the program stops. The first shutdown, restart
+    /// or update request wins; a later request (or a plain quit) doesn't replace it.
+    pub fn request_exit(&mut self, action: exit::ExitAction) {
+        if self.exit_action == exit::ExitAction::Quit {
+            self.exit_action = action;
+        }
+    }
+
     pub fn update(&mut self, new_control: Control) -> Result<(), ()> {
         if self.name != new_control.name {
             self.name = new_control.name
@@ -161,6 +172,7 @@ impl Control {
             battery_voltage: String::from("0"),
             screen_type: String::from(defaults::DEFAULT_SCREEN_TYPE),
             beep_ignore: defaults::DEFAULT_BEEP_IGNORE,
+            exit_action: exit::ExitAction::Quit,
         };
         match sqlite.get_setting(SETTING_PORTAL_NAME) {
             Ok(s) => {

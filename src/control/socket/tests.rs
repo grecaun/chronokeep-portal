@@ -23,6 +23,7 @@ use super::{find_json_end, parse_request, requests::Request};
 mod messages;
 mod received;
 mod manual_upload;
+mod shutdown;
 
 /// Splits a buffer into messages the same way `handle_stream` does.
 fn split(buffer: &str) -> Vec<String> {

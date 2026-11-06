@@ -217,7 +217,9 @@ fn main() {
         println!("Unable to get control mutex for some reason.");
     }
     let keepalive: Arc<Mutex<bool>> = Arc::new(Mutex::new(true));
+    // Returns once every thread has stopped and all reads are saved.
     control::socket::control_loop(sqlite.clone(), &control, keepalive.clone(), quick);
+    let exit_action = control.lock().map(|c| c.exit_action).unwrap_or_default();
     if let Ok(mut sq) = sqlite.lock() {
         let control: control::Control = control::Control::new(&mut sq).unwrap();
         let readers = sq.get_readers().unwrap();
@@ -242,9 +244,12 @@ fn main() {
         backup::save_backup(&backup, None);
     }
     println!("Goodbye!");
+    // The only place the shutdown sound plays, and it plays at most once.
     if let Ok(control) = control.lock() {
         if control.play_sound {
             control.sound_board.play_shutdown(control.volume);
         }
     };
+    // Shut down, restart or update now that everything is saved.
+    control::exit::run(exit_action);
 }

@@ -28,7 +28,7 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound::{self, SoundType}}, database::{Database, sqlite}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, MAX_ANTENNAS, auto_connect, reconnector::Reconnector, zebra}, remote::{self, heartbeat::Heartbeat, remote_util, uploader::{self, Uploader, info::UploadInfo}}, sound_board::Voice};
+use crate::{control::{exit, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound::{self, SoundType}}, database::{Database, sqlite}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, MAX_ANTENNAS, auto_connect, reconnector::Reconnector, zebra}, remote::{self, heartbeat::Heartbeat, remote_util, uploader::{self, Uploader, info::UploadInfo}}, sound_board::Voice};
 
 use self::notifications::APINotification;
 
@@ -178,20 +178,15 @@ pub fn control_loop(
     });
 
     // start a thread to save reads from a reader so we don't tie up the readers when auto uploading
+    // Kept apart from the other threads: it's stopped last, once readers have
+    // handed over their final reads.
     let read_saver = Arc::new(processor::ReadSaver::new(
         sqlite.clone(),
-        keepalive.clone()
     ));
     let z_read_saver = read_saver.clone();
-    let rs_joiner = thread::spawn(move|| {
+    let read_saver_thread = thread::spawn(move|| {
         z_read_saver.start();
     });
-
-    if let Ok(mut j) = joiners.lock() {
-        j.push(rs_joiner);
-    } else {
-        println!("Unable to get joiners lock.");
-    }
 
     // Start a thread to enable notifications.
     let notifier = Notifier::new(keepalive.clone(), control.clone());
@@ -423,28 +418,10 @@ pub fn control_loop(
             }
         }
     }
+    println!("Shutting down control thread.");
+    // Queue the shutdown notifications first so the notifier sends them before it stops.
     let date_time: DateTime<Local> = SystemTime::now().into();
     notifier.send_notification(notifier::Notification::Shutdown, format!("{}", date_time.format("%Y/%m/%d %T")));
-    println!("Shutting down control thread.");
-    // Stop heartbeats first so none go out while shutting down. This waits for
-    // at most one request already in progress.
-    heartbeat.stop();
-    _ = heartbeat_thread.join();
-    println!("Stopping readers.");
-    if let Ok(mut r) = readers.lock() {
-        for reader in r.iter_mut() {
-            _ = reader.disconnect();
-        }
-    }
-    if let Ok(c_socks) = control_sockets.lock() {
-        for sock in c_socks.iter() {
-            if let Some(sock) = sock {
-                _ = write_notification(&sock, &APINotification::ShuttingDown, &format!("now"));
-                _ = write_disconnect(&sock)
-            }
-        }
-    }
-    println!("Finished control thread shutdown.");
     if let Ok(control) = control.lock() {
         if control.auto_remote {
             if let Ok(sq) = sqlite.lock() {
@@ -464,6 +441,66 @@ pub fn control_loop(
             }
         }
     }
+    // Stop heartbeats so none go out while shutting down. This waits for at
+    // most one request already in progress.
+    heartbeat.stop();
+    _ = heartbeat_thread.join();
+    if uploader.running() {
+        uploader.stop();
+    }
+    println!("Stopping readers.");
+    if let Ok(mut r) = readers.lock() {
+        for reader in r.iter_mut() {
+            _ = reader.disconnect();
+        }
+    }
+    // Reader threads save their remaining reads as they exit; the other threads
+    // (uploader, notifier, ...) stop on their own now that keepalive is off.
+    println!("Waiting for threads to stop.");
+    if !join_all(&joiners, THREAD_STOP_WAIT) {
+        println!("Some threads didn't stop within {} seconds; continuing shutdown.", THREAD_STOP_WAIT.as_secs());
+    }
+    // Readers are done, so everything they handed over is queued; save it.
+    read_saver.stop();
+    if !join_all(&Arc::new(Mutex::new(vec![read_saver_thread])), THREAD_STOP_WAIT) {
+        println!("Read saver didn't stop within {} seconds.", THREAD_STOP_WAIT.as_secs());
+    }
+    if let Ok(c_socks) = control_sockets.lock() {
+        for sock in c_socks.iter() {
+            if let Some(sock) = sock {
+                _ = write_notification(&sock, &APINotification::ShuttingDown, &format!("now"));
+                _ = write_disconnect(&sock)
+            }
+        }
+    }
+    println!("Finished control thread shutdown.");
+}
+
+/// How long shutdown waits for threads to stop before carrying on.
+pub(crate) const THREAD_STOP_WAIT: Duration = Duration::from_secs(15);
+
+/// Joins every thread in `joiners` (including any added while waiting), giving
+/// up after `limit`. Returns true if they all finished. A helper thread does
+/// the joining so the wait is a single timed receive, not a polling loop.
+pub(crate) fn join_all(joiners: &Arc<Mutex<Vec<JoinHandle<()>>>>, limit: Duration) -> bool {
+    let joiners = joiners.clone();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        loop {
+            let batch = match joiners.lock() {
+                Ok(mut j) => std::mem::take(&mut *j),
+                Err(_) => break,
+            };
+            if batch.is_empty() {
+                break;
+            }
+            for handle in batch {
+                _ = handle.join();
+            }
+        }
+        _ = done_tx.send(());
+    });
+    done_rx.recv_timeout(limit).is_ok()
 }
 
 /// Parses one message from a control connection. Anything before the opening
@@ -1282,72 +1319,15 @@ fn handle_stream(
                     }
                 },
                 requests::Request::Quit => {
-                    if let Ok(mut ka) = keepalive.lock() {
-                        println!("Starting program stop sequence.");
-                        *ka = false;
-                    }
-                    // connect to ensure the spawning thread will exit the accept call
-                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                    exit::begin(&control, &keepalive, exit::ExitAction::Quit, *control_port);
                 },
+                // Shutdown and restart only stop the program here; main shuts down
+                // or restarts once every thread has stopped and all reads are saved.
                 requests::Request::Shutdown => {
-                    if let Ok(mut ka) = keepalive.lock() {
-                        println!("Starting program stop sequence.");
-                        *ka = false;
-                    }
-                    // play a shutdown command since the shutdown 
-                    if let Ok(control) = control.lock() {
-                        if control.play_sound {
-                            control.sound_board.play_shutdown(control.volume);
-                        }
-                    }
-                    // send shutdown command to the OS
-                    println!("Sending OS shutdown command if on Linux.");
-                    match std::env::consts::OS {
-                        "linux" => {
-                            match std::process::Command::new("sudo").arg("shutdown").arg("-h").arg("now").spawn() {
-                                Ok(_) => {
-                                    println!("Shutdown command sent to OS successfully.");
-                                },
-                                Err(e) => {
-                                    println!("Error sending shutdown command: {e}");
-                                }
-                            }
-                        },
-                        other => {
-                            println!("Shutdown not supported on this platform ({other})");
-                        }
-                    }
-                    // connect to ensure the spawning thread will exit the accept call
-                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                    exit::begin(&control, &keepalive, exit::ExitAction::Shutdown, *control_port);
                 },
                 requests::Request::Restart => {
-                    if let Ok(mut ka) = keepalive.lock() {
-                        println!("Starting program stop sequence.");
-                        *ka = false;
-                    }
-                    if let Ok(control) = control.lock() {
-                        if control.play_sound {
-                            control.sound_board.play_shutdown(control.volume);
-                        }
-                    }
-                    println!("Sending restart command if on Linux.");
-                    match std::env::consts::OS {
-                        "linux" => {
-                            match std::process::Command::new("sudo").arg("systemctl").arg("restart").arg("portal").spawn() {
-                                Ok(_) => {
-                                    println!("Restart command sent to OS successfully.");
-                                },
-                                Err(e) => {
-                                    println!("Error sending restart command: {e}");
-                                }
-                            }
-                        },
-                        other => {
-                            println!("Restart not supported on this platform ({other})");
-                        }
-                    }
-                    // connect to ensure the spawning thread will exit the accept call
-                    _ = TcpStream::connect(format!("127.0.0.1:{}", control_port));
+                    exit::begin(&control, &keepalive, exit::ExitAction::Restart, *control_port);
                 },
                 requests::Request::ApiList => {
                     if let Ok(sq) = sqlite.lock() {
@@ -1912,26 +1892,17 @@ fn handle_stream(
                     }
                 },
                 requests::Request::Update => {
-                    match std::env::consts::OS {
-                        "linux" => {
-                            if let Ok(update_path) = env::var(UPDATE_SCRIPT_ENV) {
-                                match std::process::Command::new(update_path).spawn() {
-                                    Ok(_) => {
-                                        no_error = write_success(&stream, 0);
-                                    },
-                                    Err(e) => {
-                                        println!("error updating: {e}");
-                                        no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error updating: {e}") })
-                                    }
-                                }
-                            } else {
-                                println!("update script environment variable not set");
-                                no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("update script environment variable not set") })
-                            }
+                    // Checked now so the caller hears about problems while portal is
+                    // still running. The script itself runs from main once every thread
+                    // has stopped and all reads are saved.
+                    match exit::check(exit::ExitAction::Update, std::env::consts::OS, env::var(UPDATE_SCRIPT_ENV).ok()) {
+                        Ok(()) => {
+                            no_error = write_success(&stream, 0);
+                            exit::begin(&control, &keepalive, exit::ExitAction::Update, *control_port);
                         },
-                        other => {
-                            println!("not supported on this platform ({other})");
-                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
+                        Err(e) => {
+                            println!("error updating: {e}");
+                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error updating: {e}") })
                         }
                     }
                 },

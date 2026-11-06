@@ -85,6 +85,13 @@ pub const BEEP_RAND_MAX: u64 = 350; //350
 pub const BEEP_SEPARATION: u64 = 50; //50
 pub const BEEP_SEP_RAND_MAX: u64 = 450; //450
 
+static SHUTDOWN_SOUND_PLAYED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True the first time it's called, false after that.
+pub(crate) fn claim_shutdown_sound() -> bool {
+    !SHUTDOWN_SOUND_PLAYED.swap(true, std::sync::atomic::Ordering::SeqCst)
+}
+
 #[derive(Clone)]
 pub struct SoundBoard {
     current_voice: Arc<Mutex<Voice>>,
@@ -197,7 +204,12 @@ impl SoundBoard {
         }
     }
 
+    /// Plays the shutdown sound. Only the first call in the program's life plays
+    /// it, however the program is stopped, so it's never heard twice.
     pub fn play_shutdown(&self, volume: f32) {
+        if !claim_shutdown_sound() {
+            return;
+        }
         if let Ok(voice) = self.current_voice.lock() {
             if let Ok(mut handle) = rodio::DeviceSinkBuilder::open_default_sink() {
                 handle.log_on_drop(false);

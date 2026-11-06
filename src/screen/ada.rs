@@ -17,9 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #[cfg(target_os = "linux")]
-use std::net::TcpStream;
-#[cfg(target_os = "linux")]
-use std::{env, thread, time::Duration};
+use std::{thread, time::Duration};
 #[cfg(target_os = "linux")]
 use std::time::SystemTime;
 #[cfg(target_os = "linux")]
@@ -33,7 +31,9 @@ use rppal::{hal, i2c::I2c};
 #[cfg(target_os = "linux")]
 use crate::{reader::{self, auto_connect}, remote::uploader::Status};
 #[cfg(target_os = "linux")]
-use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME, SETTING_BEEP_IGNORE, socket::{self, CONNECTION_CHANGE_PAUSE, UPDATE_SCRIPT_ENV}, sound::SoundType}, database::Database, network::api, objects::{read, setting::Setting}, reader::reconnector::Reconnector, remote::remote_util, sound_board::Voice, types};
+use crate::control::exit;
+#[cfg(target_os = "linux")]
+use crate::{control::{SETTING_AUTO_REMOTE, SETTING_CHIP_TYPE, SETTING_ENABLE_NTFY, SETTING_PLAY_SOUND, SETTING_READ_WINDOW, SETTING_UPLOAD_INTERVAL, SETTING_VOICE, SETTING_VOLUME, SETTING_BEEP_IGNORE, socket::{self, CONNECTION_CHANGE_PAUSE}, sound::SoundType}, database::Database, network::api, objects::{read, setting::Setting}, reader::reconnector::Reconnector, remote::remote_util, sound_board::Voice, types};
 #[cfg(target_os = "linux")]
 use crate::screen::{ButtonPress, ABOUT_MENU, DELETE_READS_MENU, DELETE_READS_MENU_TWO, MAIN_ABOUT, MAIN_MENU, MAIN_RESTART, MAIN_SETTINGS, MAIN_SHUTDOWN, MAIN_START_READING, MAIN_UPDATE, MANUAL_TIME_MENU, READING_MENU, RESTART_MENU, SCREEN_OFF, SETTINGS_MENU_AUTO_UPLOAD, SETTINGS_MENU_CHIP_TYPE, SETTINGS_MENU_DELETE_CHIP_READS, SETTINGS_MENU_ENABLE_NTFY, SETTINGS_MENU_MANUAL_UPLOAD, SETTINGS_MENU, SETTINGS_MENU_PLAY_SOUND, SETTINGS_MENU_READ_WINDOW, SETTINGS_MENU_SET_TIME_MANUAL, SETTINGS_MENU_SET_TIME_WEB, SETTINGS_MENU_UPLOAD_INTERVAL, SETTINGS_MENU_VOICE, SETTINGS_MENU_VOLUME, SETTINGS_MENU_BEEP_IGNORE, SHUTDOWN_MENU, STARTUP_MENU, TIME_MENU_DAY, TIME_MENU_HOUR, TIME_MENU_MINUTE, TIME_MENU_MONTH, TIME_MENU_SECOND, TIME_MENU_YEAR, UPDATE_MENU, READING_MENU_STOP, READING_MENU_NIL, READING_MENU_UPLOAD};
 
@@ -1186,35 +1186,9 @@ impl CharacterDisplay {
                                     if self.current_menu[1] == 1 {
                                         let _ = lcd.clear();
                                         let _ = lcd.show_display(false);
-                                        if let Ok(mut ka) = self.keepalive.lock() {
-                                            println!("Starting program stop sequence.");
-                                            *ka = false;
-                                        }
-                                        // play a shutdown command since the shutdown 
-                                        if let Ok(control) = self.control.lock() {
-                                            if control.play_sound {
-                                                control.sound_board.play_shutdown(control.volume);
-                                            }
-                                        }
-                                        // send shutdown command to the OS
-                                        println!("Sending OS shutdown command if on Linux.");
-                                        match std::env::consts::OS {
-                                            "linux" => {
-                                                match std::process::Command::new("sudo").arg("shutdown").arg("-h").arg("now").spawn() {
-                                                    Ok(_) => {
-                                                        println!("Shutdown command sent to OS successfully.");
-                                                    },
-                                                    Err(e) => {
-                                                        println!("Error sending shutdown command: {e}");
-                                                    }
-                                                }
-                                            },
-                                            other => {
-                                                println!("Shutdown not supported on this platform ({other})");
-                                            }
-                                        }
-                                        // connect to ensure the spawning thread will exit the accept call
-                                        _ = TcpStream::connect(format!("127.0.0.1:{}", self.control_port));
+                                        // Only stops the program; main does the shutdown once every
+                                        // thread has stopped and all reads are saved.
+                                        exit::begin(&self.control, &self.keepalive, exit::ExitAction::Shutdown, self.control_port);
                                     }
                                     self.current_menu[0] = MAIN_MENU;
                                     self.current_menu[1] = MAIN_START_READING;
@@ -1224,27 +1198,9 @@ impl CharacterDisplay {
                                     if self.current_menu[1] == 1 {
                                         let _ = lcd.clear();
                                         let _ = lcd.show_display(false);
-                                        if let Ok(mut ka) = self.keepalive.lock() {
-                                            println!("Starting program restart sequence.");
-                                            *ka = false;
-                                        }
-                                        // send shutdown command to the OS
-                                        println!("Sending program restart command if on Linux.");
-                                        match std::env::consts::OS {
-                                            "linux" => {
-                                                match std::process::Command::new("sudo").arg("systemctl").arg("restart").arg("portal").spawn() {
-                                                    Ok(_) => {
-                                                        println!("Restart command sent to OS successfully.");
-                                                    },
-                                                    Err(e) => {
-                                                        println!("Error sending restart command: {e}");
-                                                    }
-                                                }
-                                            },
-                                            other => {
-                                                println!("Rerstart not supported on this platform ({other})");
-                                            }
-                                        }
+                                        // Only stops the program; main does the restart once every
+                                        // thread has stopped and all reads are saved.
+                                        exit::begin(&self.control, &self.keepalive, exit::ExitAction::Restart, self.control_port);
                                     }
                                     self.current_menu[0] = MAIN_MENU;
                                     self.current_menu[1] = MAIN_START_READING;
@@ -1254,29 +1210,9 @@ impl CharacterDisplay {
                                     if self.current_menu[1] == 1 {
                                         let _ = lcd.clear();
                                         let _ = lcd.show_display(false);
-                                        if let Ok(mut ka) = self.keepalive.lock() {
-                                            println!("Starting program update sequence.");
-                                            *ka = false;
-                                        }
-                                        // send shutdown command to the OS
-                                        println!("Sending program update command if on Linux.");
-                                        match std::env::consts::OS {
-                                            "linux" => {
-                                                if let Ok(update_path) = env::var(UPDATE_SCRIPT_ENV) {
-                                                    match std::process::Command::new(update_path).spawn() {
-                                                        Ok(_) => {},
-                                                        Err(e) => {
-                                                            println!("error updating: {e}");
-                                                        }
-                                                    }
-                                                } else {
-                                                    println!("update script environment variable not set");
-                                                }
-                                            },
-                                            other => {
-                                                println!("not supported on this platform ({other})");
-                                            }
-                                        }
+                                        // Only stops the program; main does the update once every
+                                        // thread has stopped and all reads are saved.
+                                        exit::begin(&self.control, &self.keepalive, exit::ExitAction::Update, self.control_port);
                                     }
                                     self.current_menu[0] = MAIN_MENU;
                                     self.current_menu[1] = MAIN_START_READING;
