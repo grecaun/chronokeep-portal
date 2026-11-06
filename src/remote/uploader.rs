@@ -16,12 +16,12 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{collections::HashMap, net::TcpStream, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex}, time::{Duration, Instant}};
 
 use reqwest::StatusCode;
 use serde::Serialize;
 
-use crate::{control::{Control, socket::{MAX_CONNECTED, write_uploader_status}}, database::{Database, sqlite}, defaults, network::api, objects::read, remote::uploader::info::UploadInfo};
+use crate::{control::{Control, socket::write_uploader_status}, database::{Database, sqlite}, defaults, network::api, objects::read, remote::uploader::info::UploadInfo};
 use crate::remote::remote_util;
 
 pub mod info;
@@ -83,10 +83,14 @@ pub enum Status {
 
 pub struct Uploader {
     server_keepalive: Arc<Mutex<bool>>,
-    local_keepalive: Arc<Mutex<bool>>,
+    /// Number of the run that should be going; stop() and each new run change
+    /// it, so an older run knows to finish.
+    generation: Arc<AtomicU64>,
+    /// Held by the run in progress, so a new run waits for the old one to finish.
+    run_lock: Arc<Mutex<()>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     status: Arc<Mutex<Status>>,
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    control_sockets: crate::control::client::ControlSockets,
     control: Arc<Mutex<Control>>,
     waiter: Arc<Waiter>,
     info: Arc<Mutex<UploadInfo>>,
@@ -96,13 +100,14 @@ impl Uploader {
     pub fn new(
         keepalive: Arc<Mutex<bool>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
-        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        control_sockets: crate::control::client::ControlSockets,
         control: Arc<Mutex<Control>>,
         info: Arc<Mutex<UploadInfo>>,
     ) -> Uploader {
         Uploader {
             server_keepalive: keepalive,
-            local_keepalive: Arc::new(Mutex::new(false)),
+            generation: Arc::new(AtomicU64::new(0)),
+            run_lock: Arc::new(Mutex::new(())),
             sqlite,
             status: Arc::new(Mutex::new(Status::Stopped)),
             control_sockets,
@@ -129,9 +134,8 @@ impl Uploader {
     }
 
     pub fn stop(&self) {
-        if let Ok(mut ka) = self.local_keepalive.lock() {
-            *ka = false;
-        }
+        // Ends the current run (and any run still waiting to start).
+        self.generation.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut r) = self.status.lock() {
             *r = Status::Stopping
         }
@@ -158,23 +162,35 @@ impl Uploader {
 
     pub fn run(&self) {
         let mut err_count: usize = 0;
-        // check if we're already running, exit if so, otherwise set to running
-        let mut exit = false;
-        if let Ok(mut r) = self.status.lock() {
-            if *r == Status::Running {
-                exit = true;
+        // This run replaces any earlier one: that one sees the change and finishes,
+        // and this one waits for it, so only one ever uploads.
+        let my_run = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.wake();
+        let _running = match self.run_lock.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        if self.generation.load(Ordering::SeqCst) != my_run {
+            // Stopped, or replaced by a newer run, while waiting. If it was a stop,
+            // the earlier run may already be gone, so finish the stop here (a newer
+            // run sets Running itself).
+            let mut stopped = false;
+            if let Ok(mut r) = self.status.lock() {
+                if *r == Status::Stopping {
+                    *r = Status::Stopped;
+                    stopped = true;
+                }
             }
-            *r = Status::Running;
-        }
-        if exit == true {
+            if stopped {
+                self.update_control_socks(0);
+            }
             return;
+        }
+        if let Ok(mut r) = self.status.lock() {
+            *r = Status::Running;
         }
         // let everyone know we're running
         self.update_control_socks(err_count);
-        // set local keepalive to true to keep running until told to stop
-        if let Ok(mut ka) = self.local_keepalive.lock() {
-            *ka = true;
-        }
         let http_client: reqwest::blocking::Client;
         match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
                                     .connect_timeout(Duration::from_secs(5)).build() {
@@ -193,13 +209,8 @@ impl Uploader {
         }
         // work loop
         loop {
-            // exit our loop and terminate if local keep alive is done
-            if let Ok(ka) = self.local_keepalive.lock() {
-                if *ka == false {
-                    break;
-                }
-            } else {
-                println!("Unable to grab local keep alive mutex. Exiting.");
+            // exit our loop if this run was stopped or replaced by a newer one
+            if self.generation.load(Ordering::SeqCst) != my_run {
                 break;
             }
             // exit our loop and terminate if server is shutting down
@@ -321,10 +332,14 @@ impl Uploader {
             }
             wait_for_next_upload(&self.waiter, Duration::from_secs(upload_pause.max(1)));
         } // end auto upload loop
+        // Stopped, unless a newer run is taking over (it sets Running itself).
+        let replaced = self.generation.load(Ordering::SeqCst) != my_run;
         if let Ok(mut r) = self.status.lock() {
-            *r = Status::Stopped;
+            if !replaced || *r == Status::Stopping {
+                *r = Status::Stopped;
+            }
         }
-        // let everyone know we're stopped
+        // let everyone know
         self.update_control_socks(0);
         println!("Auto upload of reads finished.")
     }
@@ -332,12 +347,8 @@ impl Uploader {
     fn update_control_socks(&self, err_count: usize) {
         // let all the control sockets know of our status
         let stat = self.status();
-        if let Ok(c_socks) = self.control_sockets.lock() {
-            for sock in c_socks.iter() {
-                if let Some(sock) = sock {
-                    _ = write_uploader_status(&sock, stat.clone());
-                }
-            }
+        for (_, sock) in crate::control::client::connected(&self.control_sockets) {
+            _ = write_uploader_status(&sock, stat.clone());
         }
         if let Ok(mut inf) = self.info.lock() {
             inf.update_status(stat, err_count);

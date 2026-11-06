@@ -90,7 +90,7 @@ pub struct Reader {
     pub status_retries: Arc<sync::Mutex<u16>>,
     
     #[serde(skip)]
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    control_sockets: crate::control::client::ControlSockets,
     #[serde(skip)]
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     #[serde(skip)]
@@ -176,7 +176,7 @@ impl Reader {
         ip_address: String,
         port: u16,
         auto_connect: u8,
-        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        control_sockets: crate::control::client::ControlSockets,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
         readers: Arc<Mutex<Vec<Reader>>>,
     ) -> Result<Reader, DBError> {
@@ -255,7 +255,7 @@ impl Reader {
         self.auto_connect
     }
 
-    pub fn set_control_sockets(&mut self, c_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>) {
+    pub fn set_control_sockets(&mut self, c_sockets: crate::control::client::ControlSockets) {
         self.control_sockets = c_sockets
     }
 
@@ -278,9 +278,12 @@ impl Reader {
             self.port == other.port()
     }
 
+    /// Whether the reader is connected. Waits for the status lock (it's only held
+    /// briefly) instead of skipping: a busy lock used to read as "not connected",
+    /// so a connected reader could be connected a second time.
     pub fn is_connected(&self) -> Option<bool> {
         let mut output: Option<bool> = None;
-        if let Ok(con) = self.status.try_lock() {
+        if let Ok(con) = self.status.lock() {
             output = Some(ReaderStatus::Connected == *con)
         }
         output

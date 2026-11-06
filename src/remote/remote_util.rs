@@ -16,7 +16,9 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{control::socket, network::api, objects::read};
+use std::sync::{Arc, Mutex};
+
+use crate::{control::socket, database::{sqlite, Database}, network::api, objects::read};
 
 pub(crate) const NUMBER_READS_PER_UPLOAD: usize = 100;
 
@@ -137,6 +139,55 @@ pub fn upload_all_reads(
         }
     }
     return (modified_reads, err_count);
+}
+
+/// Uploads every saved read to each enabled Chronokeep Remote API (the screen's
+/// Manual Upload). The database is locked only to load the reads and to record
+/// which were uploaded, never during the upload, and no other lock is needed, so
+/// readers and everything else keep running while it uploads. Returns the number
+/// of failed upload requests.
+pub fn upload_saved_reads(
+    http_client: &reqwest::blocking::Client,
+    sqlite: &Arc<Mutex<sqlite::SQLite>>,
+) -> usize {
+    let (apis, reads) = {
+        let Ok(sq) = sqlite.lock() else { return 0 };
+        let apis: Vec<api::Api> = match sq.get_apis() {
+            Ok(apis) => apis.into_iter().filter(|a| {
+                (a.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || a.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF) && a.enabled()
+            }).collect(),
+            Err(e) => {
+                println!("error getting apis: {e}");
+                return 0;
+            }
+        };
+        if apis.is_empty() {
+            return 0;
+        }
+        match sq.get_all_reads() {
+            Ok(reads) => (apis, reads),
+            Err(e) => {
+                println!("Error geting reads to upload. {e}");
+                return 0;
+            }
+        }
+    };
+    if reads.is_empty() {
+        return 0;
+    }
+    let mut errors = 0;
+    for api in &apis {
+        println!("Uploading {} reads to {} at {}", reads.len(), api.nickname(), api.uri());
+        let (modified_reads, e_count) = upload_all_reads(http_client, api, reads.clone());
+        println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
+        errors += e_count;
+        if let Ok(mut sq) = sqlite.lock() {
+            if let Err(e) = sq.update_reads_status(&modified_reads) {
+                println!("Error updating uploaded reads: {e}");
+            }
+        }
+    }
+    errors
 }
 
 #[cfg(test)]

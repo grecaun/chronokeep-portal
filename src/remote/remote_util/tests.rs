@@ -24,7 +24,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{upload_all_reads, NUMBER_READS_PER_UPLOAD};
+use super::{upload_all_reads, upload_saved_reads, NUMBER_READS_PER_UPLOAD};
+use crate::database::{sqlite::tests::setup_tests, Database};
 use crate::network::api::{self, Api};
 use crate::objects::read::{self, Read as ChipRead};
 
@@ -43,6 +44,11 @@ enum Mode {
 /// A pretend Remote API. Returns its URL and the number of reads in each
 /// request it got.
 fn fake_remote(mode: Mode) -> (String, Arc<Mutex<Vec<usize>>>) {
+    fake_remote_with(mode, Arc::new(|| {}))
+}
+
+/// Like fake_remote, but runs `on_request` while handling each request.
+fn fake_remote_with(mode: Mode, on_request: Arc<dyn Fn() + Send + Sync>) -> (String, Arc<Mutex<Vec<usize>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap());
     let batches = Arc::new(Mutex::new(Vec::new()));
@@ -51,6 +57,7 @@ fn fake_remote(mode: Mode) -> (String, Arc<Mutex<Vec<usize>>>) {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { break };
             let batches = t_batches.clone();
+            let on_request = on_request.clone();
             thread::spawn(move || {
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut out = stream;
@@ -75,6 +82,7 @@ fn fake_remote(mode: Mode) -> (String, Arc<Mutex<Vec<usize>>>) {
                     }
                     let mut body = vec![0u8; length];
                     reader.read_exact(&mut body).unwrap();
+                    on_request();
                     let v: Value = serde_json::from_slice(&body).unwrap();
                     let n = v["reads"].as_array().map(|a| a.len()).unwrap_or(0);
                     let request_no = {
@@ -192,4 +200,48 @@ fn unreachable_server() {
     let (done, errors) = upload_all_reads(&client(), &api_for(&url), reads(3));
     assert!(done.is_empty());
     assert_eq!(errors, 1);
+}
+
+#[test]
+fn saved_reads_upload_without_holding_the_database() {
+    let path = "./test_upload_saved_reads.sqlite";
+    let sqlite = Arc::new(Mutex::new(setup_tests(path)));
+    // While each upload request is being handled, check whether the database is locked.
+    let locked = Arc::new(Mutex::new(Vec::new()));
+    // Weak, so the fake server doesn't keep the database open after the test.
+    let (t_sqlite, t_locked) = (Arc::downgrade(&sqlite), locked.clone());
+    let (url, batches) = fake_remote_with(Mode::Ok, Arc::new(move || {
+        if let Some(sq) = t_sqlite.upgrade() {
+            t_locked.lock().unwrap().push(sq.try_lock().is_err());
+        }
+    }));
+    {
+        let mut sq = sqlite.lock().unwrap();
+        // Id 0 adds a new API (any other id updates an existing one).
+        sq.save_api(&Api::new(0, String::from("Test"), String::from(api::API_TYPE_CHRONOKEEP_REMOTE_SELF), String::from("key"), String::from(&url), true, false, String::from("pc"))).unwrap();
+        // A disabled API gets nothing.
+        sq.save_api(&Api::new(0, String::from("Off"), String::from(api::API_TYPE_CHRONOKEEP_REMOTE), String::from("k2"), String::from(&url), false, false, String::new())).unwrap();
+        sq.save_reads(&reads(150)).unwrap();
+    }
+    let errors = upload_saved_reads(&client(), &sqlite);
+    assert_eq!(errors, 0);
+    assert_eq!(*batches.lock().unwrap(), vec![100, 50], "one enabled Remote API, in batches of 100");
+    let locked = locked.lock().unwrap().clone();
+    assert_eq!(locked.len(), 2);
+    assert!(locked.iter().all(|l| !l), "database was locked during an upload");
+    let saved = sqlite.lock().unwrap().get_all_reads().unwrap();
+    assert_eq!(saved.len(), 150);
+    assert!(saved.iter().all(|r| r.uploaded() == read::READ_UPLOADED_TRUE), "all reads marked uploaded");
+    drop(sqlite);
+    _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn saved_reads_with_no_remote_api_sends_nothing() {
+    let path = "./test_upload_saved_reads_none.sqlite";
+    let sqlite = Arc::new(Mutex::new(setup_tests(path)));
+    sqlite.lock().unwrap().save_reads(&reads(5)).unwrap();
+    assert_eq!(upload_saved_reads(&client(), &sqlite), 0);
+    drop(sqlite);
+    _ = std::fs::remove_file(path);
 }

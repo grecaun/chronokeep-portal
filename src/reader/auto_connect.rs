@@ -16,7 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
+use std::{sync::{Arc, Mutex}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
 
 use chrono::{DateTime, Local};
 use serde::{Serialize, Deserialize};
@@ -37,7 +37,7 @@ pub struct AutoConnector {
     state: Arc<Mutex<State>>,
     readers: Arc<Mutex<Vec<super::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    control_sockets: crate::control::client::ControlSockets,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     control: Arc<Mutex<control::Control>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
@@ -52,7 +52,7 @@ impl AutoConnector {
         state: Arc<Mutex<State>>,
         readers: Arc<Mutex<Vec<super::Reader>>>,
         joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
-        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        control_sockets: crate::control::client::ControlSockets,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
         control: Arc<Mutex<control::Control>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,

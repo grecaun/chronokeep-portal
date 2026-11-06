@@ -16,7 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{net::TcpStream, sync::{Arc, Mutex}, thread::JoinHandle};
+use std::{sync::{Arc, Mutex}, thread::JoinHandle};
 use crate::{control::{Control, socket::MAX_CONNECTED, sound::SoundNotifier}, database::sqlite, notifier, processor, reader::{self, auto_connect}, remote::uploader::{Uploader, info::UploadInfo}};
 #[cfg(target_os = "linux")]
 use crate::{types};
@@ -78,7 +78,7 @@ pub struct CharacterDisplay {
     control: Arc<Mutex<Control>>,
     readers: Arc<Mutex<Vec<reader::Reader>>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    control_sockets: crate::control::client::ControlSockets,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
     button_presses: Arc<Mutex<Vec<ButtonPress>>>,
     ac_state: Arc<Mutex<auto_connect::State>>,
@@ -123,7 +123,7 @@ impl CharacterDisplay {
         control: Arc<Mutex<Control>>,
         readers: Arc<Mutex<Vec<reader::Reader>>>,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
-        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        control_sockets: crate::control::client::ControlSockets,
         read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
         ac_state: Arc<Mutex<auto_connect::State>>,
         read_saver: Arc<processor::ReadSaver>,

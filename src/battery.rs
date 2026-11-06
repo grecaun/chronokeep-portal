@@ -24,10 +24,9 @@ use ina219::address::Address;
 use ina219::SyncIna219;
 use rppal::i2c::I2c;
 use chrono::Utc;
-use std::net::TcpStream;
 use chrono::{DateTime, Local};
 
-use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification, MAX_CONNECTED}}, sqlite, network::api, notifier};
+use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification}}, sqlite, network::api, notifier};
 
 pub const BATT_SLEEP_MILLISEC: u64 = 300;
 pub const BATT_VOLTAGE_COUNT: usize = 15;
@@ -36,7 +35,7 @@ pub struct Checker {
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<Control>>,
     notifier: notifier::Notifier,
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    control_sockets: crate::control::client::ControlSockets,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     last_low: u64,
     last_crit: u64,
@@ -48,7 +47,7 @@ impl Checker {
         keepalive: Arc<Mutex<bool>>,
         control: Arc<Mutex<Control>>,
         notifier: notifier::Notifier,
-        control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+        control_sockets: crate::control::client::ControlSockets,
         sqlite: Arc<Mutex<sqlite::SQLite>>,
     ) -> Self {
         Self {
@@ -176,13 +175,9 @@ impl Checker {
 
     fn send_notification(&self, notification: APINotification) {
         let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
-        if let Ok(c_socks) = self.control_sockets.lock() {
-            println!("notifying connected sockets");
-            for sock in c_socks.iter() {
-                if let Some(s) = sock {
-                    _ = socket::write_notification(&s, &notification, &time);
-                }
-            }
+        println!("notifying connected sockets");
+        for (_, sock) in crate::control::client::connected(&self.control_sockets) {
+            _ = socket::write_notification(&sock, &notification, &time);
         }
         if let Ok(control) = self.control.lock() {
             if control.auto_remote {

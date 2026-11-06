@@ -23,15 +23,22 @@ use crate::{reader::zebra::TagData, sound_board};
 pub struct Sounds {
     control: Arc<Mutex<super::Control>>,
     keepalive: Arc<Mutex<bool>>,
-    mtx: Arc<Mutex<bool>>,
     sound_notifier: Arc<SoundNotifier>
 }
 
+/// Sounds waiting to be played.
+#[derive(Default)]
+struct Pending {
+    beep: bool,
+    sounds: Vec<SoundType>,
+}
+
+/// Tells the sound thread what to play. Requests are kept under the same lock
+/// the sound thread waits on, so one made while a sound is playing is never missed.
 pub struct SoundNotifier {
-    notifier: Arc<Condvar>,
-    beep: Arc<Mutex<bool>>,
-    tag_list: Arc<Mutex<HashMap<u128, u64>>>,
-    sound_list: Arc<Mutex<Vec<SoundType>>>
+    pending: Mutex<Pending>,
+    wake: Condvar,
+    tag_list: Mutex<HashMap<u128, u64>>,
 }
 
 pub enum SoundType {
@@ -48,44 +55,51 @@ pub enum SoundType {
 impl SoundNotifier {
     pub fn new() -> SoundNotifier {
         SoundNotifier {
-            beep: Arc::new(Mutex::new(false)),
-            notifier: Arc::new(Condvar::new()),
-            tag_list: Arc::new(Mutex::new(HashMap::new())),
-            sound_list: Arc::new(Mutex::new(Vec::new())),
+            pending: Mutex::new(Pending::default()),
+            wake: Condvar::new(),
+            tag_list: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn notify_tags(&self, tags: &Vec<TagData>, ignore: u16) {
+        let mut beep = false;
         if let Ok(cur_dur) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             let cur_time = cur_dur.as_secs(); // current time as unix timestamp
             if let Ok(mut t_list) = self.tag_list.lock() {
                 for tag in tags {
-                    // Play a sound if we haven't seen the tag ever, or if we've not seen it in the past 60 seconds.
+                    // Play a sound if we haven't seen the tag ever, or not within the beep interval.
                     if !t_list.contains_key(&tag.tag()) || (t_list.get(&tag.tag()).unwrap() + (ignore as u64)) < cur_time {
-                        if let Ok(mut val) = self.beep.lock() {
-                            *val = true;
-                        }
+                        beep = true;
                         // Update the time we've played a sound.
                         t_list.insert(tag.tag(), cur_time);
                     }
                 }
             }
         }
-        self.notifier.notify_one()
+        if beep {
+            self.notify_one();
+        }
     }
 
     pub fn notify_one(&self) {
-        if let Ok(mut val) = self.beep.lock() {
-            *val = true;
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.beep = true;
         }
-        self.notifier.notify_one()
+        self.wake.notify_all();
     }
 
     pub fn notify_custom(&self, sound: SoundType) {
-        if let Ok(mut sounds) = self.sound_list.lock() {
-            sounds.push(sound);
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.sounds.push(sound);
         }
-        self.notifier.notify_one()
+        self.wake.notify_all();
+    }
+
+    /// Waits until there's something to play and takes it (no polling).
+    fn take(&self) -> Option<Pending> {
+        let guard = self.pending.lock().ok()?;
+        let mut pending = self.wake.wait_while(guard, |p| !p.beep && p.sounds.is_empty()).ok()?;
+        Some(std::mem::take(&mut *pending))
     }
 }
 
@@ -97,7 +111,6 @@ impl Sounds {
         Sounds {
             control,
             keepalive,
-            mtx: Arc::new(Mutex::new(true)),
             sound_notifier: Arc::new(SoundNotifier::new())
         }
     }
@@ -111,51 +124,44 @@ impl Sounds {
         let mut separation: u64 = sound_board::BEEP_SEPARATION + rand::random_range(0..sound_board::BEEP_SEP_RAND_MAX);
         loop {
             if let Ok(ka) = self.keepalive.try_lock() {
-                match *ka {
-                    false => {
-                        break
-                    },
-                    true => {},
+                if *ka == false {
+                    break
                 }
             }
-            let notifier = self.mtx.lock().unwrap();
-            if let Ok(_) = self.sound_notifier.notifier.wait(notifier) {
-                if let Ok(control) = self.control.lock() {
-                    if let Ok(mut beep) = self.sound_notifier.beep.lock() {
-                        if *beep == true {
-                            // always change beep back to false, even if we don't play the sound
-                            // if this doesn't happen then it may beep at some point we don't want it to beep
-                            if control.play_sound == true && last_sound.elapsed() >= Duration::from_millis(separation) {
-                                control.sound_board.play_sound(control.volume);
-                                last_sound = Instant::now();
-                                separation = sound_board::BEEP_SEPARATION + rand::random_range(0..sound_board::BEEP_SEP_RAND_MAX);
-                            }
-                            *beep = false;
-                        }
-                    }
-                    if let Ok(mut sounds) = self.sound_notifier.sound_list.lock() {
-                        // go through all the custom values, then clear the vec
-                        if control.play_sound == true {
-                            for sound in &*sounds {
-                                match sound {
-                                    SoundType::Volume => control.sound_board.play_volume(control.volume),
-                                    SoundType::Introduction => control.sound_board.play_introduction(control.volume),
-                                    SoundType::StartupFinished => control.sound_board.play_startup_finished(control.volume),
-                                    SoundType::StartupInProgress => control.sound_board.play_startup_in_progress(control.volume),
-                                    SoundType::CustomNotAvailable => control.sound_board.play_custom_not_available(control.volume),
-                                    SoundType::Connected => control.sound_board.play_connected(control.volume),
-                                    SoundType::Disconnected => control.sound_board.play_disconnected(control.volume),
-                                    SoundType::Malfunction => control.sound_board.play_malfunction(control.volume),
-                                }
-                            }
-                        };
-                        let list = &mut *sounds;
-                        list.clear();
-                    }
-                }
-            } else {
+            let Some(pending) = self.sound_notifier.take() else {
                 println!("Error waiting to play a sound.");
+                break;
+            };
+            // Copy what's needed and let go of control before playing: each sound
+            // plays to the end, and readers need control to process tags.
+            let (play_sound, volume, board) = match self.control.lock() {
+                Ok(control) => (control.play_sound, control.volume, control.sound_board.clone()),
+                Err(_) => continue,
+            };
+            if !play_sound {
+                continue;
+            }
+            // Beeps closer together than the separation are skipped.
+            if pending.beep && last_sound.elapsed() >= Duration::from_millis(separation) {
+                board.play_sound(volume);
+                last_sound = Instant::now();
+                separation = sound_board::BEEP_SEPARATION + rand::random_range(0..sound_board::BEEP_SEP_RAND_MAX);
+            }
+            for sound in pending.sounds {
+                match sound {
+                    SoundType::Volume => board.play_volume(volume),
+                    SoundType::Introduction => board.play_introduction(volume),
+                    SoundType::StartupFinished => board.play_startup_finished(volume),
+                    SoundType::StartupInProgress => board.play_startup_in_progress(volume),
+                    SoundType::CustomNotAvailable => board.play_custom_not_available(volume),
+                    SoundType::Connected => board.play_connected(volume),
+                    SoundType::Disconnected => board.play_disconnected(volume),
+                    SoundType::Malfunction => board.play_malfunction(volume),
+                }
             }
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

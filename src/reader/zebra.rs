@@ -789,13 +789,9 @@ pub fn connect(
                     }
                     if send_reader_list {
                         if let Ok(u_readers) = t_readers.lock() {
-                            if let Ok(c_socks) = t_control_sockets.lock() {
-                                for sock in c_socks.iter() {
-                                    if let Some(sock) = sock {
-                                        println!("Sending reader list!");
-                                        _ = socket::write_reader_list(&sock, &*u_readers);
-                                    }
-                                }
+                            for (_, sock) in crate::control::client::connected(&t_control_sockets) {
+                                println!("Sending reader list!");
+                                _ = socket::write_reader_list(&sock, &*u_readers);
                             }
                         }
                     }
@@ -819,13 +815,9 @@ pub fn connect(
                     *con = ReaderStatus::Disconnected;
                 }
                 if let Ok(u_readers) = t_readers.lock() {
-                    if let Ok(c_socks) = t_control_sockets.lock() {
-                        for sock in c_socks.iter() {
-                            if let Some(sock) = sock {
-                                println!("Sending reader list!");
-                                _ = socket::write_reader_list(&sock, &*u_readers);
-                            }
-                        }
+                    for (_, sock) in crate::control::client::connected(&t_control_sockets) {
+                        println!("Sending reader list!");
+                        _ = socket::write_reader_list(&sock, &*u_readers);
                     }
                 }
                 if reconnect == true {
@@ -1026,24 +1018,18 @@ fn save_reads(
 fn send_antennas(
     reader_name: &str,
     antennas: &Arc<Mutex<[u8;MAX_ANTENNAS]>>,
-    control_sockets: &Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED+1]>>
+    control_sockets: &crate::control::client::ControlSockets
 ) -> Result<(), &'static str> {
+    // Copy the antenna states and the clients, then send with no lock held.
+    let ant = match antennas.lock() {
+        Ok(a) => *a,
+        Err(_) => return Err("error getting antennas mutex"),
+    };
     let mut no_error = true;
-    if let Ok(sockets) = control_sockets.lock() {
-        if let Ok(ant) = antennas.lock() {
-            for ix in 0..MAX_CONNECTED {
-                match &sockets[ix] {
-                    Some(sock) => {
-                        no_error = no_error && socket::write_reader_antennas(sock, reader_name.to_string(), &*ant)
-                    },
-                    None => {}
-                }
-            }
-        } else {
-            return Err("error getting antennas mutex")
+    for (ix, sock) in crate::control::client::connected(control_sockets) {
+        if ix < MAX_CONNECTED {
+            no_error = socket::write_reader_antennas(&sock, reader_name.to_string(), &ant) && no_error;
         }
-    } else {
-        return Err("error getting sockets mutex")
     }
     if no_error == false {
         return Err("error occurred writing to one or more sockets")
@@ -1053,38 +1039,10 @@ fn send_antennas(
 
 fn send_new(
     reads: Vec<read::Read>,
-    control_sockets: &Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED+1]>>,
+    control_sockets: &crate::control::client::ControlSockets,
     read_repeaters: &Arc<Mutex<[bool;MAX_CONNECTED]>>,
 ) -> Result<(), &'static str> {
-    let mut no_error = true;
-    if let Ok(sockets) = control_sockets.lock() {
-        if let Ok(mut repeaters) = read_repeaters.lock() {
-            for ix in 0..MAX_CONNECTED {
-                match &sockets[ix] {
-                    Some(sock) => {
-                        if repeaters[ix] == true {
-                            //println!("Sending reads to subscribed socket {ix}.");
-                            // If write_reads returned false it wasn't able to write the reads due to connection being broken.
-                            let loc_err = socket::write_reads(&sock, &reads);
-                            if !loc_err {
-                                repeaters[ix] = false;
-                                if let Err(e) = sock.shutdown(std::net::Shutdown::Both) {
-                                    println!("Error shutting down closed socket. {e}");
-                                }
-                            }
-                            no_error = no_error && loc_err;
-                        }
-                    },
-                    None => {}
-                }
-            }
-        } else {
-            return Err("error getting repeaters mutex")
-        }
-    } else {
-        return Err("error getting sockets mutex")
-    }
-    if no_error == false {
+    if !socket::broadcast_reads(control_sockets, read_repeaters, &reads) {
         return Err("error occurred writing to one or more sockets")
     }
     Ok(())

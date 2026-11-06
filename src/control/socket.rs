@@ -16,7 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::{env, io::{ErrorKind, Read, Write}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{env, io::{ErrorKind, Read}, net::{Shutdown, SocketAddr, TcpListener, TcpStream}, sync::{Arc, Mutex, MutexGuard}, thread::{self, JoinHandle}, time::{Duration, SystemTime, UNIX_EPOCH}};
 #[cfg(target_os = "linux")]
 use crate::buttons::Buttons;
 #[cfg(target_os = "linux")]
@@ -28,7 +28,7 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use reqwest::header::{HeaderMap, CONTENT_TYPE, AUTHORIZATION};
 use socket2::{Socket, Type, Protocol, Domain};
 
-use crate::{control::{exit, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound::{self, SoundType}}, database::{Database, sqlite}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, MAX_ANTENNAS, auto_connect, reconnector::Reconnector, zebra}, remote::{self, heartbeat::Heartbeat, remote_util, uploader::{self, Uploader, info::UploadInfo}}, sound_board::Voice};
+use crate::{control::{client::{self, Client}, exit, SETTING_AUTO_REMOTE, SETTING_PORTAL_NAME, socket::requests::AutoUploadQuery, sound::{self, SoundType}}, database::{Database, sqlite}, network::api::{self, Api}, notifier::{self, Notifier}, objects::{read, setting::{self, Setting}}, processor, reader::{self, MAX_ANTENNAS, auto_connect, reconnector::Reconnector, zebra}, remote::{self, heartbeat::Heartbeat, remote_util, uploader::{self, Uploader, info::UploadInfo}}, sound_board::Voice};
 
 use self::notifications::APINotification;
 
@@ -67,7 +67,7 @@ pub fn control_loop(
 
     // Control sockets are sockets that are connected and should be relayed any changes in settings / readers / apis
     // when another socket changes/deletes/adds something. -- Last spot is reserved for localhost to send shutdown command
-    let control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>> = Arc::new(Mutex::new(Default::default()));
+    let control_sockets: crate::control::client::ControlSockets = Arc::new(Mutex::new(Default::default()));
     // Read repeaters are sockets that want reads to be sent to them as they're being saved.
     let read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>> = Arc::new(Mutex::new([false;MAX_CONNECTED]));
     
@@ -361,17 +361,18 @@ pub fn control_loop(
                 let t_notifier = notifier.clone();
 
                 let mut placed = MAX_CONNECTED + 2;
-                if let Ok(c_sock) = stream.try_clone() {
+                // Writes to this client go through its own writer thread (with a write timeout).
+                if let Ok(c_sock) = Client::new(&stream) {
                     if let Ok(mut c_sockets) = control_sockets.lock() {
                         for i in 0..(MAX_CONNECTED + 1) {
                             if c_sockets[i].is_none() && i < MAX_CONNECTED {
-                                c_sockets[i] = Some(c_sock);
+                                c_sockets[i] = Some(c_sock.clone());
                                 placed = i;
                                 break;
                             // Index MAX_CONNECTED is reserved for the system to tell itself to stop running in case of 
                             // power failure or some other reason the system needs to shut itself off.
                             } else if i == MAX_CONNECTED && addr.ip().is_loopback() && c_sockets[MAX_CONNECTED].is_none() {
-                                c_sockets[i] = Some(c_sock);
+                                c_sockets[i] = Some(c_sock.clone());
                                 placed = i;
                                 break;
                             }
@@ -382,6 +383,7 @@ pub fn control_loop(
                             handle_stream(
                                 placed,
                                 t_stream,
+                                c_sock,
                                 t_keepalive,
                                 t_control,
                                 &control_port,
@@ -398,17 +400,19 @@ pub fn control_loop(
                             );
                         });
                         if let Ok(mut j) = joiners.lock() {
+                            // Drop threads that have already finished (closed connections)
+                            // so the list doesn't grow with every connection.
+                            j.retain(|h| !h.is_finished());
                             j.push(l_joiner);
                         } else {
                             println!("Unable to get joiners lock.");
                         }
                     } else {
-                        _ = write_error(&stream, errors::Errors::TooManyConnections);
+                        _ = write_error(&c_sock, errors::Errors::TooManyConnections);
+                        c_sock.end();
                     }
                 } else {
-                    _ = write_error(&stream, errors::Errors::ServerError{
-                            message: String::from("unable to clone stream")
-                    });
+                    println!("Unable to set up writing to the new connection.");
                 }
             },
             Err(e) => {
@@ -465,16 +469,47 @@ pub fn control_loop(
     if !join_all(&Arc::new(Mutex::new(vec![read_saver_thread])), THREAD_STOP_WAIT) {
         println!("Read saver didn't stop within {} seconds.", THREAD_STOP_WAIT.as_secs());
     }
-    if let Ok(c_socks) = control_sockets.lock() {
-        for sock in c_socks.iter() {
-            if let Some(sock) = sock {
-                _ = write_notification(&sock, &APINotification::ShuttingDown, &format!("now"));
-                _ = write_disconnect(&sock)
-            }
-        }
+    // Tell clients we're stopping, then give their writer threads a moment to
+    // send that before the connections close.
+    let clients = client::connected(&control_sockets);
+    for (_, sock) in &clients {
+        _ = write_notification(sock, &APINotification::ShuttingDown, &format!("now"));
+        _ = write_disconnect(sock);
+        sock.end();
+    }
+    for (_, sock) in &clients {
+        sock.finish(CLIENT_FINISH_WAIT);
     }
     println!("Finished control thread shutdown.");
 }
+
+/// Sends reads to every client that asked for new reads. The clients are copied
+/// out first, so no lock is held while sending; a client that can't take them
+/// is disconnected and unsubscribed. Returns false if any client failed.
+pub fn broadcast_reads(
+    control_sockets: &client::ControlSockets,
+    read_repeaters: &Arc<Mutex<[bool;MAX_CONNECTED]>>,
+    reads: &Vec<read::Read>,
+) -> bool {
+    let wanted: [bool; MAX_CONNECTED] = match read_repeaters.lock() {
+        Ok(r) => *r,
+        Err(_) => return false,
+    };
+    let mut ok = true;
+    for (ix, sock) in client::connected(control_sockets) {
+        if ix < MAX_CONNECTED && wanted[ix] && !write_reads(&sock, reads) {
+            ok = false;
+            sock.close();
+            if let Ok(mut r) = read_repeaters.lock() {
+                r[ix] = false;
+            }
+        }
+    }
+    ok
+}
+
+/// How long shutdown waits for each client to be sent its last messages.
+pub(crate) const CLIENT_FINISH_WAIT: Duration = Duration::from_secs(1);
 
 /// How long shutdown waits for threads to stop before carrying on.
 pub(crate) const THREAD_STOP_WAIT: Duration = Duration::from_secs(15);
@@ -612,13 +647,14 @@ fn find_json_end(buffer: &String) -> usize {
 fn handle_stream(
     index: usize,
     mut stream: TcpStream,
+    client: Client,
     keepalive: Arc<Mutex<bool>>,
     control: Arc<Mutex<super::Control>>,
     control_port: &u16,
     readers: Arc<Mutex<Vec<reader::Reader>>>,
     joiners: Arc<Mutex<Vec<JoinHandle<()>>>>,
     read_repeaters: Arc<Mutex<[bool;MAX_CONNECTED]>>,
-    control_sockets: Arc<Mutex<[Option<TcpStream>;MAX_CONNECTED + 1]>>,
+    control_sockets: crate::control::client::ControlSockets,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
     uploader: Arc<uploader::Uploader>,
     ac_state: Arc<Mutex<auto_connect::State>>,
@@ -724,10 +760,11 @@ fn handle_stream(
                             repeaters[index] = reads;
                         }
                     }
-                    if let Ok(u_readers) = readers.try_lock() {
-                        no_error = write_connection_successful(&mut stream, name, reads, &*u_readers, &uploader);
+                    // Waits for the readers lock; with try_lock a busy lock refused the connection.
+                    if let Ok(u_readers) = readers.lock() {
+                        no_error = write_connection_successful(&client, name, reads, &*u_readers, &uploader);
                     } else {
-                        no_error = write_error(&mut stream, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
+                        no_error = write_error(&client, errors::Errors::ServerError { message: String::from("unable to get readers mutex") })
                     }
                 },
                 requests::Request::KeepaliveAck => { },
@@ -740,19 +777,19 @@ fn handle_stream(
                             // for readers is not finished (or before it's started)
                             auto_connect::State::Waiting => {
                                 if let Ok(u_readers) = readers.lock() {
-                                    no_error = write_reader_list(&mut stream, &*u_readers);
+                                    no_error = write_reader_list(&client, &*u_readers);
                                 }
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);
-                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                                no_error = write_error(&client, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
-                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                        no_error = write_error(&client, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderAdd { id, name, kind, ip_address, port, auto_connect } => {
@@ -793,29 +830,27 @@ fn handle_stream(
                                                                 u_readers.push(tmp);
                                                             }
                                                         }
-                                                        if let Ok(c_socks) = control_sockets.lock() {
-                                                            for sock in c_socks.iter() {
-                                                                if let Some(sock) = sock {
-                                                                    // we might be writing to other sockets
-                                                                    // so errors here shouldn't close our connection
-                                                                    _ = write_reader_list(&sock, &*u_readers);
-                                                                }
-                                                            }
-                                                        } else {
-                                                            no_error = write_reader_list(&stream, &*u_readers);
+                                                        let clients = crate::control::client::connected(&control_sockets);
+                                                        if clients.is_empty() {
+                                                            no_error = write_reader_list(&client, &*u_readers);
+                                                        }
+                                                        for (_, sock) in clients {
+                                                            // we might be writing to other sockets
+                                                            // so errors here shouldn't close our connection
+                                                            _ = write_reader_list(&sock, &*u_readers);
                                                         }
                                                     }
                                                 },
                                                 Err(e) => {
                                                     println!("Error saving reader to database: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    no_error = write_error(&client, errors::Errors::DatabaseError {
                                                         message: format!("unexpected error saving reader to database: {e}"),
                                                     });
                                                 },
                                             };
                                         },
                                         Err(e) => {
-                                            no_error = write_error(&stream, errors::Errors::InvalidReaderType {
+                                            no_error = write_error(&client, errors::Errors::InvalidReaderType {
                                                 message: e.to_string()
                                              });
                                         },
@@ -825,13 +860,13 @@ fn handle_stream(
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);
-                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                                no_error = write_error(&client, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
-                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                        no_error = write_error(&client, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderRemove { id } => {
@@ -853,21 +888,19 @@ fn handle_stream(
                                             },
                                             Err(e) => {
                                                 println!("Error removing database from reader: {e}");
-                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                                     message: format!("unexpected error removing reader from database: {e}")
                                                 });
                                             },
                                         }
-                                        if let Ok(c_socks) = control_sockets.lock() {
-                                            for sock in c_socks.iter() {
-                                                if let Some(sock) = sock {
-                                                    // we might be writing to other sockets
-                                                    // so errors here shouldn't close our connection
-                                                    _ = write_reader_list(&sock, &*u_readers);
-                                                }
-                                            }
-                                        } else {
-                                            no_error = write_reader_list(&stream, &*u_readers);
+                                        let clients = crate::control::client::connected(&control_sockets);
+                                        if clients.is_empty() {
+                                            no_error = write_reader_list(&client, &*u_readers);
+                                        }
+                                        for (_, sock) in clients {
+                                            // we might be writing to other sockets
+                                            // so errors here shouldn't close our connection
+                                            _ = write_reader_list(&sock, &*u_readers);
                                         }
                                     }
                                 }
@@ -875,13 +908,13 @@ fn handle_stream(
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);
-                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                                no_error = write_error(&client, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
-                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                        no_error = write_error(&client, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderConnect { id } | requests::Request::ReaderStart { id } => {
@@ -936,7 +969,7 @@ fn handle_stream(
                                                             },
                                                             Err(e) => {
                                                                 println!("Error connecting to reader: {e}");
-                                                                no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                                no_error = write_error(&client, errors::Errors::ReaderConnection {
                                                                     message: format!("error connecting to reader: {e}")
                                                                 });
                                                             }
@@ -945,15 +978,15 @@ fn handle_stream(
                                                     },
                                                     Err(e) => {
                                                         u_readers.push(old_reader);
-                                                        no_error = write_error(&stream, errors::Errors::InvalidReaderType { message: e.to_string() });
+                                                        no_error = write_error(&client, errors::Errors::InvalidReaderType { message: e.to_string() });
                                                     }
                                                 };
                                             } else {
-                                                no_error = write_error(&stream, errors::Errors::AlreadyRunning);
+                                                no_error = write_error(&client, errors::Errors::AlreadyRunning);
                                             }
                                         },
                                         None => {
-                                            no_error = write_error(&stream, errors::Errors::NotFound);
+                                            no_error = write_error(&client, errors::Errors::NotFound);
                                         }
                                     };
                                 }
@@ -961,13 +994,13 @@ fn handle_stream(
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);
-                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                                no_error = write_error(&client, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
-                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                        no_error = write_error(&client, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderDisconnect { id } | requests::Request::ReaderStop { id }  => {
@@ -983,7 +1016,7 @@ fn handle_stream(
                                                 Ok(_) => {},
                                                 Err(e) => {
                                                     println!("Error connecting to reader: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                    no_error = write_error(&client, errors::Errors::ReaderConnection {
                                                         message: format!("error stopping reader: {e}")
                                                     });
                                                 }
@@ -992,7 +1025,7 @@ fn handle_stream(
                                                 Ok(_) => {},
                                                 Err(e) => {
                                                     println!("Error connecting to reader: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                    no_error = write_error(&client, errors::Errors::ReaderConnection {
                                                         message: format!("error disconnecting reader: {e}")
                                                     });
                                                 }
@@ -1000,31 +1033,29 @@ fn handle_stream(
                                             u_readers.push(reader);
                                         },
                                         None => {
-                                            no_error = write_error(&stream, errors::Errors::NotFound);
+                                            no_error = write_error(&client, errors::Errors::NotFound);
                                         }
                                     };
                                     thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                    if let Ok(c_socks) = control_sockets.lock() {
-                                        for sock in c_socks.iter() {
-                                            if let Some(sock) = sock {
-                                                no_error = write_reader_list(&sock, &*u_readers) && no_error;
-                                            }
-                                        }
-                                    } else {
-                                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
+                                    let clients = crate::control::client::connected(&control_sockets);
+                                    if clients.is_empty() {
+                                        no_error = write_reader_list(&client, &*u_readers) && no_error;
+                                    }
+                                    for (_, sock) in clients {
+                                        no_error = write_reader_list(&sock, &*u_readers) && no_error;
                                     }
                                 }
                             }
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);
-                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                                no_error = write_error(&client, errors::Errors::StartingUp)
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
-                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                        no_error = write_error(&client, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderStartAll => { // START ALL
@@ -1073,7 +1104,7 @@ fn handle_stream(
                                                 },
                                                 Err(e) => {
                                                     println!("Error connecting to reader: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                    no_error = write_error(&client, errors::Errors::ReaderConnection {
                                                         message: format!("error connecting to reader: {e}")
                                                     });
                                                 }
@@ -1085,27 +1116,25 @@ fn handle_stream(
                                         sound.notify_custom(SoundType::Connected);
                                     }
                                     thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                    if let Ok(c_socks) = control_sockets.lock() {
-                                        for sock in c_socks.iter() {
-                                            if let Some(sock) = sock {
-                                                no_error = write_reader_list(&sock, &*u_readers) && no_error;
-                                            }
-                                        }
-                                    } else {
-                                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
+                                    let clients = crate::control::client::connected(&control_sockets);
+                                    if clients.is_empty() {
+                                        no_error = write_reader_list(&client, &*u_readers) && no_error;
+                                    }
+                                    for (_, sock) in clients {
+                                        no_error = write_reader_list(&sock, &*u_readers) && no_error;
                                     }
                                 }
                             },
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);
-                                no_error = write_error(&stream, errors::Errors::StartingUp);
+                                no_error = write_error(&client, errors::Errors::StartingUp);
                             }
                         }
                     } else {
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
-                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                        no_error = write_error(&client, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderStopAll => {  // STOP ALL
@@ -1121,7 +1150,7 @@ fn handle_stream(
                                                 Ok(_) => {},
                                                 Err(e) => {
                                                     println!("Error connecting to reader: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                    no_error = write_error(&client, errors::Errors::ReaderConnection {
                                                         message: format!("error stopping reader: {e}")
                                                     });
                                                 }
@@ -1132,7 +1161,7 @@ fn handle_stream(
                                                 Ok(_) => {},
                                                 Err(e) => {
                                                     println!("Error connecting to reader: {e}");
-                                                    no_error = write_error(&stream, errors::Errors::ReaderConnection {
+                                                    no_error = write_error(&client, errors::Errors::ReaderConnection {
                                                         message: format!("error discconnecting reader: {e}")
                                                     });
                                                 }
@@ -1141,37 +1170,35 @@ fn handle_stream(
                                         u_readers.push(reader);
                                     }
                                     thread::sleep(Duration::from_millis(CONNECTION_CHANGE_PAUSE));
-                                    if let Ok(c_socks) = control_sockets.lock() {
-                                        for sock in c_socks.iter() {
-                                            if let Some(sock) = sock {
-                                                no_error = write_reader_list(&sock, &*u_readers) && no_error;
-                                            }
-                                        }
-                                    } else {
-                                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
+                                    let clients = crate::control::client::connected(&control_sockets);
+                                    if clients.is_empty() {
+                                        no_error = write_reader_list(&client, &*u_readers) && no_error;
+                                    }
+                                    for (_, sock) in clients {
+                                        no_error = write_reader_list(&sock, &*u_readers) && no_error;
                                     }
                                 }
                             },
                             _ => {
                                 println!("Auto connect is working right now.");
                                 sound.notify_custom(SoundType::StartupInProgress);
-                                no_error = write_error(&stream, errors::Errors::StartingUp)
+                                no_error = write_error(&client, errors::Errors::StartingUp)
                             },
                         }
                     } else {
                         println!("Auto connect is working right now.");
                         sound.notify_custom(SoundType::StartupInProgress);
-                        no_error = write_error(&stream, errors::Errors::StartingUp)
+                        no_error = write_error(&client, errors::Errors::StartingUp)
                     }
                 },
                 requests::Request::ReaderGetAll => {
                     if let Ok(u_readers) = readers.lock() {
-                        no_error = write_reader_list(&stream, &*u_readers) && no_error;
+                        no_error = write_reader_list(&client, &*u_readers) && no_error;
                     }
                 }
                 requests::Request::SettingsGet => {
                     if let Ok(sq) = sqlite.lock() {
-                        no_error = write_settings(&stream, &get_settings(&sq));
+                        no_error = write_settings(&client, &get_settings(&sq));
                     }
                 },
                 requests::Request::SettingsGetAll => {
@@ -1180,14 +1207,14 @@ fn handle_stream(
                         match sq.get_apis() {
                             Ok(apis) => {
                                 if let Ok(u_readers) = readers.lock() {
-                                    no_error = write_all_settings(&stream, &settings, &*u_readers, &apis, uploader.status());
+                                    no_error = write_all_settings(&client, &settings, &*u_readers, &apis, uploader.status());
                                 } else {
-                                    no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error getting the readers mutex") });
+                                    no_error = write_error(&client, errors::Errors::ServerError { message: String::from("error getting the readers mutex") });
                                 }
                             },
                             Err(e) => {
                                 println!("error getting api list. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error getting api list: {e}")
                                 });
                             }
@@ -1215,12 +1242,12 @@ fn handle_stream(
                                                         _ = control.update(new_control);
                                                     } else {
                                                         let settings = get_settings(&sq);
-                                                        no_error = write_settings(&stream, &settings);
+                                                        no_error = write_settings(&client, &settings);
                                                     }
                                                 },
                                                 Err(e) => {
                                                     println!("Error saving setting. {e}");
-                                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                    no_error = write_error(&client, errors::Errors::DatabaseError {
                                                         message: format!("error saving setting: {e}")
                                                     });
                                                 }
@@ -1238,12 +1265,12 @@ fn handle_stream(
                                                     _ = control.update(new_control);
                                                 } else {
                                                     let settings = get_settings(&sq);
-                                                    no_error = write_settings(&stream, &settings);
+                                                    no_error = write_settings(&client, &settings);
                                                 }
                                             },
                                             Err(e) => {
                                                 println!("Error saving setting. {e}");
-                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                                     message: format!("error saving setting: {e}")
                                                 });
                                             }
@@ -1273,12 +1300,12 @@ fn handle_stream(
                                                     _ = control.update(new_control);
                                                 } else {
                                                     let settings = get_settings(&sq);
-                                                    no_error = write_settings(&stream, &settings);
+                                                    no_error = write_settings(&client, &settings);
                                                 }
                                             },
                                             Err(e) => {
                                                 println!("Error saving setting. {e}");
-                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                                     message: format!("error saving setting: {e}")
                                                 });
                                             }
@@ -1286,21 +1313,17 @@ fn handle_stream(
                                     },
                                     other => {
                                         println!("'{other}' is not a valid setting");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                        no_error = write_error(&client, errors::Errors::DatabaseError {
                                             message: format!("'{other}' is not a valid setting")
                                         });
                                     }
                                 }
                             }
                             let settings = get_settings(&sq);
-                            if let Ok(c_socks) = control_sockets.lock() {
-                                for sock in c_socks.iter() {
-                                    if let Some(sock) = sock {
-                                        // we might be writing to other sockets
-                                        // so errors here shouldn't close our connection
-                                        _ = write_settings(&sock, &settings);
-                                    }
-                                }
+                            for (_, sock) in crate::control::client::connected(&control_sockets) {
+                                // we might be writing to other sockets
+                                // so errors here shouldn't close our connection
+                                _ = write_settings(&sock, &settings);
                             }
                         }
                         if custom_error && control.play_sound {
@@ -1314,7 +1337,7 @@ fn handle_stream(
                     } else {
                         if let Ok(sq) = sqlite.lock() {
                             let settings = get_settings(&sq);
-                            no_error = write_settings(&stream, &settings);
+                            no_error = write_settings(&client, &settings);
                         }
                     }
                 },
@@ -1333,11 +1356,11 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_apis() {
                             Ok(apis) => {
-                                no_error = write_api_list(&stream, &apis);
+                                no_error = write_api_list(&client, &apis);
                             },
                             Err(e) => {
                                 println!("error getting api list. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error getting api list: {e}")
                                 });
                             }
@@ -1376,21 +1399,19 @@ fn handle_stream(
                                     Ok(_) => {
                                         match sq.get_apis() {
                                             Ok(apis) => {
-                                                if let Ok(c_socks) = control_sockets.lock() {
-                                                    for sock in c_socks.iter() {
-                                                        if let Some(sock) = sock {
-                                                            // we might be writing to other sockets
-                                                            // so errors here shouldn't close our connection
-                                                            _ = write_api_list(&sock, &apis);
-                                                        }
-                                                    }
-                                                } else {
-                                                    no_error = write_api_list(&stream, &apis);
+                                                let clients = crate::control::client::connected(&control_sockets);
+                                                if clients.is_empty() {
+                                                    no_error = write_api_list(&client, &apis);
+                                                }
+                                                for (_, sock) in clients {
+                                                    // we might be writing to other sockets
+                                                    // so errors here shouldn't close our connection
+                                                    _ = write_api_list(&sock, &apis);
                                                 }
                                             },
                                             Err(e) => {
                                                 println!("error getting api list. {e}");
-                                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                                     message: format!("error getting api list: {e}")
                                                 });
                                             }
@@ -1398,7 +1419,7 @@ fn handle_stream(
                                     },
                                     Err(e) => {
                                         println!("Error saving api {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                        no_error = write_error(&client, errors::Errors::DatabaseError {
                                             message: format!("error saving api: {e}")
                                         });
                                     }
@@ -1407,7 +1428,7 @@ fn handle_stream(
                         },
                         other => {
                             println!("'{other}' is not a valid api type");
-                            no_error = write_error(&stream, errors::Errors::InvalidApiType {
+                            no_error = write_error(&client, errors::Errors::InvalidApiType {
                                 message: format!("'{other}' is not a valid api type")
                             });
                         }
@@ -1428,7 +1449,7 @@ fn handle_stream(
                             },
                             Err(e) => {
                                 println!("error getting api list. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error getting apis: {e}")
                                 })
                             }
@@ -1454,11 +1475,11 @@ fn handle_stream(
                             // if we found a duplicate remote, don't save and write error
                             if remote_exists {
                                 println!("Remote api already exists.");
-                                no_error = write_error(&stream, errors::Errors::TooManyRemoteApi);
+                                no_error = write_error(&client, errors::Errors::TooManyRemoteApi);
                             // if there's an invalid type, don't save and write error
                             } else if invalid_type {
                                 println!("One or more invalid api types found.");
-                                no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
+                                no_error = write_error(&client, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
                             // all are saveable
                             } else {
                                 let mut error_saving = false;
@@ -1491,28 +1512,26 @@ fn handle_stream(
                                 // write an error message if we had an issue
                                 if error_saving {
                                     println!("Error saving one or more apis");
-                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    no_error = write_error(&client, errors::Errors::DatabaseError {
                                         message: String::from("error saving one or more apis")
                                     });
                                 // otherwise send everyone connected the updated list of apis
                                 } else {
                                     match sq.get_apis() {
                                         Ok(apis) => {
-                                            if let Ok(c_socks) = control_sockets.lock() {
-                                                for sock in c_socks.iter() {
-                                                    if let Some(sock) = sock {
-                                                        // we might be writing to other sockets
-                                                        // so errors here shouldn't close our connection
-                                                        _ = write_api_list(&sock, &apis);
-                                                    }
-                                                }
-                                            } else {
-                                                no_error = write_api_list(&stream, &apis);
+                                            let clients = crate::control::client::connected(&control_sockets);
+                                            if clients.is_empty() {
+                                                no_error = write_api_list(&client, &apis);
+                                            }
+                                            for (_, sock) in clients {
+                                                // we might be writing to other sockets
+                                                // so errors here shouldn't close our connection
+                                                _ = write_api_list(&sock, &apis);
                                             }
                                         },
                                         Err(e) => {
                                             println!("error getting api list. {e}");
-                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            no_error = write_error(&client, errors::Errors::DatabaseError {
                                                 message: format!("error getting api list: {e}")
                                             });
                                         }
@@ -1537,11 +1556,11 @@ fn handle_stream(
                             // if we found a duplicate remote, don't save and write error
                             if remote_count > 1 {
                                 println!("Remote api already exists.");
-                                no_error = write_error(&stream, errors::Errors::TooManyRemoteApi);
+                                no_error = write_error(&client, errors::Errors::TooManyRemoteApi);
                             // if there's an invalid type, don't save and write error
                             } else if invalid_type {
                                 println!("One or more invalid api types found.");
-                                no_error = write_error(&stream, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
+                                no_error = write_error(&client, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
                             // all are saveable
                             } else {
                                 let mut error_saving = false;
@@ -1557,28 +1576,26 @@ fn handle_stream(
                                 // write an error message if we had an issue
                                 if error_saving {
                                     println!("Error saving one or more apis");
-                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    no_error = write_error(&client, errors::Errors::DatabaseError {
                                         message: String::from("error saving one or more apis")
                                     });
                                 // otherwise send everyone connected the updated list of apis
                                 } else {
                                     match sq.get_apis() {
                                         Ok(apis) => {
-                                            if let Ok(c_socks) = control_sockets.lock() {
-                                                for sock in c_socks.iter() {
-                                                    if let Some(sock) = sock {
-                                                        // we might be writing to other sockets
-                                                        // so errors here shouldn't close our connection
-                                                        _ = write_api_list(&sock, &apis);
-                                                    }
-                                                }
-                                            } else {
-                                                no_error = write_api_list(&stream, &apis);
+                                            let clients = crate::control::client::connected(&control_sockets);
+                                            if clients.is_empty() {
+                                                no_error = write_api_list(&client, &apis);
+                                            }
+                                            for (_, sock) in clients {
+                                                // we might be writing to other sockets
+                                                // so errors here shouldn't close our connection
+                                                _ = write_api_list(&sock, &apis);
                                             }
                                         },
                                         Err(e) => {
                                             println!("error getting api list. {e}");
-                                            no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                            no_error = write_error(&client, errors::Errors::DatabaseError {
                                                 message: format!("error getting api list: {e}")
                                             });
                                         }
@@ -1594,21 +1611,19 @@ fn handle_stream(
                             Ok(_) => {
                                 match sq.get_apis() {
                                     Ok(apis) => {
-                                        if let Ok(c_socks) = control_sockets.lock() {
-                                            for sock in c_socks.iter() {
-                                                if let Some(sock) = sock {
-                                                    // we might be writing to other sockets
-                                                    // so errors here shouldn't close our connection
-                                                    _ = write_api_list(&sock, &apis);
-                                                }
-                                            }
-                                        } else {
-                                            no_error = write_api_list(&stream, &apis);
+                                        let clients = crate::control::client::connected(&control_sockets);
+                                        if clients.is_empty() {
+                                            no_error = write_api_list(&client, &apis);
+                                        }
+                                        for (_, sock) in clients {
+                                            // we might be writing to other sockets
+                                            // so errors here shouldn't close our connection
+                                            _ = write_api_list(&sock, &apis);
                                         }
                                     },
                                     Err(e) => {
                                         println!("error getting api list. {e}");
-                                        no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                        no_error = write_error(&client, errors::Errors::DatabaseError {
                                             message: format!("error getting api list: {e}")
                                         });
                                     }
@@ -1616,7 +1631,7 @@ fn handle_stream(
                             },
                             Err(e) => {
                                 println!("Error deleting api {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error deleting api: {e}")
                                 });
                             }
@@ -1637,7 +1652,7 @@ fn handle_stream(
                                     }
                                 }
                                 if found == false {
-                                    no_error = write_error(&stream, errors::Errors::NoRemoteApi);
+                                    no_error = write_error(&client, errors::Errors::NoRemoteApi);
                                 } else {
                                     match reads_for_manual_upload(&sq, start_seconds, end_seconds, reader_name.as_deref()) {
                                         Ok(mut reads) => {
@@ -1645,7 +1660,7 @@ fn handle_stream(
                                         },
                                         Err(e) => {
                                             println!("Error geting reads to upload. {e}");
-                                            no_error = write_error(&stream, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
+                                            no_error = write_error(&client, errors::Errors::DatabaseError { message: format!("error getting reads to upload: {e}") });
                                             upload_apis.clear();
                                         }
                                     };
@@ -1653,7 +1668,7 @@ fn handle_stream(
                             },
                             Err(e) => {
                                 println!("error getting apis: {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error getting apis: {e}")
                                 });
                             }
@@ -1684,15 +1699,15 @@ fn handle_stream(
                     // Tell the requester how it went (an error was already sent if there was no API).
                     if !upload_apis.is_empty() {
                         if !upload_apis.iter().any(|a| a.enabled()) {
-                            no_error = write_error(&stream, errors::Errors::NotAllowed {
+                            no_error = write_error(&client, errors::Errors::NotAllowed {
                                 message: String::from("every remote API is turned off")
                             });
                         } else if !failures.is_empty() {
-                            no_error = write_error(&stream, errors::Errors::ServerError {
+                            no_error = write_error(&client, errors::Errors::ServerError {
                                 message: format!("some reads didn't upload to {}", failures.join(", "))
                             });
                         } else {
-                            no_error = write_success(&stream, uploaded);
+                            no_error = write_success(&client, uploaded);
                         }
                     }
                 },
@@ -1700,7 +1715,7 @@ fn handle_stream(
                     match query {
                         AutoUploadQuery::Start => {
                             if uploader.running() {
-                                no_error = write_error(&stream, errors::Errors::AlreadyRunning);
+                                no_error = write_error(&client, errors::Errors::AlreadyRunning);
                             } else {
                                 let t_uploader = uploader.clone();
                                 let t_joiner = thread::spawn(move|| {
@@ -1710,16 +1725,18 @@ fn handle_stream(
                                     j.push(t_joiner);
                                 }
                             }
-                            if let Ok(mut sq) = sqlite.lock() {
-                                match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("true"))) {
-                                    Ok(_) => {
-                                        if let Ok(mut control) = control.lock() {
+                            // control before sqlite, the order used everywhere else, so this
+                            // can't deadlock with a thread holding control and waiting on sqlite.
+                            if let Ok(mut control) = control.lock() {
+                                if let Ok(mut sq) = sqlite.lock() {
+                                    match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("true"))) {
+                                        Ok(_) => {
                                             control.auto_remote = true;
-                                        };
-                                    },
-                                    Err(e) => {
-                                        println!("Error saving auto upload setting: {:?}", e);
-                                        no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error saving auto upload setting") });
+                                        },
+                                        Err(e) => {
+                                            println!("Error saving auto upload setting: {:?}", e);
+                                            no_error = write_error(&client, errors::Errors::ServerError { message: String::from("error saving auto upload setting") });
+                                        }
                                     }
                                 }
                             };
@@ -1728,58 +1745,52 @@ fn handle_stream(
                             if uploader.running() {
                                 uploader.stop();
                             } else {
-                                no_error = write_error(&stream, errors::Errors::NotRunning);
+                                no_error = write_error(&client, errors::Errors::NotRunning);
                             }
-                            if let Ok(mut sq) = sqlite.lock() {
-                                match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("false"))) {
-                                    Ok(_) => {
-                                        if let Ok(mut control) = control.lock() {
+                            // control before sqlite, the order used everywhere else, so this
+                            // can't deadlock with a thread holding control and waiting on sqlite.
+                            if let Ok(mut control) = control.lock() {
+                                if let Ok(mut sq) = sqlite.lock() {
+                                    match sq.set_setting(&Setting::new(String::from(SETTING_AUTO_REMOTE), String::from("false"))) {
+                                        Ok(_) => {
                                             control.auto_remote = false;
-                                        };
-                                    },
-                                    Err(e) => {
-                                        println!("Error saving auto upload setting: {:?}", e);
-                                        no_error = write_error(&stream, errors::Errors::ServerError { message: String::from("error saving auto upload setting") });
+                                        },
+                                        Err(e) => {
+                                            println!("Error saving auto upload setting: {:?}", e);
+                                            no_error = write_error(&client, errors::Errors::ServerError { message: String::from("error saving auto upload setting") });
+                                        }
                                     }
                                 }
                             };
                         }
                         AutoUploadQuery::Status => {
-                            no_error = write_uploader_status(&stream, uploader.status());
+                            no_error = write_uploader_status(&client, uploader.status());
                         }
                     }
                 },
                 requests::Request::ReadsAdd { read } => {
                     if read.is_valid() == false {
-                        no_error = write_error(&stream, errors::Errors::InvalidRead)
+                        no_error = write_error(&client, errors::Errors::InvalidRead)
                     } else {
+                        let reads: Vec<read::Read> = vec![read];
+                        let mut saved = false;
                         if let Ok(mut sq) = sqlite.lock() {
-                            let mut reads: Vec<read::Read> = Vec::new();
-                            reads.push(read);
                             match sq.save_reads(&reads) {
                                 Ok(_) => {
-                                    if let Ok(sockets) = control_sockets.lock() {
-                                        if let Ok(repeaters) = read_repeaters.lock() {
-                                            for ix in 0..MAX_CONNECTED {
-                                                match &sockets[ix] {
-                                                    Some(sock) => {
-                                                        if repeaters[ix] == true {
-                                                            no_error = no_error && write_reads(&sock, &reads);
-                                                        }
-                                                    },
-                                                    None => {}
-                                                }
-                                            }
-                                        }
-                                    }
+                                    saved = true;
                                 },
                                 Err(e) => {
                                     println!("Error saving manual read: {e}");
-                                    no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                    no_error = write_error(&client, errors::Errors::DatabaseError {
                                         message: format!("error saving manual read: {e}")
                                     });
                                 }
                             }
+                        }
+                        // Sent once the database is unlocked. Failures are other clients'
+                        // problems, so they don't end this client's connection.
+                        if saved {
+                            _ = broadcast_reads(&control_sockets, &read_repeaters, &reads);
                         }
                     }
                 },
@@ -1787,11 +1798,11 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_reads(start_seconds, end_seconds) {
                             Ok(reads) => {
-                                no_error = write_reads(&stream, &reads);
+                                no_error = write_reads(&client, &reads);
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error getting reads: {e}")
                                 });
                             }
@@ -1802,11 +1813,11 @@ fn handle_stream(
                     if let Ok(sq) = sqlite.lock() {
                         match sq.get_all_reads() {
                             Ok(reads) => {
-                                no_error = write_reads(&stream, &reads);
+                                no_error = write_reads(&client, &reads);
                             },
                             Err(e) => {
                                 println!("Error getting reads. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error getting reads: {e}")
                                 });
                             }
@@ -1817,11 +1828,11 @@ fn handle_stream(
                     if let Ok(mut sq) = sqlite.lock() {
                         match sq.delete_reads(start_seconds, end_seconds) {
                             Ok(count) => {
-                                no_error = write_success(&stream, count);
+                                no_error = write_success(&client, count);
                             },
                             Err(e) => {
                                 println!("Error deleting reads. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error deleting reads: {e}")
                                 });
                             }
@@ -1832,11 +1843,11 @@ fn handle_stream(
                     if let Ok(mut sq) = sqlite.lock() {
                         match sq.delete_all_reads() {
                             Ok(count) => {
-                                no_error = write_success(&stream, count);
+                                no_error = write_success(&client, count);
                             },
                             Err(e) => {
                                 println!("Error deleting reads. {e}");
-                                no_error = write_error(&stream, errors::Errors::DatabaseError {
+                                no_error = write_error(&client, errors::Errors::DatabaseError {
                                     message: format!("error deleting reads: {e}")
                                 });
                             }
@@ -1844,7 +1855,7 @@ fn handle_stream(
                     }
                 },
                 requests::Request::TimeGet => {
-                    no_error = write_time(&stream);
+                    no_error = write_time(&client);
                 },
                 requests::Request::TimeSet { time } => {
                     match std::env::consts::OS {
@@ -1855,23 +1866,23 @@ fn handle_stream(
                                         Ok(_) => {
                                             // Update last_received_at so the socket doesn't auto close if we jump to the future.
                                             last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-                                            no_error = write_time(&stream)
+                                            no_error = write_time(&client)
                                         },
                                         Err(e) => {
                                             println!("error setting time: {e}");
-                                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
+                                            no_error = write_error(&client, errors::Errors::ServerError { message: format!("error setting time: {e}") })
                                         }
                                     }
                                 },
                                 Err(e) => {
                                     println!("error setting time: {e}");
-                                    no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error setting time: {e}") })
+                                    no_error = write_error(&client, errors::Errors::ServerError { message: format!("error setting time: {e}") })
                                 }
                             }
                         },
                         other => {
                             println!("not supported on this platform ({other})");
-                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
+                            no_error = write_error(&client, errors::Errors::ServerError { message: format!("not supported on this platform ({other})") })
                         }
                     }
                 },
@@ -1888,7 +1899,7 @@ fn handle_stream(
                         }
                     }
                     if message.len() > 0 {
-                        no_error = write_error(&stream, errors::Errors::AlreadySubscribed { message: message });
+                        no_error = write_error(&client, errors::Errors::AlreadySubscribed { message: message });
                     }
                 },
                 requests::Request::Update => {
@@ -1897,12 +1908,12 @@ fn handle_stream(
                     // has stopped and all reads are saved.
                     match exit::check(exit::ExitAction::Update, std::env::consts::OS, env::var(UPDATE_SCRIPT_ENV).ok()) {
                         Ok(()) => {
-                            no_error = write_success(&stream, 0);
+                            no_error = write_success(&client, 0);
                             exit::begin(&control, &keepalive, exit::ExitAction::Update, *control_port);
                         },
                         Err(e) => {
                             println!("error updating: {e}");
-                            no_error = write_error(&stream, errors::Errors::ServerError { message: format!("error updating: {e}") })
+                            no_error = write_error(&client, errors::Errors::ServerError { message: format!("error updating: {e}") })
                         }
                     }
                 },
@@ -1912,13 +1923,9 @@ fn handle_stream(
                         if sock.ip().is_loopback() {
                             //println!("sock is loopback");
                             let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
-                            if let Ok(c_socks) = control_sockets.lock() {
-                                println!("notifying connected sockets");
-                                for sock in c_socks.iter() {
-                                    if let Some(s) = sock {
-                                        _ = write_notification(&s, &notification, &time);
-                                    }
-                                }
+                            println!("notifying connected sockets");
+                            for (_, sock) in client::connected(&control_sockets) {
+                                _ = write_notification(&sock, &notification, &time);
                             }
                             if let Ok(control) = control.lock() {
                                 if control.auto_remote {
@@ -1944,7 +1951,7 @@ fn handle_stream(
                 },
                 _ => {
                     println!("Unknown command received - line was {:?}", single_line);
-                    no_error = write_error(&stream, errors::Errors::UnknownCommand)
+                    no_error = write_error(&client, errors::Errors::UnknownCommand)
                 },
             }
             if no_error == false {
@@ -1962,7 +1969,7 @@ fn handle_stream(
                 break;
             // send a keepalive message if we haven't heard from the socket in KEEPALIVE_INTERVAL_SECONDS
             } else if last_received_at + KEEPALIVE_INTERVAL_SECONDS < time.as_secs() {
-                no_error = write_keepalive(&stream) && no_error;
+                no_error = write_keepalive(&client) && no_error;
             }
         }
         // check if we've encountered an error
@@ -1979,10 +1986,14 @@ fn handle_stream(
             repeaters[index] = false;
         }
     }
-    _ = write_disconnect(&stream);
-    _ = stream.shutdown(Shutdown::Both);
+    _ = write_disconnect(&client);
+    // Close once the disconnect message is written.
+    client.end();
+    _ = stream.shutdown(Shutdown::Read);
     if let Ok(mut c_socks) = control_sockets.lock() {
-        if index < MAX_CONNECTED {
+        // Includes the slot kept for this computer; before, it was never freed, so
+        // after one use portal-quit couldn't connect to stop portal.
+        if index <= MAX_CONNECTED {
             c_socks[index] = None;
         }
     }
@@ -2001,135 +2012,36 @@ fn get_available_port() -> u16 {
 }
 
 pub fn write_notification(
-    stream: &TcpStream,
+    stream: &Client,
     notification: &notifications::APINotification,
     time: &String
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Notification {
+    stream.send(&responses::Responses::Notification {
         kind: notification.clone(),
         time: String::from(time)
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("17/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("17/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 fn write_error(
-    stream: &TcpStream,
+    stream: &Client,
     error: errors::Errors
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Error{
+    stream.send(&responses::Responses::Error{
         error,
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("1/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("1/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 fn write_time(
-    stream: &TcpStream
+    stream: &Client
 ) -> bool {
     let time = Utc::now();
     let utc = time.naive_utc();
     let local = Local.from_utc_datetime(&utc).format("%Y-%m-%d %H:%M:%S").to_string();
     let utc = utc.format("%Y-%m-%d %H:%M:%S").to_string();
-    match serde_json::to_writer(stream, &responses::Responses::Time{
+    stream.send(&responses::Responses::Time{
         local,
         utc,
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("2/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("2/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::Setting> {
@@ -2162,49 +2074,16 @@ pub(crate) fn get_settings(sqlite: &MutexGuard<sqlite::SQLite>) -> Vec<setting::
 }
 
 pub(crate) fn write_settings(
-    stream: &TcpStream,
+    stream: &Client,
     settings: &Vec<setting::Setting>
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Settings{
+    stream.send(&responses::Responses::Settings{
         settings: settings.to_vec(),
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("3/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("3/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 fn write_all_settings(
-    stream: &TcpStream,
+    stream: &Client,
     settings: &Vec<setting::Setting>,
     u_readers: &Vec<reader::Reader>,
     apis: &Vec<Api>,
@@ -2230,50 +2109,17 @@ fn write_all_settings(
             antennas
         })
     };
-    match serde_json::to_writer(stream, &responses::Responses::SettingsAll {
+    stream.send(&responses::Responses::SettingsAll {
         settings: settings.to_vec(),
         readers: list,
         apis: apis.to_vec(),
         auto_upload: status,
         portal_version: env!("CARGO_PKG_VERSION")
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-            println!("16/ Something went wrong writing to the socket. {e}");
-            return false;
-        }
-    }
-}
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("16/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 pub fn write_reader_list(
-    stream: &TcpStream,
+    stream: &Client,
     u_readers: &Vec<reader::Reader>
 ) -> bool {
     let mut list: Vec<responses::Reader> = Vec::new();
@@ -2296,214 +2142,51 @@ pub fn write_reader_list(
             antennas
         })
     };
-    match serde_json::to_writer(stream, &responses::Responses::Readers{
+    stream.send(&responses::Responses::Readers{
         readers: list,
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-            println!("4/ Something went wrong writing to the socket. {e}");
-            return false;
-        }
-    }
-}
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("4/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 fn write_api_list(
-    stream: &TcpStream,
+    stream: &Client,
     apis: &Vec<api::Api>
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::ApiList{
+    stream.send(&responses::Responses::ApiList{
         apis: apis.to_vec()
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("5/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("5/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 pub fn write_reader_antennas(
-    stream: &TcpStream,
+    stream: &Client,
     reader_name: String,
     antennas: &[u8;MAX_ANTENNAS]
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::ReaderAntennas{
+    stream.send(&responses::Responses::ReaderAntennas{
         reader_name,
         antennas: antennas.clone()
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("16/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("13/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 pub fn write_reads(
-    stream: &TcpStream,
+    stream: &Client,
     reads: &Vec<read::Read>
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Reads{
+    stream.send(&responses::Responses::Reads{
         list: reads.to_vec(),
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("6/ Something went wrong writing to the socket. {e}");
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("6/ Something went wrong writing to the socket. {e}");
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 fn write_success(
-    stream: &TcpStream,
+    stream: &Client,
     count: usize
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Success {
+    stream.send(&responses::Responses::Success {
         count
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("7/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("7/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 fn write_connection_successful(
-    stream: &TcpStream,
+    stream: &Client,
     name: String,
     reads: bool,
     u_readers: &Vec<reader::Reader>,
@@ -2535,7 +2218,7 @@ fn write_connection_successful(
             updatable = true;
         }
     }
-    match serde_json::to_writer(stream, &responses::Responses::ConnectionSuccessful{
+    stream.send(&responses::Responses::ConnectionSuccessful{
         name,
         kind: String::from(CONNECTION_TYPE),
         version: CONNECTION_VERS,
@@ -2544,160 +2227,28 @@ fn write_connection_successful(
         updatable: updatable,
         auto_upload: uploader.status(),
         portal_version: env!("CARGO_PKG_VERSION"),
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("9/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("9/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 pub fn write_keepalive(
-    stream: &TcpStream
+    stream: &Client
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Keepalive) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("10/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("10/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    stream.send(&responses::Responses::Keepalive)
 }
 
 pub fn write_disconnect(
-    stream: &TcpStream
+    stream: &Client
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::Disconnect) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("11/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("11/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    stream.send(&responses::Responses::Disconnect)
 }
 
 pub fn write_uploader_status(
-    stream: &TcpStream,
+    stream: &Client,
     status: uploader::Status
 ) -> bool {
-    match serde_json::to_writer(stream, &responses::Responses::ReadAutoUpload {
+    stream.send(&responses::Responses::ReadAutoUpload {
         status
-    }) {
-        Ok(_) => {},
-        Err(e) => {
-            match e.io_error_kind() {
-                Some(ErrorKind::BrokenPipe) |
-                Some(ErrorKind::ConnectionReset) |
-                Some(ErrorKind::ConnectionAborted) => {
-                    return false;
-                },
-                _ => {
-                    println!("15/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    let mut writer = stream;
-    match writer.write_all(b"\n") {
-        Ok(_) => {},
-        Err(e) => {
-            match e.kind() {
-                ErrorKind::BrokenPipe |
-                ErrorKind::ConnectionReset |
-                ErrorKind::ConnectionAborted => {
-                    return false;
-                },
-                _ => {
-                    println!("15/ Something went wrong writing to the socket. {e}");
-                    return false;
-                }
-            }
-        }
-    };
-    true
+    })
 }
 
 fn construct_headers(key: &str) -> HeaderMap {

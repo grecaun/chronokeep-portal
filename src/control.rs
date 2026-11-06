@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{database::{self, sqlite, DBError, Database}, defaults, objects::setting, sound_board::{SoundBoard, Voice}};
 
 pub mod socket;
+pub mod client;
 pub mod zero_conf;
 pub mod sound;
 pub mod exit;
