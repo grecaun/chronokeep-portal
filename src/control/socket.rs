@@ -670,9 +670,6 @@ fn handle_stream(
     let mut no_error = true;
     let mut client_disconnected = false;
     let mut last_received_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
-                                .connect_timeout(Duration::from_secs(5)).build()
-                                .unwrap_or(reqwest::blocking::Client::new());
     loop {
         if let Ok(ka) = keepalive.lock() {
             if *ka == false {
@@ -1677,10 +1674,21 @@ fn handle_stream(
                     // upload any reads we found in the database if we found our remote API
                     let mut uploaded: usize = 0;
                     let mut failures: Vec<String> = Vec::new();
+                    let http_client = match remote_util::http_client(Duration::from_secs(5)) {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            println!("Unable to create http client: {e}");
+                            None
+                        }
+                    };
                     for api in &upload_apis {
                         if to_upload.len() > 0 && api.enabled() {
+                            let Some(http_client) = &http_client else {
+                                failures.push(format!("{} (unable to create http client)", api.nickname()));
+                                continue;
+                            };
                             println!("Uploading {} reads to {} at {}", to_upload.len(), api.nickname(), api.uri());
-                            let (modified_reads, e_count) = remote_util::upload_all_reads(&http_client, &api, to_upload.clone());
+                            let (modified_reads, e_count) = remote_util::upload_all_reads(http_client, &api, to_upload.clone());
                             println!("Uploaded {} reads to {} at {}. Error count: {}", modified_reads.len(), api.nickname(), api.uri(), e_count);
                             uploaded = uploaded.max(modified_reads.len());
                             if e_count > 0 {

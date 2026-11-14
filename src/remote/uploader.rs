@@ -192,8 +192,7 @@ impl Uploader {
         // let everyone know we're running
         self.update_control_socks(err_count);
         let http_client: reqwest::blocking::Client;
-        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
-                                    .connect_timeout(Duration::from_secs(5)).build() {
+        match remote_util::http_client(Duration::from_secs(5)) {
             Ok(client) => {
                 http_client = client;
             },

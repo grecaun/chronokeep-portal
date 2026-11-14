@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use std::{sync::{Arc, Condvar, Mutex}, thread::{self, JoinHandle}, time::{Duration, Instant}};
 
-use crate::{control, database::{Database, sqlite}, network::{api::{self, Api}, heartbeat::HeartbeatState}, reader::{self, Reader}, remote::uploader::info::UploadInfo};
+use crate::{control, database::{Database, sqlite}, network::{api::{self, Api}, heartbeat::HeartbeatState}, reader::{self, Reader}, remote::{remote_util, uploader::info::UploadInfo}};
 
 /// How often a heartbeat is sent to each Chronokeep Remote API with heartbeat turned on.
 pub const INTERVAL: Duration = Duration::from_secs(60);
@@ -195,10 +195,7 @@ pub(crate) fn run_loop<F>(signal: &StopSignal, interval: Duration, build: F)
 where
     F: Fn() -> Vec<(Api, HeartbeatState)>,
 {
-    let client = match reqwest::blocking::ClientBuilder::new()
-        .timeout(HTTP_TIMEOUT)
-        .connect_timeout(HTTP_TIMEOUT)
-        .build() {
+    let client = match remote_util::http_client(HTTP_TIMEOUT) {
         Ok(c) => c,
         Err(e) => {
             println!("Unable to create http client, heartbeat thread not started: {e}");

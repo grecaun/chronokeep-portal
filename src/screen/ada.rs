@@ -82,9 +82,13 @@ impl CharacterDisplay {
         self.hour = date_time.hour() as u8;
         self.minute = date_time.minute() as u8;
         self.seconds = date_time.second() as u8;
-        let http_client = reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
-                                .connect_timeout(Duration::from_secs(5)).build()
-                                .unwrap_or(reqwest::blocking::Client::new());
+        let http_client = match remote_util::http_client(Duration::from_secs(5)) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                println!("Unable to create http client, manual upload unavailable: {e}");
+                None
+            }
+        };
         loop {
             if let Ok(keepalive) = self.keepalive.try_lock() {
                 if *keepalive == false {
@@ -490,7 +494,9 @@ impl CharacterDisplay {
                                         }
                                     }
                                     if manual_upload {
-                                        remote_util::upload_saved_reads(&http_client, &self.sqlite);
+                                        if let Some(c) = &http_client {
+                                            remote_util::upload_saved_reads(c, &self.sqlite);
+                                        }
                                     }
                                     self.update_settings();
                                 },
@@ -842,7 +848,9 @@ impl CharacterDisplay {
                                         }
                                     }
                                     if manual_upload {
-                                        remote_util::upload_saved_reads(&http_client, &self.sqlite);
+                                        if let Some(c) = &http_client {
+                                            remote_util::upload_saved_reads(c, &self.sqlite);
+                                        }
                                     }
                                     self.update_settings();
                                 },
@@ -1035,7 +1043,9 @@ impl CharacterDisplay {
                                             let _ = write!(lcd, "{:<20}", "");
                                             let _ = write!(lcd, "{:^20}", "Uploading . . .");
                                             let _ = write!(lcd, "{:<20}", "");
-                                            remote_util::upload_saved_reads(&http_client, &self.sqlite);
+                                            if let Some(c) = &http_client {
+                                                remote_util::upload_saved_reads(c, &self.sqlite);
+                                            }
                                         }
                                         _ => {
                                             self.current_menu[0] = MAIN_MENU;

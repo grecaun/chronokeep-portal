@@ -17,10 +17,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use reqwest::header::{HeaderMap, HeaderValue, CONNECTION};
 
 use crate::{control::socket, database::{sqlite, Database}, network::api, objects::read};
 
 pub(crate) const NUMBER_READS_PER_UPLOAD: usize = 100;
+
+/// HTTP client that doesn't keep connections open between requests.
+pub fn http_client(timeout: Duration) -> reqwest::Result<reqwest::blocking::Client> {
+    let mut headers = HeaderMap::new();
+    // Ask the server to close its end once it has responded.
+    headers.insert(CONNECTION, HeaderValue::from_static("close"));
+    reqwest::blocking::ClientBuilder::new()
+        .timeout(timeout)
+        .connect_timeout(timeout)
+        // Keep no idle connections: each one closes once its response is read.
+        .pool_max_idle_per_host(0)
+        .default_headers(headers)
+        .build()
+}
 
 pub fn upload_all_reads(
     http_client: &reqwest::blocking::Client,

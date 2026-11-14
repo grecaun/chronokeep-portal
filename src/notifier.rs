@@ -21,7 +21,7 @@ use std::{sync::{Arc, Condvar, Mutex, WaitTimeoutResult}, time::Duration};
 use chrono::Utc;
 use reqwest::header::{HeaderMap, AUTHORIZATION, CONTENT_TYPE};
 
-use crate::{control::{socket::notifications::APINotification, Control}, network::api::Api, objects::notification::RemoteNotification, remote};
+use crate::{control::{Control, socket::notifications::APINotification}, network::api::Api, objects::notification::RemoteNotification, remote::{self, remote_util}};
 
 #[derive(Clone, Debug)]
 pub enum Notification {
@@ -84,8 +84,7 @@ impl Notifier {
 
     pub fn run(&mut self) {
         let http_client: reqwest::blocking::Client;
-        match reqwest::blocking::ClientBuilder::new().timeout(Duration::from_secs(5))
-                                    .connect_timeout(Duration::from_secs(5)).build() {
+        match remote_util::http_client(Duration::from_secs(5)) {
             Ok(client) => {
                 http_client = client;
             },
