@@ -2275,6 +2275,7 @@ pub fn upload_reads(
     let response = match http_client.post(format!("{url}reads/add"))
         .headers(construct_headers(api.token()))
         .json(&remote::requests::UploadReadsRequest {
+            dev: String::from(api.device_name()),
             reads: reads.to_vec()
         })
         .send() {

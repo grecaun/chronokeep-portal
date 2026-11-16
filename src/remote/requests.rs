@@ -22,6 +22,7 @@ use crate::objects::{notification::RemoteNotification, read};
 
 #[derive(Serialize, Debug, Clone)]
 pub struct UploadReadsRequest {
+    pub dev: String,
     pub reads: Vec<read::Read>
 }
 
