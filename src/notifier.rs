@@ -30,11 +30,29 @@ pub enum Notification {
     BatteryLow,
     BatteryCritical,
     BatteryUnknown,
+    HighTemp,
+    MaxTemp,
     StartReading,
     StopReading,
     UnableToStartReading,
     Location,
     Shutdown,
+}
+
+/// Every Chronokeep Remote API saved on the portal.
+pub fn remote_apis(sqlite: &Arc<Mutex<crate::database::sqlite::SQLite>>) -> Vec<Api> {
+    use crate::database::Database;
+    use crate::network::api;
+    let Ok(sq) = sqlite.lock() else { return Vec::new() };
+    match sq.get_apis() {
+        Ok(apis) => apis.into_iter()
+            .filter(|a| a.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || a.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF)
+            .collect(),
+        Err(e) => {
+            println!("Error trying to get apis: {e}");
+            Vec::new()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -69,6 +87,38 @@ impl Notifier {
         *waiting = false;
         cvar.notify_one();
         drop(waiting);
+    }
+
+    /// Tells everyone about something on the portal itself, like a low battery or high
+    /// temperature: every client connected to the control socket, and, while auto upload is
+    /// on, every Chronokeep Remote API.
+    pub fn send_device_notification(
+        &self,
+        notification: APINotification,
+        control_sockets: &crate::control::client::ControlSockets,
+        sqlite: &Arc<Mutex<crate::database::sqlite::SQLite>>,
+    ) {
+        let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+        println!("notifying connected sockets");
+        for (_, sock) in crate::control::client::connected(control_sockets) {
+            _ = crate::control::socket::write_notification(&sock, &notification, &time);
+        }
+        self.send_remote_notification(notification, sqlite);
+    }
+
+    /// Sends a notification to every Chronokeep Remote API while auto upload is on.
+    pub fn send_remote_notification(
+        &self,
+        notification: APINotification,
+        sqlite: &Arc<Mutex<crate::database::sqlite::SQLite>>,
+    ) {
+        let auto_remote = self.control.lock().map(|c| c.auto_remote).unwrap_or(false);
+        if !auto_remote {
+            return;
+        }
+        for api in remote_apis(sqlite) {
+            self.send_api_notification(&api, notification.clone());
+        }
     }
 
     pub fn send_api_notification(&self, api: &Api, note: APINotification) {
@@ -155,6 +205,16 @@ impl Notifier {
                     Notification::BatteryUnknown => {
                         tag = String::from("battery");
                         format!("{time} - {name} is unable to detect the battery level.")
+                    },
+                    Notification::HighTemp => {
+                        tag = String::from("thermometer");
+                        priority = 4;
+                        format!("{time} - {name} is running hot.")
+                    },
+                    Notification::MaxTemp => {
+                        tag = String::from("thermometer");
+                        priority = 5;
+                        format!("{time} - Warning! {name} is too hot and may slow down or shut off.")
                     },
                     Notification::Location => {
                         tag = String::from("world_map");
@@ -250,3 +310,6 @@ fn construct_api_headers(key: &str) -> HeaderMap {
     headers.insert(AUTHORIZATION, format!("Bearer {key}").parse().unwrap());
     headers
 }
+
+#[cfg(test)]
+mod tests;

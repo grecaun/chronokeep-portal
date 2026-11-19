@@ -23,10 +23,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use ina219::address::Address;
 use ina219::SyncIna219;
 use rppal::i2c::I2c;
-use chrono::Utc;
 use chrono::{DateTime, Local};
 
-use crate::{database::Database, control::{Control, socket::{self, notifications::APINotification}}, sqlite, network::api, notifier};
+use crate::{control::{Control, BATTERY_CRITICAL_PERCENT, BATTERY_LOW_PERCENT, socket::notifications::APINotification}, sqlite, notifier};
 
 pub const BATT_SLEEP_MILLISEC: u64 = 300;
 pub const BATT_VOLTAGE_COUNT: usize = 15;
@@ -160,12 +159,12 @@ impl Checker {
             control.battery = percentage;
             control.battery_voltage = format!("{}", average_voltage);
         }
-        if batt > 30 && percentage <= 30 && now > self.last_low + 60 {
+        if batt > BATTERY_LOW_PERCENT && percentage <= BATTERY_LOW_PERCENT && now > self.last_low + 60 {
             let date_time: DateTime<Local> = SystemTime::now().into();
             self.notifier.send_notification(notifier::Notification::BatteryLow, format!("{}", date_time.format("%Y/%m/%d %T")));
             self.send_notification(APINotification::BatteryLow);
             self.last_low = now;
-        } else if batt > 15 && percentage <= 15 && now > self.last_crit + 60 {
+        } else if batt > BATTERY_CRITICAL_PERCENT && percentage <= BATTERY_CRITICAL_PERCENT && now > self.last_crit + 60 {
             let date_time: DateTime<Local> = SystemTime::now().into();
             self.notifier.send_notification(notifier::Notification::BatteryCritical, format!("{}", date_time.format("%Y/%m/%d %T")));
             self.send_notification(APINotification::BatteryCritical);
@@ -174,29 +173,6 @@ impl Checker {
     }
 
     fn send_notification(&self, notification: APINotification) {
-        let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
-        println!("notifying connected sockets");
-        for (_, sock) in crate::control::client::connected(&self.control_sockets) {
-            _ = socket::write_notification(&sock, &notification, &time);
-        }
-        if let Ok(control) = self.control.lock() {
-            if control.auto_remote {
-                if let Ok(sq) = self.sqlite.lock() {
-                    match sq.get_apis() {
-                        Ok(apis) => {
-                            for api in apis {
-                                if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                    self.notifier.send_api_notification(&api, notification);
-                                    break;
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            println!("Error trying to get apis: {e}");
-                        }
-                    }
-                }
-            }
-        }
+        self.notifier.send_device_notification(notification, &self.control_sockets, &self.sqlite);
     }
 }

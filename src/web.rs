@@ -21,6 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //! * `GET /`               the page (one self-contained HTML file, works offline)
 //! * `GET /api/info`       portal name, version, platform and uptime
 //! * `GET /api/time`       this computer's clock (Unix milliseconds)
+//! * `GET /api/status`     the CPU temperature and battery level, each null when the portal
+//!                         can't read it, with the levels that send their warnings
 //! * `GET /api/events`     Server-Sent Events: every control socket message
 //!                         (`readers`, `settings`, `api_list`, `reads`, ...) as it happens
 //! * `GET /api/reads`      most recently saved reads (`?limit=N`, default 200)
@@ -76,6 +78,7 @@ struct Hub {
     control_port: u16,
     keepalive: Arc<Mutex<bool>>,
     sqlite: Arc<Mutex<sqlite::SQLite>>,
+    control: Arc<Mutex<control::Control>>,
     started: Instant,
     subscribers: Mutex<Vec<(u64, mpsc::Sender<String>)>>,
     next_id: AtomicU64,
@@ -92,7 +95,7 @@ fn now_millis() -> u128 {
 }
 
 /// Starts the web page if it's enabled. Called once the control socket is listening.
-pub fn start(control_port: u16, keepalive: Arc<Mutex<bool>>, sqlite: Arc<Mutex<sqlite::SQLite>>) {
+pub fn start(control_port: u16, keepalive: Arc<Mutex<bool>>, sqlite: Arc<Mutex<sqlite::SQLite>>, control: Arc<Mutex<control::Control>>) {
     let port = match std::env::var(WEB_PORT_ENV) {
         Ok(v) if v.trim().eq_ignore_ascii_case("off") || v.trim() == "0" => {
             println!("Web page disabled ({WEB_PORT_ENV}={v}).");
@@ -129,6 +132,7 @@ pub fn start(control_port: u16, keepalive: Arc<Mutex<bool>>, sqlite: Arc<Mutex<s
         control_port,
         keepalive,
         sqlite,
+        control,
         started: Instant::now(),
         subscribers: Mutex::new(Vec::new()),
         next_id: AtomicU64::new(1),
@@ -479,6 +483,37 @@ fn info(hub: &Hub) -> String {
     }).to_string()
 }
 
+/// The portal's latest temperature and battery readings.
+fn status(hub: &Hub) -> String {
+    match hub.control.lock() {
+        Ok(c) => status_json(c.temperature, c.battery, &c.battery_voltage),
+        Err(_) => status_json(None, 0, ""),
+    }
+}
+
+/// What `/api/status` sends for the given readings. The battery voltage (in mV) stays "0"
+/// on portals without a battery monitor, so the battery is reported as unknown there. Each
+/// reading comes with the levels where the portal sends its warnings, so the page shows
+/// them the same way.
+fn status_json(temperature: Option<f32>, battery: u8, battery_voltage: &str) -> String {
+    let millivolts = battery_voltage.trim().parse::<u32>().ok().filter(|mv| *mv > 0);
+    let charging = millivolts.is_some() && battery > control::BATTERY_CHARGING_PERCENT;
+    json!({
+        "temperature": {
+            "celsius": temperature,
+            "high": crate::temperature::HIGH_TEMP,
+            "max": crate::temperature::MAX_TEMP,
+        },
+        "battery": {
+            "percent": millivolts.map(|_| battery.min(100)),
+            "millivolts": millivolts,
+            "charging": charging,
+            "low": control::BATTERY_LOW_PERCENT,
+            "critical": control::BATTERY_CRITICAL_PERCENT,
+        },
+    }).to_string()
+}
+
 // -------------------------------------------------------------------- http
 
 fn header(name: &str, value: &str) -> Header {
@@ -501,6 +536,7 @@ fn handle(mut req: Request, hub: &Hub) {
                 .with_header(header("Cache-Control", "no-store")),
         ),
         (Method::Get, "/api/info") => req.respond(json_response(info(hub))),
+        (Method::Get, "/api/status") => req.respond(json_response(status(hub))),
         (Method::Get, "/api/time") => {
             req.respond(json_response(json!({ "time_ms": now_millis() as u64 }).to_string()))
         }

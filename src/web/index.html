@@ -41,7 +41,10 @@
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   /* The bar spans the window; its content lines up with the body (same max width and side padding as main). */
-  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+  /* The header covers the pill row too, so it lets clicks through and only the title bar and
+     the pills take them. */
+  header { position: sticky; top: 0; z-index: 5; pointer-events: none; }
+  .titlebar { background: var(--panel); border-bottom: 1px solid var(--line); pointer-events: auto; }
   .header-inner { max-width: 1200px; margin: 0 auto; padding: 10px 16px;
                   display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   header h1 { font-size: 17px; margin: 0; font-weight: 650; }
@@ -60,6 +63,13 @@
   .live.off .dot { background: var(--danger); }
   .live.wait .dot { background: var(--warn); }
   .uptime { font-size: 13px; color: var(--muted); }
+  /* Clock, temperature and battery, centered under the title bar. The row has no background,
+     so the page shows through around the pills as it scrolls, and clicks between the pills
+     reach whatever is underneath. */
+  .status-row { padding: 8px 16px;
+                display: flex; justify-content: center; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .status-row > * { pointer-events: auto; }
+  .status-row .status { background: var(--panel); box-shadow: 0 1px 4px rgba(0, 0, 0, .18); }
   main { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; gap: 20px; }
   /* Center on whole pixels so borders and text stay in line (see snapDialog). */
   @supports (margin-left: round(down, 1.5px, 1px)) {
@@ -106,6 +116,14 @@
   .status.clock.off { border-color: var(--warn); }
   .status.clock.off .state { background: var(--warn-bg); color: var(--warn); }
   .status.clock.off button { border-left-color: var(--warn); }
+  /* Temperature and battery pills in the header, coloured by how close they are to a warning. */
+  .status.vital { font-variant-numeric: tabular-nums; cursor: help; }
+  .status.vital.ok { border-color: var(--ok); }
+  .status.vital.ok .state { background: var(--ok-bg); color: var(--ok); }
+  .status.vital.warn { border-color: var(--warn); }
+  .status.vital.warn .state { background: var(--warn-bg); color: var(--warn); }
+  .status.vital.bad { border-color: var(--danger); }
+  .status.vital.bad .state { background: var(--danger-bg); color: var(--danger); }
   .card-foot { display: flex; align-items: center; gap: 2px; border-top: 1px solid var(--line); padding-top: 6px; margin-top: auto; }
   .card-foot .spacer { flex: 1; }
   .meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
@@ -215,15 +233,12 @@
 </head>
 <body>
 <header>
+ <div class="titlebar">
  <div class="header-inner">
   <h1>Chronokeep Portal</h1>
   <span class="live" id="live"><span class="dot"></span><span id="live-text">Connecting…</span></span>
   <span class="uptime" id="uptime"></span>
   <span class="spacer"></span>
-  <span class="status clock" id="clock" title="The portal computer's clock">
-    <span class="state" id="clock-text">Portal clock —</span>
-    <button type="button" id="clock-btn" title="Set the portal computer's clock">Set time</button>
-  </span>
   <div class="theme" role="group" aria-label="Color theme">
     <button type="button" data-theme-choice="system" title="Match system theme" aria-label="Match system theme">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
@@ -240,6 +255,15 @@
     <button id="stop-all">Stop all</button>
     <button class="primary" id="add-reader">Add reader</button>
   </div>
+ </div>
+ </div>
+ <div class="status-row">
+  <span class="status clock" id="clock" title="The portal computer's clock">
+    <span class="state" id="clock-text">Portal clock —</span>
+    <button type="button" id="clock-btn" title="Set the portal computer's clock">Set time</button>
+  </span>
+  <span class="status vital" id="temp" hidden><span class="state" id="temp-text"></span></span>
+  <span class="status vital" id="battery" hidden><span class="state" id="battery-text"></span></span>
  </div>
 </header>
 
@@ -502,7 +526,7 @@ function toast(text, kind = "") {
 function errorText(err) {
   const names = {
     UNKNOWN_COMMAND: "Unknown command", TOO_MANY_CONNECTIONS: "Too many programs connected to the portal",
-    TOO_MANY_REMOTE_API: "Only one remote API can be saved", SERVER_ERROR: "Portal error", DATABASE_ERROR: "Database error",
+    SERVER_ERROR: "Portal error", DATABASE_ERROR: "Database error",
     INVALID_READER_TYPE: "Invalid reader", READER_CONNECTION: "Reader problem", NOT_FOUND: "Not found",
     INVALID_SETTING: "Invalid setting", INVALID_API_TYPE: "Invalid API type", ALREADY_RUNNING: "Already running",
     NOT_RUNNING: "Not running", NO_REMOTE_API: "No remote API saved", INVALID_READ: "Invalid read",
@@ -1133,9 +1157,7 @@ function renderLive() {
 }
 
 const notificationText = {
-  UPS_DISCONNECTED: ["UPS disconnected", "warn"], UPS_CONNECTED: ["UPS connected", ""],
-  UPS_ON_BATTERY: ["Running on UPS battery", "warn"], UPS_LOW_BATTERY: ["UPS battery low", "error"],
-  UPS_ONLINE: ["UPS back on mains power", ""], SHUTTING_DOWN: ["The portal is shutting down", "warn"],
+  SHUTTING_DOWN: ["The portal is shutting down", "warn"],
   RESTARTING: ["The portal is restarting", "warn"], HIGH_TEMP: ["The portal is running hot", "warn"],
   MAX_TEMP: ["The portal is too hot", "error"], BATTERY_LOW: ["Battery low", "warn"],
   BATTERY_CRITICAL: ["Battery critically low", "error"],
@@ -1186,6 +1208,51 @@ function connectEvents() {
     }
   };
 }
+
+// ------------------------------------------------------- temperature, battery
+
+// Shows a reading in its header pill: green, amber at its first warning level and red at its
+// second, the same levels where the portal sends its warnings.
+function showVital(id, text, level, title) {
+  const pill = $(id);
+  pill.hidden = false;
+  pill.classList.remove("ok", "warn", "bad");
+  pill.classList.add(level);
+  $(`${id}-text`).textContent = text;
+  pill.title = title;
+}
+
+function renderStatus(s) {
+  const t = s && s.temperature;
+  if (!t || t.celsius === null || t.celsius === undefined) {
+    $("temp").hidden = true;
+  } else {
+    const c = t.celsius;
+    const level = c >= t.max ? "bad" : c >= t.high ? "warn" : "ok";
+    const label = c >= t.max ? " · Too hot" : c >= t.high ? " · Hot" : "";
+    showVital("temp", `${c.toFixed(1)}°C${label}`, level,
+      `CPU temperature. The portal warns at ${t.high}°C and again at ${t.max}°C, where it starts slowing itself down.`);
+  }
+  const b = s && s.battery;
+  if (!b || b.percent === null || b.percent === undefined) {
+    $("battery").hidden = true;
+  } else if (b.charging) {
+    showVital("battery", "Battery charging", "ok", `Battery charging (${b.millivolts} mV).`);
+  } else {
+    const p = b.percent;
+    const level = p <= b.critical ? "bad" : p <= b.low ? "warn" : "ok";
+    const label = p <= b.critical ? " · Critical" : p <= b.low ? " · Low" : "";
+    showVital("battery", `Battery ${p}%${label}`, level,
+      `Battery ${p}% (${b.millivolts} mV). The portal warns at ${b.low}% and again at ${b.critical}%.`);
+  }
+}
+
+async function loadStatus() {
+  try {
+    renderStatus(await (await fetch("/api/status", { cache: "no-store" })).json());
+  } catch (_) {}
+}
+setInterval(loadStatus, 10000);
 
 // ------------------------------------------------------------------ uptime
 
@@ -1240,6 +1307,7 @@ async function init() {
   renderReads();
   renderLive();
   measureClock();
+  loadStatus();
   loadReads();
   connectEvents();
 }

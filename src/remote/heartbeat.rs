@@ -24,8 +24,6 @@ use crate::{control, database::{Database, sqlite}, network::{api::{self, Api}, h
 pub const INTERVAL: Duration = Duration::from_secs(60);
 /// Per-request timeout. Kept short so stopping never waits long on a slow API.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
-/// Battery percentages above this mean the portal is charging (see battery.rs).
-const CHARGING_PERCENTAGE: u8 = 110;
 
 /// Tells the heartbeat thread to stop. Waiting on it wakes immediately when
 /// stopped, so the thread never sleeps through a stop or spins while waiting.
@@ -98,9 +96,9 @@ impl Heartbeat {
     /// The portal's current state. `build` swaps in each API's device name.
     fn state(&self) -> HeartbeatState {
         let now = chrono::Utc::now().timestamp_millis();
-        let (dev, bat, voltage, chip_type) = match self.control.lock() {
-            Ok(c) => (c.name.clone(), c.battery, c.battery_voltage.clone(), c.chip_type.clone()),
-            Err(_) => (String::new(), 0, String::new(), String::new()),
+        let (dev, bat, voltage, chip_type, temperature) = match self.control.lock() {
+            Ok(c) => (c.name.clone(), c.battery, c.battery_voltage.clone(), c.chip_type.clone(), c.temperature),
+            Err(_) => (String::new(), 0, String::new(), String::new(), None),
         };
         let (mut total, mut connected, mut reading) = (0, 0, false);
         if let Ok(readers) = self.readers.lock() {
@@ -130,6 +128,7 @@ impl Heartbeat {
             readers_total: total,
             reading,
             chip_type,
+            temperature,
         }
     }
 
@@ -168,7 +167,7 @@ pub fn spawn(heartbeat: Arc<Heartbeat>) -> JoinHandle<()> {
 /// Battery percentages above 110 mean charging (see battery.rs). Checked on the
 /// raw value; capping it to 100 first would hide charging.
 pub(crate) fn is_charging(battery: u8) -> bool {
-    battery > CHARGING_PERCENTAGE
+    battery > control::BATTERY_CHARGING_PERCENT
 }
 
 /// Only Chronokeep Remote APIs with heartbeat turned on get heartbeats.

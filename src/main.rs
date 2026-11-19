@@ -45,6 +45,7 @@ pub mod notifier;
 pub mod web;
 #[cfg(target_os = "linux")]
 pub mod battery;
+pub mod temperature;
 
 fn main() {
     println!("Chronokeep Portal starting up...");

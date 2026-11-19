@@ -144,7 +144,7 @@ pub fn control_loop(
 
     // Serve the web page. It talks to the portal through this control socket,
     // which is already listening, so it can connect whenever it's ready.
-    crate::web::start(control_port, keepalive.clone(), sqlite.clone());
+    crate::web::start(control_port, keepalive.clone(), sqlite.clone(), control.clone());
 
     // Get all known readers so we can work on them later.
     match sqlite.lock() {
@@ -284,6 +284,15 @@ pub fn control_loop(
                 });
             }
         }
+    }
+
+    // Watch the CPU temperature. This stops by itself where there's no temperature to read.
+    let mut temp_check = crate::temperature::Checker::new(keepalive.clone(), control.clone(), notifier.clone(), control_sockets.clone(), sqlite.clone());
+    let t_joiner = thread::spawn(move|| {
+        temp_check.run();
+    });
+    if let Ok(mut j) = joiners.lock() {
+        j.push(t_joiner);
     }
 
     // Start our code to check the battery level.
@@ -426,25 +435,7 @@ pub fn control_loop(
     // Queue the shutdown notifications first so the notifier sends them before it stops.
     let date_time: DateTime<Local> = SystemTime::now().into();
     notifier.send_notification(notifier::Notification::Shutdown, format!("{}", date_time.format("%Y/%m/%d %T")));
-    if let Ok(control) = control.lock() {
-        if control.auto_remote {
-            if let Ok(sq) = sqlite.lock() {
-                match sq.get_apis() {
-                    Ok(apis) => {
-                        for api in apis {
-                            if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                notifier.send_api_notification(&api, APINotification::ShuttingDown);
-                                break;
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        println!("Error trying to get apis: {e}");
-                    }
-                }
-            }
-        }
-    }
+    notifier.send_remote_notification(APINotification::ShuttingDown, &sqlite);
     // Stop heartbeats so none go out while shutting down. This waits for at
     // most one request already in progress.
     heartbeat.stop();
@@ -1433,172 +1424,31 @@ fn handle_stream(
                 },
                 requests::Request::ApiSaveAll { list } => {
                     if let Ok(mut sq) = sqlite.lock() {
-                        let mut remote_api: Option<Api> = None;
-                        // check if we have a remote api already set, there can only be one
-                        match sq.get_apis() {
-                            Ok(apis) => {
-                                for api in apis {
-                                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                        remote_api = Some(api);
-                                        break;
+                        match save_api_list(&mut sq, list) {
+                            Err(e) => {
+                                println!("Error saving apis: {e:?}");
+                                no_error = write_error(&client, e);
+                            },
+                            // send everyone connected the updated list of apis
+                            Ok(()) => match sq.get_apis() {
+                                Ok(apis) => {
+                                    let clients = crate::control::client::connected(&control_sockets);
+                                    if clients.is_empty() {
+                                        no_error = write_api_list(&client, &apis);
                                     }
+                                    for (_, sock) in clients {
+                                        // we might be writing to other sockets
+                                        // so errors here shouldn't close our connection
+                                        _ = write_api_list(&sock, &apis);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("error getting api list. {e}");
+                                    no_error = write_error(&client, errors::Errors::DatabaseError {
+                                        message: format!("error getting api list: {e}")
+                                    });
                                 }
                             },
-                            Err(e) => {
-                                println!("error getting api list. {e}");
-                                no_error = write_error(&client, errors::Errors::DatabaseError {
-                                    message: format!("error getting apis: {e}")
-                                })
-                            }
-                        }
-                        // if we've got a remote api set we need to check if there is another
-                        if let Some(remote) = remote_api {
-                            let mut remote_exists = false;
-                            let mut invalid_type = false;
-                            for api in &list {
-                                match api.kind() {
-                                    api::API_TYPE_CHRONOKEEP_REMOTE |
-                                    api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
-                                        // if the id's don't match then they're trying to save a second
-                                        if remote.id() != api.id() {
-                                            remote_exists = true;
-                                        }
-                                    },
-                                    _ => {
-                                        invalid_type = true;
-                                    }
-                                }
-                            }
-                            // if we found a duplicate remote, don't save and write error
-                            if remote_exists {
-                                println!("Remote api already exists.");
-                                no_error = write_error(&client, errors::Errors::TooManyRemoteApi);
-                            // if there's an invalid type, don't save and write error
-                            } else if invalid_type {
-                                println!("One or more invalid api types found.");
-                                no_error = write_error(&client, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
-                            // all are saveable
-                            } else {
-                                let mut error_saving = false;
-                                // check if we have any errors saving apis
-                                for api in list {
-                                    let mut t_uri = match api.kind() {
-                                        _ => {
-                                            String::from(api.uri())
-                                        }
-                                    };
-                                    if !t_uri.ends_with("/") {
-                                        t_uri = format!("{t_uri}/")
-                                    }
-                                    match sq.save_api(&api::Api::new(
-                                        api.id(),
-                                        String::from(api.nickname()),
-                                        String::from(api.kind()),
-                                        String::from(api.token()),
-                                        t_uri,
-                                        api.enabled(),
-                                        api.heartbeat(),
-                                        String::from(api.device_name())
-                                    )) {
-                                        Ok(_) => { },
-                                        Err(_) => {
-                                            error_saving = true;
-                                        }
-                                    }
-                                }
-                                // write an error message if we had an issue
-                                if error_saving {
-                                    println!("Error saving one or more apis");
-                                    no_error = write_error(&client, errors::Errors::DatabaseError {
-                                        message: String::from("error saving one or more apis")
-                                    });
-                                // otherwise send everyone connected the updated list of apis
-                                } else {
-                                    match sq.get_apis() {
-                                        Ok(apis) => {
-                                            let clients = crate::control::client::connected(&control_sockets);
-                                            if clients.is_empty() {
-                                                no_error = write_api_list(&client, &apis);
-                                            }
-                                            for (_, sock) in clients {
-                                                // we might be writing to other sockets
-                                                // so errors here shouldn't close our connection
-                                                _ = write_api_list(&sock, &apis);
-                                            }
-                                        },
-                                        Err(e) => {
-                                            println!("error getting api list. {e}");
-                                            no_error = write_error(&client, errors::Errors::DatabaseError {
-                                                message: format!("error getting api list: {e}")
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        // no previous remote api found
-                        } else {
-                            let mut remote_count = 0;
-                            let mut invalid_type = false;
-                            for api in &list {
-                                match api.kind() {
-                                    api::API_TYPE_CHRONOKEEP_REMOTE |
-                                    api::API_TYPE_CHRONOKEEP_REMOTE_SELF => {
-                                        remote_count += 1
-                                    },
-                                    _ => {
-                                        invalid_type = true;
-                                    }
-                                }
-                            }
-                            // if we found a duplicate remote, don't save and write error
-                            if remote_count > 1 {
-                                println!("Remote api already exists.");
-                                no_error = write_error(&client, errors::Errors::TooManyRemoteApi);
-                            // if there's an invalid type, don't save and write error
-                            } else if invalid_type {
-                                println!("One or more invalid api types found.");
-                                no_error = write_error(&client, errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
-                            // all are saveable
-                            } else {
-                                let mut error_saving = false;
-                                // check if we have any errors saving apis
-                                for api in list {
-                                    match sq.save_api(&api) {
-                                        Ok(_) => { },
-                                        Err(_) => {
-                                            error_saving = true;
-                                        }
-                                    }
-                                }
-                                // write an error message if we had an issue
-                                if error_saving {
-                                    println!("Error saving one or more apis");
-                                    no_error = write_error(&client, errors::Errors::DatabaseError {
-                                        message: String::from("error saving one or more apis")
-                                    });
-                                // otherwise send everyone connected the updated list of apis
-                                } else {
-                                    match sq.get_apis() {
-                                        Ok(apis) => {
-                                            let clients = crate::control::client::connected(&control_sockets);
-                                            if clients.is_empty() {
-                                                no_error = write_api_list(&client, &apis);
-                                            }
-                                            for (_, sock) in clients {
-                                                // we might be writing to other sockets
-                                                // so errors here shouldn't close our connection
-                                                _ = write_api_list(&sock, &apis);
-                                            }
-                                        },
-                                        Err(e) => {
-                                            println!("error getting api list. {e}");
-                                            no_error = write_error(&client, errors::Errors::DatabaseError {
-                                                message: format!("error getting api list: {e}")
-                                            });
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 },
@@ -1928,32 +1778,9 @@ fn handle_stream(
                 requests::Request::SetNoficiation { kind: notification } => {
                     if let Ok(sock) = stream.local_addr() {
                         //println!("sock found");
+                        // only programs on the portal itself, like portal-exit, can send these
                         if sock.ip().is_loopback() {
-                            //println!("sock is loopback");
-                            let time = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
-                            println!("notifying connected sockets");
-                            for (_, sock) in client::connected(&control_sockets) {
-                                _ = write_notification(&sock, &notification, &time);
-                            }
-                            if let Ok(control) = control.lock() {
-                                if control.auto_remote {
-                                    if let Ok(sq) = sqlite.lock() {
-                                        match sq.get_apis() {
-                                            Ok(apis) => {
-                                                for api in apis {
-                                                    if api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE || api.kind() == api::API_TYPE_CHRONOKEEP_REMOTE_SELF {
-                                                        notifier.send_api_notification(&api, notification);
-                                                        break;
-                                                    }
-                                                }
-                                            },
-                                            Err(e) => {
-                                                println!("Error trying to get apis: {e}");
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            notifier.send_device_notification(notification, &control_sockets, &sqlite);
                         }
                     }
                 },
@@ -2257,6 +2084,39 @@ pub fn write_uploader_status(
     stream.send(&responses::Responses::ReadAutoUpload {
         status
     })
+}
+
+/// Saves a list of APIs sent by a client. Any number of Chronokeep Remote APIs can be saved,
+/// but nothing is saved if one of them is another kind of API. Each URI is saved ending in "/",
+/// since request URLs are built by adding a path straight onto it.
+pub(crate) fn save_api_list(sq: &mut sqlite::SQLite, list: Vec<Api>) -> Result<(), errors::Errors> {
+    if list.iter().any(|a| a.kind() != api::API_TYPE_CHRONOKEEP_REMOTE && a.kind() != api::API_TYPE_CHRONOKEEP_REMOTE_SELF) {
+        return Err(errors::Errors::InvalidApiType { message: String::from("one or more invalid api types found") });
+    }
+    let mut error_saving = false;
+    for a in list {
+        let mut uri = String::from(a.uri());
+        if !uri.ends_with('/') {
+            uri.push('/');
+        }
+        let saved = sq.save_api(&api::Api::new(
+            a.id(),
+            String::from(a.nickname()),
+            String::from(a.kind()),
+            String::from(a.token()),
+            uri,
+            a.enabled(),
+            a.heartbeat(),
+            String::from(a.device_name()),
+        ));
+        if saved.is_err() {
+            error_saving = true;
+        }
+    }
+    if error_saving {
+        return Err(errors::Errors::DatabaseError { message: String::from("error saving one or more apis") });
+    }
+    Ok(())
 }
 
 fn construct_headers(key: &str) -> HeaderMap {

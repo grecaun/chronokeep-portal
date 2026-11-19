@@ -109,3 +109,23 @@ fn leading_whitespace_before_a_message() {
     assert_eq!(reqs.len(), 1);
     assert!(matches!(serde_json::from_str::<Request>(reqs[0].trim()).unwrap(), Request::TimeGet));
 }
+
+#[test]
+fn notifications_from_portal_exit() {
+    use crate::control::socket::{notifications::APINotification, parse_request};
+
+    // exactly what portal-exit sends for hightemp and maxtemp
+    assert!(matches!(
+        parse_request("{\"command\":\"set_noficiation\",\"kind\":\"HIGH_TEMP\"}").unwrap(),
+        Request::SetNoficiation { kind: APINotification::HighTemp }
+    ));
+    assert!(matches!(
+        parse_request("{\"command\":\"set_noficiation\",\"kind\":\"MAX_TEMP\"}").unwrap(),
+        Request::SetNoficiation { kind: APINotification::MaxTemp }
+    ));
+    // UPS notifications are no longer used
+    for kind in ["UPS_DISCONNECTED", "UPS_CONNECTED", "UPS_ON_BATTERY", "UPS_LOW_BATTERY", "UPS_ONLINE"] {
+        let message = format!("{{\"command\":\"set_noficiation\",\"kind\":\"{kind}\"}}");
+        assert!(parse_request(&message).is_err(), "{kind} should no longer be accepted");
+    }
+}

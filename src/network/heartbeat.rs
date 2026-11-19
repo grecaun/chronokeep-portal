@@ -32,4 +32,7 @@ pub struct HeartbeatState {
     pub readers_total: u32,
     pub reading: bool,
     pub chip_type: String,
+    /// The CPU temperature in °C. Left out when it can't be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
 }

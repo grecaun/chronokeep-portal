@@ -23,7 +23,6 @@ use serde::Serialize;
 pub enum Errors {
     UnknownCommand,
     TooManyConnections,
-    TooManyRemoteApi,
     ServerError{
         message: String,
     },

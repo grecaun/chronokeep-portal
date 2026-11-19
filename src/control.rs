@@ -24,6 +24,13 @@ pub mod zero_conf;
 pub mod sound;
 pub mod exit;
 
+/// BATTERY_LOW is sent when the battery drops to this percentage.
+pub const BATTERY_LOW_PERCENT: u8 = 30;
+/// BATTERY_CRITICAL is sent when the battery drops to this percentage.
+pub const BATTERY_CRITICAL_PERCENT: u8 = 15;
+/// Battery percentages above this mean the portal is charging (see battery.rs).
+pub const BATTERY_CHARGING_PERCENT: u8 = 110;
+
 pub const SETTING_PORTAL_NAME: &str = "SETTING_PORTAL_NAME";
 pub const SETTING_CHIP_TYPE: &str = "SETTING_CHIP_TYPE";
 pub const SETTING_READ_WINDOW: &str = "SETTING_READ_WINDOW";
@@ -90,6 +97,8 @@ pub struct Control {
     pub enable_ntfy: bool,
     pub battery: u8,
     pub battery_voltage: String,
+    /// The CPU temperature in °C, or None when it can't be read (see temperature.rs).
+    pub temperature: Option<f32>,
     pub screen_type: String,
     pub beep_ignore: u16,
     /// What to do once the program has stopped (not saved to the database).
@@ -171,6 +180,7 @@ impl Control {
             enable_ntfy: defaults::DEFAULT_ENABLE_NTFY,
             battery: 0,
             battery_voltage: String::from("0"),
+            temperature: None,
             screen_type: String::from(defaults::DEFAULT_SCREEN_TYPE),
             beep_ignore: defaults::DEFAULT_BEEP_IGNORE,
             exit_action: exit::ExitAction::Quit,

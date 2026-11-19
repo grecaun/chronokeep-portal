@@ -39,18 +39,32 @@ one) using an API key.
 ### Heartbeats
 For each Remote API with heartbeat turned on, portal sends a heartbeat as soon as it starts
 and then every minute: its name (or the API's device name), uptime, battery voltage and
-whether it's charging, upload errors, reader counts, whether it's reading, and the chip type.
+whether it's charging, upload errors, reader counts, whether it's reading, the chip type, and
+the CPU temperature in °C (left out when it can't be read).
 
 ### Notifications
 * **ntfy:** with ntfy turned on, portal posts to an ntfy topic when it starts and shuts down,
-  when readers start or stop reading (or fail to start), and when the battery is low.
-* **Remote API:** portal tells the Remote API when it's shutting down, and passes on
-  notifications from the computer (UPS power changes, high temperature, low battery).
+  when readers start or stop reading (or fail to start), when the battery is low, and when it
+  gets too hot.
+* **Remote API:** portal tells the Remote API when it's shutting down, and, while auto upload
+  is on, passes on its battery and temperature warnings to the first Chronokeep Remote API.
+
+### Temperature
+Every 10 seconds portal reads the CPU temperature from
+`/sys/class/thermal/thermal_zone0/temp` (on a Raspberry Pi 4, the system on a chip). It sends
+`HIGH_TEMP` at 75°C and `MAX_TEMP` at 80°C, where a Pi 4 starts slowing itself down, to
+connected clients, ntfy and the Remote API. Each is sent once, and again only after the
+temperature has dropped 5°C below it. Where there's no temperature to read, portal doesn't
+watch it.
 
 ### Battery
 On portals with a battery monitor (I²C bus 1), portal reads the battery voltage and shows the
 level on the screen and in Chronokeep desktop. At 30% and again at 15% it warns connected
 clients, ntfy and the Remote API.
+
+The web page shows the temperature and battery in its header, green normally, amber from the
+first warning level and red from the second, and lists those levels when you hover over them.
+Each is hidden on portals that can't read it.
 
 ### Ways to control portal
 * **Chronokeep desktop** finds portals on the network automatically: it broadcasts on UDP

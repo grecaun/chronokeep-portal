@@ -71,6 +71,7 @@ fn beat() -> HeartbeatState {
         readers_total: 2,
         reading: true,
         chip_type: String::from("DEC"),
+        temperature: Some(54.5),
     }
 }
 
@@ -90,6 +91,17 @@ fn send_posts_heartbeat() {
     assert_eq!(got.body["battery"], "4.10");
     assert_eq!(got.body["charging"], true);
     assert_eq!(got.body["readers_total"], 2);
+    assert_eq!(got.body["temperature"], 54.5);
+}
+
+#[test]
+fn leaves_out_an_unknown_temperature() {
+    let (url, rx) = fake_remote(200, "");
+    let mut state = beat();
+    state.temperature = None;
+    send(&client(), &api(api::API_TYPE_CHRONOKEEP_REMOTE, &url, true, ""), &state).unwrap();
+    let got = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(got.body.get("temperature").is_none(), "{}", got.body);
 }
 
 #[test]

@@ -23,6 +23,7 @@ use serde_json::Value;
 mod requests;
 mod messages;
 mod commands;
+mod status;
 
 fn reply_type(reply: &str) -> String {
     let v: Value = serde_json::from_str(reply).unwrap();
