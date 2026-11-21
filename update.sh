@@ -8,7 +8,7 @@ UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-porta
 PORTAL_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal/releases/latest'
 QUIT_REPO_URL='https://api.github.com/repos/grecaun/chronokeep-portal-quit/releases/latest'
 
-VERSION=7
+VERSION=8
 
 # Check OS type & architecture
 OS=$(uname)
@@ -81,7 +81,7 @@ if ! [[ -e ${DEST}files.sh ]]; then
     curl -L ${FILES_SCRIPT_URL} -o ${DEST}files.sh > /dev/null 2>&1
     sudo chown $USER:root ${DEST}files.sh
     sudo chmod +x ${DEST}files.sh
-    sudo ${DEST}files.sh -f # Always run in force mode after update or create.
+    ${DEST}files.sh -f # Always run in force mode after update or create. Not run with sudo, files.sh refuses to run as root.
 else
     OLD_SCRIPT_VERS=`cat ${DEST}files.sh | grep ^VERSION= | sed 's/VERSION=//'`
     if [[ $OLD_SCRIPT_VERS -ge 0 ]]; then
@@ -93,7 +93,7 @@ else
             mv ${DEST}files_tmp.sh ${DEST}files.sh
             sudo chown $USER:root ${DEST}files.sh
             sudo chmod +x ${DEST}files.sh
-            sudo ${DEST}files.sh -f # Always run in force mode after update or create.
+            ${DEST}files.sh -f # Always run in force mode after update or create. Not run with sudo, files.sh refuses to run as root.
         else
             rm ${DEST}files_tmp.sh
         fi;
@@ -103,7 +103,7 @@ else
         curl -L ${FILES_SCRIPT_URL} -o ${DEST}files.sh > /dev/null 2>&1
         sudo chown $USER:root ${DEST}files.sh
         sudo chmod +x ${DEST}files.sh
-        sudo ${DEST}files.sh -f # Always run in force mode after update or create.
+        ${DEST}files.sh -f # Always run in force mode after update or create. Not run with sudo, files.sh refuses to run as root.
     fi;
 fi;
 echo "---------- Checking uninstall script -----------"
@@ -135,6 +135,40 @@ else
         sudo chown $USER:root ${DEST}uninstall.sh
         sudo chmod +x ${DEST}uninstall.sh
     fi;
+fi;
+echo "------------ Checking portal service -----------"
+echo "------------------------------------------------"
+SERVICE_FILE=/etc/systemd/system/${SERVICE_NAME}.service
+if [[ -e ${SERVICE_FILE} ]]; then
+    SERVICE_CHANGED=false
+    SERVICE_TMP=$(mktemp)
+    cp ${SERVICE_FILE} ${SERVICE_TMP}
+    # Start after kernel modules (i2c-dev) are loaded so the screen's i2c bus is ready.
+    if ! grep -q '^After=.*systemd-modules-load\.service' ${SERVICE_TMP}; then
+        if grep -q '^After=' ${SERVICE_TMP}; then
+            sed -i '0,/^After=/{s/^After=\(.*\)$/After=\1 systemd-modules-load.service/}' ${SERVICE_TMP}
+        else
+            sed -i '/^\[Unit\]/a After=systemd-modules-load.service' ${SERVICE_TMP}
+        fi;
+        SERVICE_CHANGED=true
+    fi;
+    # ExecRestart isn't a systemd option, so it never did anything. Portal works out the reader wait from uptime instead.
+    if grep -q '^ExecRestart=' ${SERVICE_TMP}; then
+        sed -i '/^ExecRestart=/d' ${SERVICE_TMP}
+        SERVICE_CHANGED=true
+    fi;
+    if [[ $SERVICE_CHANGED == true ]]; then
+        echo "------------ Updating portal service -----------"
+        echo "------------------------------------------------"
+        if sudo cp ${SERVICE_TMP} ${SERVICE_FILE} && sudo systemctl daemon-reload; then
+            echo "------------ Portal service updated ------------"
+            echo "------------------------------------------------"
+        else
+            echo "Unable to update ${SERVICE_FILE}. Please run ${DEST}update.sh from a terminal."
+            echo "------------------------------------------------"
+        fi;
+    fi;
+    rm -f ${SERVICE_TMP}
 fi;
 # Check if the main Portal software is up to date.
 echo "----- Checking latest Portal release version ---"

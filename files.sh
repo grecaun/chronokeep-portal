@@ -6,7 +6,7 @@ QUIT_SERVICE_NAME=portal-quit
 UPDATE_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/update.sh'
 UNINSTALL_SCRIPT_URL='https://raw.githubusercontent.com/grecaun/chronokeep-portal/main/uninstall.sh'
 
-VERSION=3
+VERSION=4
 
 help_function()
 {
@@ -92,7 +92,7 @@ if ! [[ -e /etc/systemd/system/${SERVICE_NAME}.service ]] || [[ $FORCE_CREATE ==
     sudo echo "[Unit]" | sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "Description=Chronokeep Portal Service" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "Wants=network-online.target" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
-    sudo echo "After=network.target network-online.target" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
+    sudo echo "After=network.target network-online.target systemd-modules-load.service" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "StartLimitIntervalSec=0" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "[Service]" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
@@ -102,7 +102,6 @@ if ! [[ -e /etc/systemd/system/${SERVICE_NAME}.service ]] || [[ $FORCE_CREATE ==
     sudo echo "User=$USER" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "ExecStart=${DEST}run.sh" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "ExecStop=${DEST}quit.sh" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
-    sudo echo "ExecRestart=${DEST}run.sh -q" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "[Install]" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1
     sudo echo "WantedBy=multi-user.target" | sudo tee -a /etc/systemd/system/${SERVICE_NAME}.service > /dev/null 2>&1

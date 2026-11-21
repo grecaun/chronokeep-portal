@@ -21,8 +21,9 @@ use crate::{control::{Control, socket::MAX_CONNECTED, sound::SoundNotifier}, dat
 #[cfg(target_os = "linux")]
 use crate::{types};
 
-mod ada;
-mod pcf;
+mod display;
+#[cfg(target_os = "linux")]
+mod lcd;
 
 pub const EMPTY_STRING: &str = "                    ";
 
@@ -246,11 +247,7 @@ impl CharacterDisplay {
                     adafruit = false;
                 }
             }
-            if adafruit {
-                self.ada_run(bus);
-            } else {
-                self.pcf_run(bus);
-            }
+            self.display_run(adafruit, bus);
         }
     }
 

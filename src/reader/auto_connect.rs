@@ -91,13 +91,13 @@ impl AutoConnector {
             println!("Error getting state mutex during reader auto start sequence.");
             return
         }
-        if !quick {
-            println!("Auto connect is pausing for {START_UP_WAITING_PERIOD_SECONDS} seconds before trying to connect to readers.");
-            thread::sleep(Duration::from_secs(START_UP_WAITING_PERIOD_SECONDS));
-        } else {
-            println!("Auto connect is in quick mode. Wait period shortened to 1 second.");
-            thread::sleep(Duration::from_secs(1));
+        let uptime = system_uptime();
+        let wait = startup_wait(quick, uptime);
+        match uptime {
+            Some(up) => println!("System has been up for {} seconds. Auto connect is pausing for {} seconds before trying to connect to readers.", up.as_secs(), wait.as_secs()),
+            None => println!("Auto connect is pausing for {} seconds before trying to connect to readers.", wait.as_secs()),
         }
+        thread::sleep(wait);
         if let Ok(mut state) = self.state.lock() {
             *state = State::Running;
         } else {
@@ -161,5 +161,59 @@ impl AutoConnector {
         if let Ok(mut state) = self.state.lock() {
             *state = State::Finished
         }
+    }
+}
+
+/// Minimum pause before connecting, even when the readers have had time to start.
+const MINIMUM_WAIT: Duration = Duration::from_secs(1);
+
+/// How long to wait before connecting to readers.
+///
+/// Readers need about a minute after power-on before they accept connections, and they're
+/// powered on with the computer. When the system uptime is known, only the part of that minute
+/// that hasn't passed yet is waited out, so restarting portal right after boot can't skip it.
+/// When it isn't known, `quick` shortens the wait.
+fn startup_wait(quick: bool, uptime: Option<Duration>) -> Duration {
+    let full = Duration::from_secs(START_UP_WAITING_PERIOD_SECONDS);
+    match uptime {
+        Some(up) => full.saturating_sub(up).max(MINIMUM_WAIT),
+        None if quick => MINIMUM_WAIT,
+        None => full,
+    }
+}
+
+/// Time since the computer booted, from /proc/uptime. None where that isn't available.
+fn system_uptime() -> Option<Duration> {
+    let contents = std::fs::read_to_string("/proc/uptime").ok()?;
+    let seconds: f64 = contents.split_whitespace().next()?.parse().ok()?;
+    Duration::try_from_secs_f64(seconds).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FULL: Duration = Duration::from_secs(START_UP_WAITING_PERIOD_SECONDS);
+
+    #[test]
+    fn waits_full_period_right_after_boot() {
+        assert_eq!(startup_wait(false, Some(Duration::ZERO)), FULL);
+    }
+
+    #[test]
+    fn quick_flag_cannot_skip_remaining_wait_after_boot() {
+        assert_eq!(startup_wait(true, Some(Duration::from_secs(10))), FULL - Duration::from_secs(10));
+    }
+
+    #[test]
+    fn restart_long_after_boot_waits_minimum() {
+        assert_eq!(startup_wait(false, Some(Duration::from_secs(3600))), MINIMUM_WAIT);
+        assert_eq!(startup_wait(false, Some(FULL)), MINIMUM_WAIT);
+    }
+
+    #[test]
+    fn unknown_uptime_uses_quick_flag() {
+        assert_eq!(startup_wait(false, None), FULL);
+        assert_eq!(startup_wait(true, None), MINIMUM_WAIT);
     }
 }

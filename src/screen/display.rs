@@ -25,9 +25,7 @@ use std::fmt::Write;
 #[cfg(target_os = "linux")]
 use chrono::{DateTime, Datelike, Local, Timelike};
 #[cfg(target_os = "linux")]
-use i2c_character_display::{AdafruitLCDBackpack, LcdDisplayType};
-#[cfg(target_os = "linux")]
-use rppal::{hal, i2c::I2c};
+use super::lcd::Lcd;
 #[cfg(target_os = "linux")]
 use crate::{reader::{self, auto_connect}, remote::uploader::Status};
 #[cfg(target_os = "linux")]
@@ -41,29 +39,20 @@ use super::CharacterDisplay;
 
 impl CharacterDisplay {
     #[cfg(target_os = "linux")]
-    pub fn ada_run(&mut self, bus: u8) {
-        println!("Screen set to Adafruit type.");
+    pub fn display_run(&mut self, adafruit: bool, bus: u8) {
+        if adafruit {
+            println!("Screen set to Adafruit type.");
+        } else {
+            println!("Screen set to PCF8574T type.");
+        }
         println!("Attempting to connect to screen on i2c{bus}.");
-        let i2c_res = I2c::with_bus(bus);
-        if let Err(ref e) = i2c_res {
-            println!("Error connecting to screen on bus {bus}. {e}");
-        }
-        let i2c = i2c_res.unwrap();
-        let delay = hal::Delay::new();
-        let mut lcd = AdafruitLCDBackpack::new(i2c, LcdDisplayType::Lcd20x4, delay);
-        println!("Initializing the lcd.");
-        if let Err(e) = lcd.init() {
-            println!("Error initializing lcd. {e}");
-        }
-        if let Err(e) = lcd.backlight(true) {
-            println!("Error setting lcd backlight. {e}");
-        }
-        if let Err(e) = lcd.clear() {
-            println!("Error clearing lcd. {e}");
-        }
-        if let Err(e) = lcd.home() {
-            println!("Error homing cursor. {e}");
-        }
+        let mut lcd = match Lcd::connect(adafruit, bus, &self.keepalive) {
+            Some(lcd) => lcd,
+            None => {
+                println!("LCD thread stopped before the screen was ready.");
+                return;
+            }
+        };
         let sys_time = SystemTime::now();
         let date_time: DateTime<Local> = sys_time.into();
         if let Ok(mut info) = self.info.lock() {
@@ -1223,6 +1212,9 @@ impl CharacterDisplay {
                 }
                 info.title_bar.replace_range(15..16, upload_status);
                 messages.push(info.title_bar.clone());
+                // A failed write can leave the controller out of step and showing garbage,
+                // so re-initialize it. Everything is redrawn below anyway.
+                lcd.recover_if_needed();
                 let _ = lcd.home();
                 match self.current_menu[0] {
                     MAIN_MENU => { // main menu, max ix 3

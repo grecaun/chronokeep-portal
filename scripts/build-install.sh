@@ -128,10 +128,10 @@ fi;
 if ! [[ -e /etc/systemd/system/portal.service ]]; then
     echo "----------- Creating portal service. -----------"
     echo "------------------------------------------------"
-    sudo echo "    [Unit]" | sudo tee /etc/systemd/system/portal.service
+    sudo echo "[Unit]" | sudo tee /etc/systemd/system/portal.service
     sudo echo "Description=Chronokeep Portal Service" | sudo tee -a /etc/systemd/system/portal.service
     sudo echo "Wants=network-online.target" | sudo tee -a /etc/systemd/system/portal.service
-    sudo echo "After=network.target network-online.target" | sudo tee -a /etc/systemd/system/portal.service
+    sudo echo "After=network.target network-online.target systemd-modules-load.service" | sudo tee -a /etc/systemd/system/portal.service
     sudo echo "StartLimitIntervalSec=0" | sudo tee -a /etc/systemd/system/portal.service
     sudo echo | sudo tee -a /etc/systemd/system/portal.service
     sudo echo "[Service]" | sudo tee -a /etc/systemd/system/portal.service
