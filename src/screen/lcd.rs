@@ -20,9 +20,6 @@ use std::{fmt, sync::{Arc, Mutex}, thread, time::{Duration, Instant}};
 use i2c_character_display::{AdafruitLCDBackpack, CharacterDisplayPCF8574T, LcdDisplayType};
 use rppal::{hal, i2c::I2c};
 
-// HD44780 controllers need at least 40ms after power reaches them before they accept commands.
-// Wait a little longer than that before every init attempt to let the backpack settle.
-const SETTLE_DELAY: Duration = Duration::from_millis(100);
 // Time between attempts to open the bus or initialize the display.
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 // Number of failed init attempts at startup before continuing without a working display.
@@ -108,16 +105,11 @@ impl Lcd {
         Some(lcd)
     }
 
-    /// Runs the full setup sequence. All steps must succeed or the display stays marked as failed.
+    /// Runs the display's setup sequence, which also clears it, homes the cursor and turns on
+    /// the backlight. The display stays marked as failed unless it succeeds.
     fn initialize(&mut self) -> Result<(), String> {
         self.last_init = Instant::now();
-        thread::sleep(SETTLE_DELAY);
         on_device!(self, d => d.init())?;
-        on_device!(self, d => d.backlight(true))?;
-        // init() sends clear and home without waiting for them to finish, so send them again
-        // through the methods that wait.
-        on_device!(self, d => d.clear())?;
-        on_device!(self, d => d.home())?;
         self.failed = false;
         Ok(())
     }

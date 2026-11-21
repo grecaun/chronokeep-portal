@@ -1,0 +1,9 @@
+/target
+Cargo.lock
+.vscode/
+
+# MacOS
+.DS_Store
+
+# local dev
+documentation/
